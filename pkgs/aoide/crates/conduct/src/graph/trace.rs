@@ -1026,12 +1026,40 @@ fn followed_line(line: &str, json_mode: bool, dim: bool) -> String {
     }
 }
 
+/// The identity a follow resumes after: a trace record's own journal id when the
+/// line parses as one, else a hash of the whole line.
+fn record_cursor(line: &str) -> String {
+    match eidolon_trace_record(line) {
+        Some(rec) => format!("#{}", rec.id),
+        None => {
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            std::hash::Hash::hash(line, &mut hasher);
+            format!("h{:x}", std::hash::Hasher::finish(&hasher))
+        }
+    }
+}
+
+/// The lines one follow tick prints, and whether records were skipped. Without
+/// a cursor (nothing printed yet) the whole window is new. With one, the lines
+/// after its record are new. A cursor that is not in a non-empty window has
+/// fallen out of it, or the trace was replaced: the whole window is new and
+/// the skip is a gap.
+fn follow_tick<'a>(window: &'a [String], cursor: Option<&str>) -> (&'a [String], bool) {
+    match cursor {
+        None => (window, false),
+        Some(c) => match window.iter().rposition(|l| record_cursor(l) == c) {
+            Some(i) => (&window[i + 1..], false),
+            None => (window, !window.is_empty()),
+        },
+    }
+}
+
 /// `--follow`: print the current window, then re-read the trace every
-/// [`FOLLOW_POLL`] and print whatever grew, until Ctrl-C. Re-reading the
-/// tail each tick (rather than holding a delta reader open) keeps this on
-/// the SAME reader as the one-shot path — the file is a bounded 1 MiB window,
-/// and a trace that was rotated or truncated simply yields a shorter list,
-/// which this loop notices by count rather than replaying history.
+/// [`FOLLOW_POLL`] and print whatever comes after the last record it printed,
+/// until Ctrl-C. Re-reading the window each tick keeps this on the SAME reader
+/// as the one-shot path. What it resumes after is a record's identity
+/// ([`record_cursor`]), never a line count: the window is a bounded 1 MiB tail,
+/// so once a trace outgrows it a count stops tracking the end.
 fn follow_trace(
     cmd: &str,
     id: &str,
@@ -1051,15 +1079,15 @@ fn follow_trace(
         let _ = std::io::stdout().flush();
     };
 
-    let mut seen = 0usize;
+    let mut cursor: Option<String> = None;
     let mut printed = 0usize;
+    let mut gaps = 0usize;
     if let Some(lines) = read_trace(path) {
-        let window = last_lines(&lines, tail);
-        seen = lines.len();
-        for line in window {
+        for line in last_lines(&lines, tail) {
             emit(line);
             printed += 1;
         }
+        cursor = lines.last().map(|l| record_cursor(l));
     }
     while !INTERRUPTED.load(Ordering::SeqCst) {
         std::thread::sleep(FOLLOW_POLL);
@@ -1069,16 +1097,18 @@ fn follow_trace(
         let Some(lines) = read_trace(path) else {
             continue; // the file is momentarily not there — keep waiting
         };
-        if lines.len() < seen {
-            // Rotated, truncated, or replaced: start counting from the new tail.
-            seen = lines.len();
-            continue;
+        let (fresh, gap) = follow_tick(&lines, cursor.as_deref());
+        if gap {
+            gaps += 1;
+            eprintln!("warning: records between the last printed one and this window were not in it");
         }
-        for line in lines.iter().skip(seen) {
+        for line in fresh {
             emit(line);
             printed += 1;
         }
-        seen = lines.len();
+        if let Some(last) = lines.last() {
+            cursor = Some(record_cursor(last));
+        }
     }
     Outcome::ok(cmd, format!("followed {printed} record(s) · {name}"))
         .with_data(json!({
@@ -1086,6 +1116,7 @@ fn follow_trace(
             "trace": strip_unsafe(&path.to_string_lossy()),
             "followed": true,
             "printed": printed,
+            "gaps": gaps,
         }))
 }
 
@@ -2066,6 +2097,106 @@ mod tests {
             .expect("--follow on a done record returns");
         assert_eq!(out.status, Status::Ok, "msg: {}", out.message);
         assert_eq!(out.data.clone().unwrap()["records"], 6);
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    // ── --follow resumes after the last record it printed (chat-core 1) ──
+
+    /// Bytes per record in the follow fixtures. Every line is this long, so the
+    /// tail window's line count is the same before and after an append: a count
+    /// cannot see the append.
+    const FOLLOW_RECORD_BYTES: usize = 4096;
+
+    /// One eidolon-shaped trace line with journal id `id`, padded to `size`
+    /// bytes.
+    fn padded_record(id: usize, size: usize) -> String {
+        let line = |text: &str| {
+            format!(
+                r#"{{"id":{id},"parent":null,"ts_ms":1789603005561,"kind":{{"ExternalMessage":{{"from":"orchestrator","channel":null,"text":"{text}"}}}}}}"#
+            )
+        };
+        let pad = size.saturating_sub(line("").len());
+        line(&"x".repeat(pad))
+    }
+
+    /// `ids` written as one trace file, one padded record per line.
+    fn write_trace(path: &std::path::Path, ids: std::ops::Range<usize>) {
+        let body: String = ids
+            .map(|id| padded_record(id, FOLLOW_RECORD_BYTES) + "\n")
+            .collect();
+        std::fs::write(path, body).unwrap();
+    }
+
+    static GROW_CALLS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    static SHRINK_CALLS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+    /// The real transcript-tail reader, with a script on the follow's ticks:
+    /// the initial read is call 0, the first tick (call 1) appends one record,
+    /// and the second tick (call 2) ends the loop.
+    fn growing_trace(path: &std::path::Path) -> Option<Vec<String>> {
+        use std::io::Write;
+        let call = GROW_CALLS.fetch_add(1, Ordering::SeqCst);
+        if call == 1 {
+            let mut f = std::fs::OpenOptions::new().append(true).open(path).unwrap();
+            writeln!(f, "{}", padded_record(400, FOLLOW_RECORD_BYTES)).unwrap();
+        }
+        if call == 2 {
+            INTERRUPTED.store(true, Ordering::SeqCst);
+        }
+        aoide_protocol::agents::eidolon_trace_tail(path)
+    }
+
+    /// The trace is replaced by three shorter records on the first tick, then
+    /// the loop ends on the second.
+    fn replaced_trace(path: &std::path::Path) -> Option<Vec<String>> {
+        let call = SHRINK_CALLS.fetch_add(1, Ordering::SeqCst);
+        if call == 1 {
+            write_trace(path, 500..503);
+        }
+        if call == 2 {
+            INTERRUPTED.store(true, Ordering::SeqCst);
+        }
+        aoide_protocol::agents::eidolon_trace_tail(path)
+    }
+
+    /// A 400-record trace (1.6 MiB, so the 1 MiB window has already slid) followed
+    /// with a 5-record tail: one record appended while it runs must be printed
+    /// once. On the count rule the window keeps its length, so nothing prints.
+    #[test]
+    fn a_follow_prints_a_record_appended_once_the_trace_outgrows_its_window() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let root = unique_stage("trace-follow-grow");
+        let path = root.join("trace.jsonl");
+        write_trace(&path, 0..400);
+        GROW_CALLS.store(0, Ordering::SeqCst);
+        INTERRUPTED.store(false, Ordering::SeqCst);
+
+        let out = follow_trace("session.trace", "Aoide-grow", "grow", &path, growing_trace, 5, true, false);
+        assert_eq!(out.status, Status::Ok, "msg: {}", out.message);
+        let data = out.data.clone().unwrap();
+        assert_eq!(data["printed"], 6, "5 of the window, then the appended record: {data}");
+        assert_eq!(data["gaps"], 0, "{data}");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The trace is replaced by records the cursor never saw: the new window
+    /// prints whole, and the one skip is counted as a gap.
+    #[test]
+    fn a_follow_on_a_replaced_trace_prints_the_new_window_and_counts_a_gap() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let root = unique_stage("trace-follow-replaced");
+        let path = root.join("trace.jsonl");
+        write_trace(&path, 0..400);
+        SHRINK_CALLS.store(0, Ordering::SeqCst);
+        INTERRUPTED.store(false, Ordering::SeqCst);
+
+        let out = follow_trace("session.trace", "Aoide-replaced", "replaced", &path, replaced_trace, 5, true, false);
+        assert_eq!(out.status, Status::Ok, "msg: {}", out.message);
+        let data = out.data.clone().unwrap();
+        assert_eq!(data["printed"], 8, "5 of the window, then the 3 replacement records: {data}");
+        assert_eq!(data["gaps"], 1, "{data}");
 
         let _ = std::fs::remove_dir_all(&root);
     }

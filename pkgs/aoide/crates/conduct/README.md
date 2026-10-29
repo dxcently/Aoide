@@ -1052,7 +1052,12 @@ blank one is refused too.
   journal's own JSON lines (raw unsafe characters removed, JSON escapes kept, so
   a decoded line holds untrusted strings; a consumer shows `data.steps`),
   `--follow` re-reads every 500ms until Ctrl-C (CLI-only), `--tail N` shows the
-  last N (default 50). The dim follows CONTRACTS's color rule (a tty only, never
+  last N (default 50). A follow resumes after the last record it printed, keyed
+  by the record's own id (a line's hash when it is not a trace record), never by
+  a line count: the window is a 1 MiB tail, so a count stops tracking the end
+  once the trace outgrows it. A tick whose window no longer holds that record
+  (the trace was replaced, or records fell out between ticks) prints the window
+  and counts one gap, named on stderr and in `data.gaps`. The dim follows CONTRACTS's color rule (a tty only, never
   for `NO_COLOR`, `TERM=dumb` or `--json`, and only at the CLI door); the door's
   `--color` does not reach it, since the trace builds its text before the door
   renders. **Read-only, and so outside every other discipline in this file:** no
