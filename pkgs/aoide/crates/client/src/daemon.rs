@@ -280,6 +280,41 @@ mod tests {
         std::fs::remove_file(&socket_path).ok();
     }
 
+    /// A reply that takes three seconds still arrives: the round trip is bounded
+    /// by `ROUND_TRIP_TIMEOUT` (ten seconds), so a bound under three seconds
+    /// fails this test.
+    #[test]
+    fn daemon_dispatch_waits_out_a_reply_that_takes_three_seconds() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let socket_path = short_tmp("slow-reply").with_extension("sock");
+        let listener = UnixListener::bind(&socket_path).unwrap();
+        let handle = std::thread::spawn(move || {
+            let (mut conn, _) = listener.accept().unwrap();
+            let mut buf = [0u8; 4096];
+            let _ = conn.read(&mut buf).unwrap();
+            std::thread::sleep(std::time::Duration::from_secs(3));
+            let outcome = Outcome::ok("session.start", "started session `slow`");
+            let mut line = json!({ "outcome": outcome }).to_string();
+            line.push('\n');
+            conn.write_all(line.as_bytes()).unwrap();
+        });
+
+        let saved = std::env::var("AOIDE_DAEMON_SOCKET").ok();
+        std::env::set_var("AOIDE_DAEMON_SOCKET", &socket_path);
+        let out = daemon_dispatch(&inv(&["session", "start"], Door::Cli));
+        match saved {
+            Some(v) => std::env::set_var("AOIDE_DAEMON_SOCKET", v),
+            None => std::env::remove_var("AOIDE_DAEMON_SOCKET"),
+        }
+        handle.join().unwrap();
+
+        let out = out.expect("a reply inside the bound must be answered");
+        assert_eq!(out.status, Status::Ok);
+        assert!(out.message.contains("slow"));
+
+        std::fs::remove_file(&socket_path).ok();
+    }
+
     #[test]
     fn daemon_dispatch_round_trips_against_a_fake_daemon() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
