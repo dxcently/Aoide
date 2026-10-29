@@ -7,6 +7,11 @@ other crate in this workspace sits above.
 
 ## Named seams (what it exposes)
 
+- `chat` — the chat line v1 (`ChatLine`, `Role`, `State`, `Ask`, `Tool`). One
+  type; its constructor strips and clips every string once, and its wire form
+  is fixed by `CONTRACTS.md` "The chat line — v1" and
+  `tests/fixtures/chat-v1.jsonl`. The role and state tables are closed here.
+  Per-harness adapters that build these lines land beside it, one file each.
 - `registry` — `Registry`/`Command`/`Arg`/`Flag` + the `cmd!`/`arg!`/`flag!`
   registration macros. Every domain crate's `commands::register` builds one
   of these; `schema --json`, the MCP tool list, and the A2A `AgentCard` all

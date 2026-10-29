@@ -4053,6 +4053,51 @@ line, by exact `sessionId` only: its journal is the trace, its message says it
 ended and when, and `--follow` prints the window and returns. A `done` record
 prints its window with no ended line, and `--follow` returns for it too.
 
+### The chat line — **v1** (`pkgs/aoide/crates/protocol/src/chat/mod.rs`)
+
+One JSON object per message event, the same shape for every harness. A chat
+reads a session's source (an Eidolon journal record, a Claude Code transcript
+line) through that harness's chat adapter and prints these lines; the adapter
+is the only place a source's own format is read.
+
+| field | rule |
+|---|---|
+| `v` | `1`. A consumer ignores fields it does not know; a new required field bumps `v` |
+| `session` | the aoide session id the verb resolved |
+| `id` | the source's own record id, stable across reads: a consumer de-duplicates by it |
+| `ts` | the source's own epoch milliseconds, or `null`; never a read time |
+| `role` | closed: `user`, `agent`, `tool`, `system`. A consumer treats any other name as `system` |
+| `from` | who spoke when `role` does not say it (a peer, an operator's label) |
+| `text` | stripped of the characters no terminal may be handed, clipped to 4000 characters (`clipped: true`). Hostile data: a consumer renders it as text only |
+| `thinking` | `true` when the text is the agent's thinking |
+| `tool` | `{name, input?, result?, error?}`: a call (`input`), or its result (`result`, `error`) under the same `name`. Every string is stripped and clipped to 200 characters |
+| `ask` | `{id, kind, prompt, answers?, options?, fingerprint?}`. `kind` is `approval` (`answers`) or `question` (`options: [{label, description}]`); `fingerprint` is a Claude permission prompt's permit record |
+| `state` | `waiting` or `settled` |
+| `clipped` | `true` only when the text was cut |
+
+Keys are sorted and an absent optional field is left out, so one line has one
+spelling. The constructor strips every string it is given, once; the fields are
+private, so no caller holds a raw string in a line.
+
+The example block below is the fixture
+`pkgs/aoide/crates/protocol/tests/fixtures/chat-v1.jsonl`. Its first line names
+the fixture. A test fails when the block and the fixture differ.
+
+```jsonl
+pkgs/aoide/crates/protocol/tests/fixtures/chat-v1.jsonl
+{"id":"1","role":"user","session":"s-1","text":"hello <script>","ts":1789603005570,"v":1}
+{"id":"2","role":"agent","session":"s-1","text":"Let me read the slot catalog.","ts":1789603009102,"v":1}
+{"id":"2.0","role":"agent","session":"s-1","text":"I should read the catalog first.","thinking":true,"ts":1789603009100,"v":1}
+{"id":"2.1","role":"tool","session":"s-1","tool":{"input":"{\"path\":\"slots.md\"}","name":"read"},"ts":1789603009102,"v":1}
+{"id":"3","role":"tool","session":"s-1","tool":{"name":"read","result":"1 # Per-rice widget slots"},"ts":1789603009140,"v":1}
+{"id":"4","role":"tool","session":"s-1","tool":{"error":true,"name":"read","result":"ENOENT: no such file"},"ts":1789603009200,"v":1}
+{"from":"peer-7","id":"5","role":"system","session":"s-1","text":"ping","ts":1789603010000,"v":1}
+{"id":"6","role":"system","session":"s-1","state":"waiting","ts":null,"v":1}
+{"ask":{"answers":["yes","no"],"id":"call_x","kind":"approval","prompt":"Overwrite?"},"id":"7","role":"agent","session":"s-1","ts":1789626500000,"v":1}
+{"ask":{"id":"call_q","kind":"question","options":[{"description":"warm palette","label":"sunrise"},{"description":"cool palette","label":"dusk"}],"prompt":"Which rice?"},"id":"8","role":"agent","session":"s-1","ts":1789626510000,"v":1}
+{"ask":{"fingerprint":"3f9a","id":"perm-1","kind":"approval","prompt":"Bash: rm -rf build"},"id":"9","role":"system","session":"s-1","ts":null,"v":1}
+```
+
 ### `state/stage/projects.json` — **v0**
 
 Registered project anchor roots for the graph. Written by
