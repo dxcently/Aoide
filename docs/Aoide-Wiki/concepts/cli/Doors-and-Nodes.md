@@ -21,7 +21,7 @@ Handlers are spread across
 domain), `pkgs/aoide/crates/client/src/{commands,adapter,node,wire}.rs`
 (the outbound half), `pkgs/aoide/crates/conductor/src/` (the TUI), and
 `pkgs/aoide/crates/strillix/src/commands/shellbridge.rs` (over the loop in
-`pkgs/aoide/crates/conduct/src/shellbridge.rs`); `mcp serve`'s registration
+`pkgs/aoide/crates/protocol/src/shellbridge.rs`); `mcp serve`'s registration
 stays in `pkgs/aoide/crates/cli/src/commands/infra.rs`. The long-running
 launches (`mcp serve --stdio`, `a2a serve`, `conductor`) are special-cased in
 `pkgs/aoide/crates/cli/src/lib.rs::run_cli`.
@@ -229,9 +229,11 @@ strx shellbridge [--run] [--json]
   audited (action `unparseable`, a byte count only, never the payload) and
   dropped — nothing kills the accept loop. The two verbs whose caller is
   PARKED on a reply (`sessiontrace`, `workspaceaction`) are the exceptions:
-  a line that names one of them and fails its own gate is answered with a
-  `bad-request` refusal instead of silence (`CONTRACTS.md` §4's
-  workspaceaction paragraph has the shapes).
+  a malformed `sessiontrace` line on the core socket and a malformed
+  `workspaceaction` line on the desktop socket are answered with a `bad-request`
+  refusal instead of silence (`CONTRACTS.md` §4's workspaceaction paragraph has
+  the shapes). The desktop socket drops a malformed `sessiontrace` like any line
+  no verb serves.
 - **Notes:** not gated. The `--run` flag is registered in the schema but the
   handler (`strillix/src/commands/shellbridge.rs::handle_shellbridge`) never
   consults it — bare `strx shellbridge` runs the blocking loop either way. The

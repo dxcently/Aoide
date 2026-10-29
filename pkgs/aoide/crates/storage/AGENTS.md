@@ -46,7 +46,14 @@
   `$XDG_RUNTIME_DIR` override wins on BOTH hosts: every isolating fixture sets
   it, and an answer that ignored it on one host would read and write the
   machine's real per-user directory instead of the fixture's.
-- **An ack's `from.node` is this box's name in the letter's mesh, never its hostname.** `mint_ack_from` takes the name; `mint_ack_in_mesh` is the hostname form, for callers with no charter to read. The origin verifies the ack against the key it holds for that name, so a hostname-signed ack is refused and its letter never retires.
+- **A receipt's `from.node` is the minting node's name, lowercased:
+  `AOIDE_A2A_NODE_NAME` if set and non-empty, else the OS hostname, else
+  `aoide`; the door's `--node-name` flag is not read here (`local_node_name`,
+  storage/src/display.rs).** The origin verifies a receipt against the key it
+  holds for that name in that mesh, so a receipt whose `from.node` has no such
+  key is refused (`UnverifiedOrigin`) and its letter never retires.
+  `mint_ack_in_mesh` signs as `display::local_node_name()`, this box's own name:
+  an older-peer fixture for tests.
 - Structured thread/reply IDs are signed context, not membership or delivery authority. Legacy four-field content remains valid.
 - Structured letter content is optional signed text, never a new transport header. Invalid or legacy content remains raw; decoding must not write or alter envelope identity.
 
@@ -157,12 +164,11 @@
   against its own box in `mail::deposit`, so it never reads or writes the gate.
   The record means **admitted AND filed**, and it is never written from inside
   `seal::deposit_container`. Whether a duplicate
-  was originally a letter — and so whether a lost receipt is owed — is read
-  back out of the boxes through `mail::filed_kind`/`mail::show`, never
-  remembered by the gate. Both halves of that ordering are load-bearing: record
-  any earlier and a refusal past the gate answers `duplicate` forever instead
-  of re-running, and a crash between the gate and the box append claims a filing
-  that never happened.
+  was originally a letter is read back out of the boxes through
+  `mail::filed_kind`/`mail::show`, never remembered by the gate. Both halves of
+  that ordering are load-bearing: record any earlier and a refusal past the gate
+  answers `duplicate` forever instead of re-running, and a crash between the
+  gate and the box append claims a filing that never happened.
 - **Housekeeping never decides a refusal word.** `seal::sweep_retired_keys`
   runs only on the current key's own successful open — never before an
   attempt, never on a failure. Deleting a just-expired key first would turn
@@ -176,8 +182,8 @@
   withholds it (`Reseal::Withheld`, `HandOver::Withheld`), and the answer lists
   it under `withheld`. Within the batch, usable entries come before parked
   (refused) ones. The hand-over writes only a sealed upgrade (a container sealed
-  for a letter still held) or a park (a reason, on a letter no usable binding can
-  seal, which hands over nothing), and it does so under the outbox lock:
+  for a letter still held) or a park (a reason, on a letter no usable binding
+  can seal, which hands over nothing), and it does so under the outbox lock:
   `hand_over` checks the entry again there, so a return that landed since the
   read is never written over, and nothing is handed over for it. A poll
   writes only what its
@@ -545,6 +551,19 @@
   `seed.<pid>` are deliberately distinct shapes and must stay out of the
   sweep. A new temp-file shape in this crate picks a separator that is NOT
   `.tmp.` unless it wants this sweep to own it.
+- **Every atomic write to a watched path renames inside its watch.**
+  `fs::watch_writes` registers a `WriteWatch` for a list of paths.
+  `atomic_write_bytes_impl` runs its rename inside each live watch for the path
+  the caller passed, before symlink resolution, the first registered outermost.
+  A watch calls `rename` exactly once and returns its result. It never writes a
+  watched path from inside `rename`, and it never writes through storage while
+  holding its own lock, since the rename runs inside that call. The registry
+  lock is released before any watch runs, and a poisoned one is recovered. The
+  temp, its removal on failure and the stale-temp sweep stay outside the seam,
+  so a write whose temp cannot be created never reaches a watch. A stage write
+  that does not go through `atomic_write` is invisible to the seam, so a watcher
+  reads it as a hand edit. `fs::seed_if_absent`'s absent-path seed is one such
+  write, and it runs before `aoided` registers its watch.
 - **`fs.rs` carries five PUBLIC seams, each with one answer per host**, and a
   caller asks one of them rather than spelling a platform: `detach` (the
   detached-spawn posture — `setsid` in a `pre_exec`, or
@@ -606,6 +625,14 @@
   Don't add a "compact the ledger" or "delete old entries" path without
   re-reading `docs/architecture/AOIDED.md`'s "L5" — the design leans on
   this file staying a complete, permanent record.
+- **`LedgerEntry.log_path` always serializes, and only a path outside the
+  session logs dir is a journal.** Like every ledger field it is written
+  `null` when absent, never omitted, and a line without the key reads as
+  `None` — never a default path. Its referent is either a conducted
+  terminal's pty transcript under `session_logs_dir()` or a harness journal.
+  The one resume reader, `aoide-conduct`'s `journal_of`, refuses the first
+  with `fs::inside_session_logs`, which tests the raw and the canonical
+  spelling. Don't add a second reader that skips that test.
 - **`RestoreSnapshot`'s own fields never carry `skip_serializing_if`, in
   EITHER of its two homes (P-C5, durable-sessions plan).** The type is
   embedded on both `SessionRecord.restore` (additive, the outer
@@ -824,8 +851,9 @@
 - **`undying.json` is written via plain `fs::atomic_write`, never
   `atomic_write_private` — deliberate, not an oversight.** It holds session
   ids, the same class of data `sessions.json`/`nodes.json` already keep
-  at default mode; `atomic_write_private` stays reserved for the
-  identity/secret lane above.
+  at default mode; `atomic_write_private` is kept for files that take the
+  private discipline: the identity and secret lane above, the tunnel
+  records, and `resuming.json`.
 - **`undying`'s legacy-migration check runs on every `load_undying` call,
   not behind a process-wide `Once` — deliberate, not an oversight
   (command-defrag lane U1, 2026-08-27).** Unlike
@@ -836,6 +864,15 @@
   simpler to test (no cross-test `Once` state to isolate). Don't add a
   `Once` guard here "for consistency" with `fs.rs` — that would reintroduce
   exactly the test-ordering fragility a per-call idempotent check avoids.
+- **`resuming::load_claims` returns `Ok` with no claims only for an absent
+  file (one engine per session).** An unreadable, unparseable or other-version
+  file, or a claim whose `at` is not ISO UTC, is `Err`, and conduct's claim
+  step refuses the candidate on it. Don't tolerate a bad file the way
+  `load_undying` tolerates a bad `undying.json`: an empty read lets a second
+  launch through.
+- **`resuming.json` is written at `0600`, as the tunnel records are, and
+  holds no secret.** It must never grow one (no key material, no bearer
+  token) without re-opening this decision.
 - **`manifest::save_manifest` validates EVERY `SessionSpec.dir` before
   writing anything, never partially (command-defrag lane U1).** The
   absolute-path check runs over the whole `sessions` vec first; a rejection
@@ -942,9 +979,9 @@
   of the same file would block forever. An un-openable lock file still refuses
   the call, never runs it unlocked. The gate (`seal::check_seen`,
   `record_seen`) uses `try_stage_lock`, so it refuses without its lock.
-- **Rotating mail logs are read only to their cap.** `receipts.log`,
-  `containers.jsonl` and `reacks.log` are read with `feed::read_lines_up_to`
-  at `ROTATE_AT` (or `REACKS_MAX`), and an append rotates them first
+- **Rotating mail logs are read only to their cap.** `receipts.log` and
+  `containers.jsonl` are read with `feed::read_lines_up_to` at `ROTATE_AT`,
+  and an append rotates them first
   (`rotate_before_append`) so they stay under it. A file past its cap is read
   only up to it, never in full.
 - **The mailbase stage lock is held only inside `ring_targets`/
@@ -1028,24 +1065,26 @@
   ssh dial. Don't relax `.bsy` to blocking, either — ruling 3 (P-M2 brief)
   is explicit that a busy link is SKIPPED, never queued behind, so one
   wedged drain can never starve every later one.
-- **An outbox entry retires ONLY on a valid ack, a held own letter's filed
-  name (`retire_acknowledged`), explicit `mail outbox rm` (P-M2), or the drop
-  of an own letter with its session or by the tick's sweep (ruling 131) —
-  never auto-evicted, never expired, never capped.**
-  `outbox::retire_by_ack` is the "valid ack" half — it trusts its caller
-  (`mail::deposit`) to have already proven the ack's origin signature
-  genuine, and never re-verifies; don't call it on an unverified envelope.
-  It runs under one outbox lock hold, and an own letter it removes is audited
-  first (`mail.outbox.retired`), so the line and the removal cannot part.
-  Its `text` must be exactly one msgid (`mail::is_msgid`) before anything
-  is looked up: the text becomes a path, so a non-msgid retires nothing and
-  builds no path.
-  A
-  `refused: bool` entry (a JSON-RPC admission refusal, distinct from an
-  ordinary transport failure) stops a drain from retrying it but still
-  does not remove it — the kill-list discipline `undying`/`manifest`
-  above hold for their own state applies here too: only an explicit
-  human action or a genuine delivery confirmation removes a record.
+- **An outbox entry retires ONLY on its confirmation: a verified `accepted` or
+  `duplicate` answer to its own live dial, a valid receipt from an older node
+  naming an own letter (`retire_by_ack`), a held own letter's or a transit
+  entry's filed name (`retire_acknowledged`), explicit `mail outbox rm` (P-M2),
+  or the drop of an own letter with its session, or the drain tick's sweep
+  taking a letter or a receipt (ruling 131) — never auto-evicted, never expired,
+  never evicted by a size or count limit; each of the sweep's two drops takes at
+  most 500 per pass.** `outbox::retire_by_ack` is the "valid receipt" half, and
+  it retires an own letter only: a transit or charter entry with the same msgid
+  stays spooled. It trusts its caller (`mail::deposit`) to have already proven
+  the ack's origin signature genuine, and never re-verifies; don't call it on an
+  unverified envelope. It runs under one outbox lock hold, and an own letter it
+  removes is audited first (`mail.outbox.retired`), so the line and the removal
+  cannot part. Its `text` must be exactly one msgid (`mail::is_msgid`) before
+  anything is looked up: the text becomes a path, so a non-msgid retires nothing
+  and builds no path. A `refused: bool` entry (a JSON-RPC admission refusal,
+  distinct from an ordinary transport failure) stops a drain from retrying it
+  but still does not remove it — the kill-list discipline `undying`/`manifest`
+  above hold for their own state applies here too: only an explicit human action
+  or a genuine delivery confirmation removes a record.
 - **`flavor` is a LOCAL entry fact, additive both ways (P-M3).** `now`
   (attempted on every drain) vs `hold` (never attempted — it leaves only
   through the destination's own `aoide/mailPoll`). The field must never
@@ -1065,24 +1104,24 @@
   own mail is a new fact; a never-attempted entry excluded, the drain owns it
   and offering it would double-drive one entry from two callers). An own
   letter is offered only while held: a returned one is its sender's to resend.
+  A receipt is never offered (ruling 131).
   **Never add state to it**: no `tries` stamp, no `last_polled_at`, no
-  handed-over bookmark. Re-poll-before-ack idempotence is a CONSEQUENCE of
-  writing nothing (the same set is offered again) plus the receiver's
-  `msgid` dedup; a bookmark would be a second, drifting source of truth,
-  and any `tries` stamp on a poll would silently change which entries the
-  NEXT poll offers (the predicate reads exactly that field). The offer is
-  CAPPED at `POLL_BATCH_CAP` (50) — the drain's own batch size, oldest
-  first, capped after the filter, and it must stay capped: safe because the
-  poller acks what it files and those entries retire, so a large spool
-  advances a batch at a time rather than never; necessary because one
-  unbounded answer is a single JSON array of whole envelopes and walks
-  straight into the client's `MAX_RESPONSE_BYTES` refusal, which no retry
-  can clear.
-- **A receipt is filed only against a spooled letter, and by a bounded
-  check.** `mail::deposit` calls `outbox::spooled_letter_sender` and compares
-  it with the receipt's `to.node`; that read is lock-free because the caller
-  holds the stage lock, which the outbox lock shares and does not nest. Do not
-  replace it with a base scan, and do not move the `to` check after the
+  handed-over bookmark. Re-poll idempotence is a CONSEQUENCE of writing
+  nothing (the same set is offered again) plus the receiver's `msgid` dedup; a
+  bookmark would be a second, drifting source of truth, and any `tries` stamp on
+  a poll would silently change which entries the NEXT poll offers (the predicate
+  reads exactly that field). The offer is CAPPED at `POLL_BATCH_CAP` (50) — the
+  drain's own batch size, oldest first, capped after the filter, and it must
+  stay capped: safe because the poller acks what it files and those entries
+  retire, so a large spool advances a batch at a time rather than never;
+  necessary because one unbounded answer is a single JSON array of whole
+  envelopes and walks straight into the client's `MAX_RESPONSE_BYTES` refusal,
+  which no retry can clear.
+- **A receipt from an older node is filed only against a spooled letter, by a
+  bounded check.** `mail::deposit` calls `outbox::spooled_letter_sender` and
+  compares it with the receipt's `to.node`; that read is lock-free because the
+  caller holds the stage lock, which the outbox lock shares and does not nest.
+  Do not replace it with a base scan, and do not move the `to` check after the
   index: an unknown msgid must not reach a write.
 - **`update_entry` is the only write-back a drain makes to an entry it has
   already read.** It writes only when the entry is still spooled. The drain
@@ -1090,56 +1129,18 @@
   during the dial retires the entry first, and a plain `write_entry` would
   re-spool it. Every post-dial bookkeeping write in `mail_wire` goes through
   it; `write_entry` stays for entries the caller just created.
-- **`write_ack_if_absent` gates on PENDING state, never a permanent
-  ledger (mail register §26 outbox fix).** A duplicate letter redelivery
-  mints a fresh ack via `mail::mint_ack` on every call — the gate lives
-  entirely in `outbox::write_ack_if_absent`, which skips the spool only
-  when an ack for the same `(node, acked_msgid)` pair is CURRENTLY sitting
-  undelivered in that node's outbox, checked and written atomically under
-  the crate-wide stage lock. A permanent ledger keyed by `(node,
-  acked_msgid)` that never clears was tried first and rejected: it broke
-  the spec-mandated behavior that a duplicate whose ack genuinely never
-  arrived (the ack's spool entry was already retired/removed some other
-  way) must respool — MAIL.md item 5. Don't reintroduce a permanent
-  "already acked" ledger in this module without re-checking
-  `a2a::a_duplicate_of_a_filed_letter_respools_its_ack`.
-- **`has_pending_ack_unlocked` is a marker-file read-plus-one-stat, NEVER a
-  directory scan (review round 2 — the fix's first cut walked and parsed
-  every file in the node's spool under the crate-wide stage lock on every
-  ack deposit; the live osaka spool held 16.5k+ files, so that scan was
-  itself a fresh incident in the exact path this fix exists to close).**
-  `ack_marker_path(node, acked_msgid)` — `<node>/.ack/<acked_msgid>`,
-  content = the pending entry's own msgid, never empty — is written by
-  `write_ack_if_absent` in the SAME locked closure as the ack entry it
-  covers (entry first, marker second: a crash between the two leaves a
-  real entry with no marker, which just risks one harmless extra spool on
-  the next redelivery, never a marker with no entry that would block
-  respooling forever), and cleared by `remove_entry`, which reads the ONE
-  file it is about to delete (never the directory) to learn whether it's
-  a receipt-kind entry and, if so, which `acked_msgid` marker to drop
-  (falling back to a scan scoped to `.ack/` ONLY, never the node
-  directory, on the rare unreadable/unparsable-entry removal — a
-  best-effort net for a corrupted file, not the hot path).
-  Every removal goes through `remove_entry` (or `remove_entry_unlocked` under a
-  held lock): `mail_wire::settle_delivered` for a delivered dialled entry,
-  `mail outbox rm`, `retire_by_ack` for a receipt that names its entry,
-  `retire_acknowledged` for a transit entry or a held own letter its destination
-  filed, and `drop_letters_where` for an own letter whose session ended or the
-  tick's sweep. None of them needs its own awareness of the marker. Don't
-  reintroduce a directory scan on the deposit path, and don't move marker
-  creation ahead of the entry write.
-- **The gate self-heals an orphaned marker; an out-of-band mover need not
-  touch `.ack/` (review round 3).** `has_pending_ack_unlocked` never
-  trusts the marker's mere existence — it reads the msgid the marker
-  names and confirms `entry_path(node, that msgid)` still exists before
-  answering "pending," deleting the marker on the spot the moment it
-  finds one whose entry is gone (an unreadable/malformed marker is
-  treated identically). This matters because the planned archive/prune
-  step (explicitly out of scope for this pass) is expected to `mv`
-  receipt entries straight out of a node's directory with no idea `.ack/`
-  exists — it never has to know or care, since the very next deposit
-  attempt against that `acked_msgid` discovers and clears the orphan
-  itself rather than being silently suppressed forever.
+- **Nothing writes or reads a `.ack/` marker or `reacks.log` now (ruling 131).**
+  An older build's markers and `reacks.log` are inert and safe to delete by
+  hand, and no code removes them: removing an entry deletes that entry's file
+  and nothing else. Don't add a writer or a reader: the answer is the receipt,
+  and no ack is spooled.
+- **The drain tick's drop takes letters and receipts, and each selector decides
+  the rest (ruling 131).** `drop_letters_where` considers only `letter` and
+  `receipt` entries. `drop_for_session` and the session-gone pass check the
+  letter kind, so a session's end never takes a receipt; the pre-131 pass takes
+  every receipt whatever its session. Don't widen a session selector to
+  receipts: the pre-131 pass already takes them, and a session pass that did
+  would log them under the wrong reason.
 - **Backoff has a ceiling now (`BACKOFF_CEILING_SECS`, 15 min).**
   `back_off` still doubles from `DRAIN_BACKOFF_FLOOR_SECS` on every
   failure, but caps at the ceiling instead of doubling forever — a link
@@ -1272,6 +1273,8 @@
 ## Docs update required in the same commit
 
 - This `README.md` when a new module or stage-file shape is added.
+- `fs::WriteWatch` and `fs::watch_writes` (the write seam): the server crate's
+  README and AGENTS, and AOIDED.md's hand-edit section, in the same commit.
 - `CONTRACTS.md §4`/`§7` when a stage-file or node-registry wire shape
   changes — including `config.toml`'s own subsection when `config::SCHEMA`
   gains or loses a section/key, plus `modules/dendrites/aoide-config.nix` when the nix authoring front-end's
@@ -1280,3 +1283,4 @@
   pinned vectors change (P-P4).
 - `pkgs/aoide/crates/AGENTS.md` for cross-crate invariants (registry order,
   golden discipline) — not restated here.
+

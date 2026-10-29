@@ -464,7 +464,7 @@ are core `aoide` identity, root `AGENTS.md`).
 
 `strillix shellbridge --run` is the desktop process. It serves its own socket,
 `$XDG_RUNTIME_DIR/strillix/bridge.sock`, through
-`aoide_conduct::shellbridge::run_on(&socket_path(), &SOCKET)`. `SOCKET` carries the
+`aoide_protocol::shellbridge::run_on(&socket_path(), &SOCKET)`. `SOCKET` carries the
 nine desktop verbs (`bridge::VERBS`) and no core arm: the core verbs and the stage
 seeding are aoided's, on `aoide/shellbridge.sock`, and ShellBridge.qml routes each
 cmd to one of the two. The desktop's drops, refusals and verb outcomes land in
@@ -492,7 +492,7 @@ in `docs/Aoide-Wiki/concepts/cli/Doors-and-Nodes.md`.
   (`{ok:false, action, reason, message}` — nothing was resolved to name), and
   both `workspace` and `action` are absent on a `bad-request` refusal
   (nothing parsed to echo) — and a malformed line that NAMES this verb is
-  ANSWERED with that refusal rather than dropped, the same rule
+  ANSWERED with that refusal rather than dropped, the rule the core socket's
   `sessiontrace` holds: one rule for every parked caller.
 
 - `{"cmd":"component","slot","verb","arg"?}` is a cross-component call,

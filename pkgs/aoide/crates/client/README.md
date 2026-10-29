@@ -52,21 +52,20 @@ never the inbound/serve half (that's `aoide-server`).
   (`socket_path()` resolves `$AOIDE_DAEMON_SOCKET` →
   `$XDG_RUNTIME_DIR/aoide/aoided.sock`, the identical convention
   `aoide_server::daemon::socket_path` resolves — this crate sits BELOW
-  `aoide-server` in the DAG, so it is never imported from there; as of
-  LANE IDENTITY P-ID4 the derivation's body, the bounded connect
-  (`connect_bounded`, a background-thread-plus-channel race, ~100ms), and
-  the `daemon_seal_pubkey_hex` ping fetch all live in
-  `aoide_storage::attest`, with this module's public seams delegating —
-  the secrets broker's origin gate needs the same fetch and cannot depend
-  on this crate). `None` means "nothing usable answered" — the caller's own
-  pre-existing direct stage-write path runs unchanged; any OTHER failure
-  once a connection exists becomes `Some(Outcome::error(...))` instead of a
-  silent fallback, since a daemon that answered but broke is a real bug
-  worth surfacing. Only `Door::Cli` hops: every other door short-circuits
-  to `None` with no connect, because the wire carries no door and the
-  daemon runs each dispatch as `Door::Daemon` (MCP and A2A would arrive
-  holding the daemon's approvals). `Door::Daemon` is the reentrancy case: a
-  handler already running INSIDE the daemon never connects to itself.
+  `aoide-server` in the DAG, so it is never imported from there; the
+  derivation's body and the `daemon_seal_pubkey_hex` ping fetch live in
+  `aoide_storage::attest`, the bounded connect (`connect_bounded`,
+  protocol's bounded unix connect, ~100ms) is protocol's, and this module's
+  public seams delegate — the secrets broker's origin gate needs the same fetch
+  and cannot depend on this crate). `None` means "nothing usable answered" — the
+  caller's own pre-existing direct stage-write path runs unchanged; any OTHER
+  failure once a connection exists becomes `Some(Outcome::error(...))` instead
+  of a silent fallback, since a daemon that answered but broke is a real bug
+  worth surfacing. Only `Door::Cli` hops: every other door short-circuits to
+  `None` with no connect, because the wire carries no door and the daemon runs
+  each dispatch as `Door::Daemon` (MCP and A2A would arrive holding the daemon's
+  approvals). `Door::Daemon` is the reentrancy case: a handler already running
+  INSIDE the daemon never connects to itself.
 - `wire` — client-side A2A JSON-RPC message builders
   (`build_message_send_body` and `resolve_card_url`).
 - `adapter` — the melete neutral-event adapter (consumes events, stays
@@ -522,16 +521,13 @@ never the inbound/serve half (that's `aoide-server`).
   actually hit — `tries`/`last_try_at`/`last_outcome` — THEN calls
   `outbox::back_off`; previously the loop broke before touching that
   entry's own bookkeeping at all, leaving every entry behind a dead link
-  frozen at `tries: 0` forever. A receipt's own successful deposit —
-  accepted OR duplicate, either way the far end has it now — IS its
-  confirmation (ruling 4: no separate ack-of-an-ack), so `drain_node`
-  removes it outright (`settle_delivered` retires a `charter` letter and a
-  `transit` container on the same verified acceptance); an ordinary letter
-  waits for a REAL ack instead,
-  only having its `tries`/`last_try_at`/`last_outcome` bookkeeping
-  updated. **P-M3 adds hold, the poll, and poll-on-contact to this same
-  function.** `drain_node` skips a `hold` entry exactly the way it skips a
-  parked one — filtered BEFORE the cap, since a held entry is permanent to
+  frozen at `tries: 0` forever. `settle_delivered` retires a `charter` letter
+  and a `transit` container on a verified acceptance; a receipt is never
+  dialled (ruling 131), so no drain settles one, and an own letter is never
+  drained at all: its send dials it. **P-M3 adds hold, the poll, and
+  poll-on-contact to this same function.** `drain_node` skips a `hold` entry
+  exactly the way it skips a parked one — filtered BEFORE the cap, since a held
+  entry is permanent to
   a drain too — and a pass that reached the node at all (at least one
   deposit answered, delivered or refused) ends by calling `poll_node` on
   that same session, under the same `.bsy` lock and the same
@@ -542,8 +538,7 @@ never the inbound/serve half (that's `aoide-server`).
   **P-CHARTER adds the `poll` address to the same three places, from ONE
   predicate** (`node_store::Node::never_dialled`, the record's address
   being `poll`): `spool_entry` holds such an entry whatever its caller asked
-  for — the ack path's own literal `false` is covered by that line rather than
-  by an argument it must remember — `drain_node` returns before the link lock
+  for, so no caller has to remember — `drain_node` returns before the link lock
   and before the binding exchange (a dial held entries are filtered too late
   for), and `pollable_nodes()` leaves such a node out, so a bare
   `aoide mail poll` never dials a node that has no inbound transport to answer
@@ -559,11 +554,9 @@ never the inbound/serve half (that's `aoide-server`).
   handed-over envelope through the SAME `aoide_storage::mail::deposit`
   chain a pushed deposit gets (hop = the node polled, origin = the
   envelope's own `header.from.node`), then through `settle_deposit`:
-  filing a letter spools its ack toward the letter's origin, a receipt
-  retires the entry it confirms, and a re-poll before the ack files
-  nothing twice and spools nothing twice. A re-ack of a letter already
-  filed files nothing either, and the write-back after a deposit never
-  re-spools a letter the ack has retired. **`aoide mail poll [<node>]` is
+  filing a letter owes nothing, a receipt from an older node retires only the
+  own letter it confirms, and a re-poll files nothing twice. A duplicate of a
+  letter already filed owes nothing either. **`aoide mail poll [<node>]` is
   the second caller of `poll_node`, and the reason it exists: an empty
   outbox never dials, so `drain_node`'s poll-on-contact can never reach a
   node with nothing to send — the one receive path the relay model needs
@@ -593,10 +586,10 @@ never the inbound/serve half (that's `aoide-server`).
   `unpaired-node`, and any other name takes its `poll_target` and refuses with
   the taught text, all BEFORE any dial. Hand-over is bounded by
   `aoide_storage::outbox::POLL_BATCH_CAP` (50, the drain's own batch), which
-  is safe because the acks retire what was filed and the next poll
-  advances. The `PollOutcome` it returns carries all three answers the command
-  renders: `filed`, the `refused` containers (`<msgid>: <reason>`), and — H1 —
-  the `withheld` entries a sealed-only listener would not hand over
+  is safe because the poller's `filed` names retire what it took and the next
+  poll advances. The `PollOutcome` it returns carries all three answers the
+  command renders: `filed`, the `refused` containers (`<msgid>: <reason>`), and
+  — H1 — the `withheld` entries a sealed-only listener would not hand over
   (`<msgid>: sealed-required — <detail>`), so a letter held at a relay for want
   of a binding is reported where the operator is looking instead of as a bare
   `0 envelope(s) filed`. `settle_deposit` is the ONLY
@@ -672,8 +665,8 @@ never the inbound/serve half (that's `aoide-server`).
   `docs/architecture/MAIL.md` for the vocabulary). A post-spool read
   that itself fails, or finds the entry already removed, degrades `delivery` to
   `queued`/"status unavailable" (the read-fault fallback, for any entry, own
-  letters included) without ever touching the spool's own `Ok`. Its node-branch gate
-  is deliberately shallow — it requires `verified` off `node_store::
+  letters included) without ever touching the spool's own `Ok`. Its node-branch
+  gate is deliberately shallow — it requires `verified` off `node_store::
   load_nodes()` and nothing more, the SAME "the client checks reachability
   of a record, never a granular capability" precedent `handle_node_spawn`
   already sets; whether this node actually GRANTS `message` is exclusively
@@ -729,7 +722,9 @@ never the inbound/serve half (that's `aoide-server`).
   back, and the retry reports `removed`), and a held one is refused (its node's
   poll moves it). `--refused` does the same
   for every returned letter, and leaves a held or sessionless (pre-131) letter
-  as it is, undialled and unwritten, reporting it with its listed word. Each
+  as it is, undialled and unwritten, reporting it with its listed word. A
+  parked receipt is neither un-parked nor dialled: its retry answers
+  `pre-131`, and it stays parked for the tick (ruling 131). Each
   reports the `delivery` vocabulary `mail send`
   uses; nothing parked is a clean no-op, not an error. Neither `outbox`
   nor `outbox rm` WRITES to the

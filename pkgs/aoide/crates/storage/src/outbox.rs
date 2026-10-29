@@ -99,32 +99,6 @@ fn poll_lock_path(node: &str) -> PathBuf {
     node_dir(node).join(".poll")
 }
 
-/// One node's pending-ack marker for `acked_msgid` — its CONTENT is the
-/// pending ack entry's own msgid (its file stem, what [`entry_path`]
-/// keys on), never empty, never binary data. Its sole job is making "is
-/// an ack for this msgid already sitting undelivered in this node's
-/// spool" a stat-plus-one-small-read instead of a directory scan (mail
-/// register §26 outbox fix, review round 2): the live osaka spool holds
-/// 16.5k+ entries, and walking/parsing every one of them under the
-/// crate-wide stage lock on every ack deposit is exactly the
-/// O(n)-under-a-shared-lock hazard the review flagged. `.ack/` is a
-/// sibling of the entry files, never itself globbed by [`list_entries`]
-/// (extension-filtered to `.json`, and `.ack` is a directory, not a
-/// `.json` file) or drained.
-///
-/// Storing the entry's msgid (review round 3), not leaving the marker
-/// content-free, is what lets [`has_pending_ack_unlocked`] verify the
-/// entry it names is STILL actually there rather than trusting the
-/// marker's mere existence: an out-of-band mover (the planned archive
-/// script, deliberately out of THIS pass's scope, is expected to `mv`
-/// receipts straight out of a node's directory) has no reason to know
-/// `.ack/` exists at all, and never needs to — the gate self-heals a
-/// marker whose entry has vanished instead of suppressing that
-/// `acked_msgid`'s ack forever.
-fn ack_marker_path(node: &str, acked_msgid: &str) -> PathBuf {
-    node_dir(node).join(".ack").join(acked_msgid)
-}
-
 /// One spooled, not-yet-retired envelope plus this box's own delivery
 /// bookkeeping for it. The envelope is stored VERBATIM, byte-identical to
 /// what was sealed at mint time — a retry resends the exact same signed
@@ -285,9 +259,11 @@ impl OutboxEntry {
     /// Is this entry a hub's CUSTODY of someone else's sealed letter — a
     /// `transit` container spooled toward the hop it goes to next? Its own kind
     /// answers: the bookkeeping envelope is built from the container's outer
-    /// claims and marked [`crate::mail::ENTRY_TYPE_TRANSIT`]. A drain retires
-    /// such an entry on the HOP's acceptance, never on the destination's ack (a
-    /// hub keeps no receipt of a letter it never opened).
+    /// claims and marked [`crate::mail::ENTRY_TYPE_TRANSIT`]. Such an entry
+    /// lives until its next hop takes it: a drain retires it on that hop's
+    /// verified `accepted` or `duplicate`, a poll on the poller's `filed` name.
+    /// A receipt from the destination never retires it, since a hub keeps no
+    /// receipt of a letter it never opened.
     pub fn is_transit(&self) -> bool {
         self.envelope.header.kind == crate::mail::ENTRY_TYPE_TRANSIT
     }
@@ -614,8 +590,7 @@ fn nodes_with_outbox_unlocked() -> Result<Vec<String>, String> {
 }
 
 /// Raw write of one entry file — assumes the caller already holds the
-/// lock. The one place [`write_entry`] and [`write_ack_if_absent`] both
-/// funnel their actual disk write through, so the two never drift on shape.
+/// lock. The one place [`write_entry`] funnels its actual disk write through.
 fn write_entry_unlocked(node: &str, entry: &OutboxEntry) -> Result<(), String> {
     let path = entry_path(node, &entry.envelope.msgid);
     let json = serde_json::to_string_pretty(entry).map_err(|e| e.to_string())?;
@@ -626,8 +601,8 @@ fn write_entry_unlocked(node: &str, entry: &OutboxEntry) -> Result<(), String> {
 /// Writes only when the entry is still spooled: a receipt that landed during
 /// the dial (the far end drains its ack straight back, before it answers) has
 /// retired the entry already, and writing the drain's stale copy back would
-/// re-spool a letter the far end has acknowledged — the loop that re-offers,
-/// re-acks and re-retires it once per drain. `Ok(false)` when it was gone.
+/// re-spool a letter the far end has acknowledged — the loop that re-offers
+/// and re-retires it once per drain. `Ok(false)` when it was gone.
 pub fn update_entry(node: &str, entry: &OutboxEntry) -> Result<bool, String> {
     let node = node.to_string();
     let entry = entry.clone();
@@ -684,92 +659,6 @@ pub fn write_entry(node: &str, entry: &OutboxEntry) -> Result<(), String> {
     let node = node.to_string();
     let entry = entry.clone();
     with_lock(move || write_entry_unlocked(&node, &entry))
-}
-
-/// Is a pending (not yet delivered) ack already covering `acked_msgid`
-/// sitting in `node`'s spool? Reads [`ack_marker_path`]'s one small file
-/// (never a directory scan — review round 2, mail register §26) and,
-/// critically, does NOT trust its mere existence (review round 3): the
-/// marker names the entry it covers, and this function verifies that
-/// entry is STILL actually spooled (`entry_path(node, marker content)`
-/// exists) before answering `true`. A marker whose entry is gone — an
-/// out-of-band mover took the entry file directly, the marker write
-/// itself was interrupted leaving empty/garbage content, or anything
-/// else made it stale — is treated as NOT pending and deleted right
-/// here, in the same locked section, so the very call that discovers
-/// the orphan also heals it: the next line in [`write_ack_if_absent`]
-/// then spools normally instead of being suppressed forever. Assumes
-/// the caller already holds the lock (matches this module's other
-/// `*_unlocked` helpers).
-fn has_pending_ack_unlocked(node: &str, acked_msgid: &str) -> Result<bool, String> {
-    let marker = ack_marker_path(node, acked_msgid);
-    let content = match std::fs::read_to_string(&marker) {
-        Ok(c) => c,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(false),
-        Err(_) => {
-            // Unreadable marker — treat exactly like a stale one.
-            let _ = std::fs::remove_file(&marker);
-            return Ok(false);
-        }
-    };
-    let entry_msgid = content.trim();
-    if !entry_msgid.is_empty() && entry_path(node, entry_msgid).exists() {
-        return Ok(true);
-    }
-    // Malformed (empty) content, or the entry it names is no longer
-    // spooled — self-heal by removing the orphan.
-    let _ = std::fs::remove_file(&marker);
-    Ok(false)
-}
-
-/// Spool a freshly minted ack UNLESS an ack for the same `acked_msgid` is
-/// already sitting in `node`'s spool, undelivered — the gate the outbox
-/// investigation's fix calls for: a sender that keeps redelivering the same
-/// letter (because its own earlier ack never arrived — MAIL.md spec item 5,
-/// exactly the case [`crate::mail::DepositOutcome::Duplicate`]'s
-/// `filed_letter` flag exists for) used to mint a BRAND-NEW ack envelope,
-/// fresh `mintedAt` and fresh `msgid`, on every single redelivery, even
-/// while the first one sat here the whole time, undelivered — one
-/// permanent duplicate file per redelivery, unbounded. Checked and written
-/// in the SAME lock acquisition (never two separate calls), so two racing
-/// redeliveries can never both observe "nothing pending" and both spool.
-///
-/// Deliberately NOT a permanent ledger: once the pending ack is actually
-/// delivered ([`mail_wire::drain_node`]'s own `Delivered` arm removes a
-/// receipt-kind entry outright on confirmation — this crate has no
-/// `mail_wire`, hence the doc reference rather than a link), the NEXT
-/// redelivery correctly finds nothing pending here and spools again — spec
-/// item 5's "a duplicate re-sends the ack because the sender's earlier one
-/// evidently never arrived" must stay true for a REAL loss (the far end's
-/// receiver never durably recorded a genuinely-delivered ack); this gate
-/// only closes the narrower "one is still sitting right here" case. Returns
-/// `true` when `entry` was newly spooled, `false` when a pending ack for
-/// `acked_msgid` already covered it and nothing was written.
-pub fn write_ack_if_absent(node: &str, acked_msgid: &str, entry: &OutboxEntry) -> Result<bool, String> {
-    let node = node.to_string();
-    let acked_msgid = acked_msgid.to_string();
-    let entry = entry.clone();
-    with_lock(move || {
-        if has_pending_ack_unlocked(&node, &acked_msgid)? {
-            return Ok(false);
-        }
-        write_entry_unlocked(&node, &entry)?;
-        // The marker is written AFTER the entry, deliberately: a crash
-        // between the two leaves a real, undelivered ack entry with no
-        // marker — the next redelivery just spools a harmless second one
-        // — rather than a marker with no entry behind it, which would
-        // block every future redelivery forever with nothing to retire it.
-        // Content is the entry's own msgid (review round 3), not empty —
-        // what lets `has_pending_ack_unlocked` verify the entry it names
-        // is still actually there rather than trusting existence alone.
-        let marker = ack_marker_path(&node, &acked_msgid);
-        if let Some(parent) = marker.parent() {
-            crate::fs::ensure_write_dir(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
-        }
-        std::fs::write(&marker, entry.envelope.msgid.as_bytes())
-            .map_err(|e| format!("{}: {e}", marker.display()))?;
-        Ok(true)
-    })
 }
 
 /// Every entry spooled for `node`, oldest first (`header.mintedAt`, ties
@@ -829,7 +718,9 @@ fn list_entries_unlocked(node: &str) -> Result<Vec<OutboxEntry>, String> {
 /// or a park (a reason on an entry no usable binding can seal, which hands over
 /// nothing), and no other write. That is what makes a re-poll before the ack hand
 /// the same entries over again by construction (the predicate still holds), and it
-/// is why an entry leaves the spool only by a valid ack ([`retire_by_ack`]),
+/// is why an entry leaves the spool only on its confirmation: a verified
+/// answer to its own dial, a receipt that retires an own letter
+/// ([`retire_by_ack`]), the poller's `filed` name ([`retire_acknowledged`]),
 /// `mail outbox rm`, or an own letter's session ending (ruling 131).
 ///
 /// "Attempts have been failing" = the entry has been attempted at least
@@ -913,20 +804,22 @@ fn now_epoch() -> i64 {
 /// Drop every own letter bound to `session`, returned or held: the session has
 /// ended, and a letter lives exactly as long as the session that sent it (ruling
 /// 131). One `mail.outbox.dropped` audit line each. Idempotent: a repeat finds
-/// nothing and writes no second line.
+/// nothing and writes no second line. A receipt bound to the session is left for
+/// the tick's pre-131 pass: a session's end takes letters only.
 pub fn drop_for_session(session: &str) -> Result<usize, String> {
     drop_letters_where(
-        |entry| entry.session.as_deref() == Some(session),
+        |entry| entry.envelope.header.kind == crate::mail::ENTRY_TYPE_LETTER && entry.session.as_deref() == Some(session),
         usize::MAX,
         "session-ended",
     )
 }
 
-/// Drop at most `limit` own letters that `select` takes, one `mail.outbox.dropped`
-/// audit line each, carrying `reason`. Only `letter` entries are considered:
-/// receipts, charters and transit custody are never dropped here. Each line is
-/// written before its file is removed, so a letter whose line cannot be written
-/// stays spooled.
+/// Drop at most `limit` own letters and receipts that `select` takes, one
+/// `mail.outbox.dropped` audit line each, naming the entry's kind and carrying
+/// `reason`. Only `letter` and `receipt` entries are considered: charters and
+/// transit custody are never dropped here, and a selector that must leave a
+/// receipt alone checks the kind itself. Each line is written before its file is
+/// removed, so an entry whose line cannot be written stays spooled.
 pub fn drop_letters_where(
     select: impl Fn(&OutboxEntry) -> bool,
     limit: usize,
@@ -939,7 +832,12 @@ pub fn drop_letters_where(
                 if dropped >= limit {
                     return Ok(dropped);
                 }
-                if entry.envelope.header.kind != crate::mail::ENTRY_TYPE_LETTER || !select(&entry) {
+                let kind = match entry.envelope.header.kind.as_str() {
+                    crate::mail::ENTRY_TYPE_LETTER => "letter",
+                    crate::mail::ENTRY_TYPE_RECEIPT => "receipt",
+                    _ => continue,
+                };
+                if !select(&entry) {
                     continue;
                 }
                 let msgid = entry.envelope.msgid.clone();
@@ -950,7 +848,7 @@ pub fn drop_letters_where(
                     aoide_protocol::audit::EventClass::Audit,
                     "mail.outbox.dropped",
                     "ok",
-                    &format!("dropped letter {msgid} toward {node} ({reason}{bound})"),
+                    &format!("dropped {kind} {msgid} toward {node} ({reason}{bound})"),
                 )
                 .map_err(|e| format!("the audit log cannot be written, so the letter stays: {e}"))?;
                 if remove_entry_unlocked(&node, &msgid)? {
@@ -992,58 +890,36 @@ pub fn bind_session(raw: &str) -> Option<String> {
 /// Is one spooled entry offered to the node's own poll? See [`poll_payloads`]
 /// for the rule; held out-of-band so a test can pin each arm without a
 /// filesystem. An own letter is offered only while it is held: a returned one
-/// is its sender's to resend (ruling 131).
+/// is its sender's to resend (ruling 131). A receipt is never offered: the
+/// verified answer that filed its letter was the receipt, and the tick's pre-131
+/// pass drops one still spooled.
 fn pollable(entry: &OutboxEntry) -> bool {
-    if entry.envelope.header.kind == crate::mail::ENTRY_TYPE_LETTER {
-        return entry.is_held();
+    match entry.envelope.header.kind.as_str() {
+        crate::mail::ENTRY_TYPE_RECEIPT => false,
+        crate::mail::ENTRY_TYPE_LETTER => entry.is_held(),
+        _ => entry.is_held() || (entry.tries > 0 && !entry.last_attempt_reached_the_peer()),
     }
-    entry.is_held() || (entry.tries > 0 && !entry.last_attempt_reached_the_peer())
 }
 
-/// Retire one entry: a valid ack, a held own letter its poller
-/// files ([`retire_acknowledged`]), explicit `mail outbox rm`, or the drop of
-/// an own letter with its session or by the tick's sweep (ruling 131). Nothing
-/// else evicts an entry (the kill-list: no auto-eviction). `Ok(false)` when
-/// nothing named `msgid` was spooled (already retired, or never was) — not an
-/// error, so a retry racing an ack's own retirement is a no-op, not a failure.
+/// Retire one entry: the verified `accepted` or `duplicate` answer to its own
+/// dial, a held own letter its poller files ([`retire_acknowledged`]), explicit
+/// `mail outbox rm`, or the drop of an own letter with its session or by the
+/// tick's sweep (ruling 131). A receipt retires an own letter only, through
+/// [`retire_by_ack`]. Nothing else evicts an entry (the kill-list: no
+/// auto-eviction). `Ok(false)` when nothing named `msgid` was spooled (already
+/// retired, or never was) — not an error, so a retry racing a retirement is a
+/// no-op, not a failure.
 pub fn remove_entry(node: &str, msgid: &str) -> Result<bool, String> {
     let node = node.to_string();
     let msgid = msgid.to_string();
     with_lock(move || remove_entry_unlocked(&node, &msgid))
 }
 
-/// [`remove_entry`]'s body, for a caller that already holds the stage lock.
+/// [`remove_entry`]'s body, for a caller that already holds the stage lock. It
+/// removes the entry's file and nothing else: an older build's `.ack/` marker
+/// is inert, and no code clears it (ruling 131).
 fn remove_entry_unlocked(node: &str, msgid: &str) -> Result<bool, String> {
     let path = entry_path(node, msgid);
-    // If this is an ack (receipt-kind) entry, clear its pending-ack
-    // marker in the SAME locked section — one file read (this entry
-    // only, never a directory scan), so every retirement path (a
-    // drain's own `Delivered` confirmation, an explicit `mail outbox
-    // rm`, a test's manual simulation of delivery) uniformly lets a
-    // later redelivery of the same acked_msgid correctly respool,
-    // without every caller needing to know about the marker at all.
-    // `has_pending_ack_unlocked`'s own self-healing already covers the
-    // ordinary "entry vanished out-of-band, marker never told" case —
-    // this is the fast path for when the entry is right here.
-    match std::fs::read_to_string(&path).ok().and_then(|raw| serde_json::from_str::<OutboxEntry>(&raw).ok()) {
-        Some(parsed) if parsed.envelope.header.kind == crate::mail::ENTRY_TYPE_RECEIPT => {
-            let _ = std::fs::remove_file(ack_marker_path(node, &parsed.envelope.text));
-        }
-        Some(_) => {
-            // An ordinary (letter) entry never carries a marker.
-        }
-        None => {
-            // The entry couldn't be read or parsed at all — rare
-            // (corruption, or a caller racing its
-            // own prior removal). Its content can't tell us the
-            // `acked_msgid` it covered, so fall back to a scan of
-            // ONLY `.ack/` (never the whole node directory — removal
-            // is rare, unlike the hot deposit path this must stay
-            // O(1) for) looking for a marker whose content names
-            // THIS entry's own msgid, and clear it if found.
-            clear_marker_pointing_to_msgid(node, msgid);
-        }
-    }
     match std::fs::remove_file(&path) {
         Ok(()) => Ok(true),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
@@ -1100,12 +976,17 @@ pub fn unpark_entry(node: &str, msgid: &str) -> Result<bool, String> {
 /// whole sweep) nor lose an entry it is in the middle of recording (every
 /// mutation is read-modify-write of one file). An entry that vanishes
 /// between the listing and its own un-park (a concurrent `mail outbox rm`,
-/// or a real ack retiring it) simply does not count — no error. Own letters are
-/// left out: a returned one is resent by `retry`, never by a sweep.
+/// or a real ack retiring it) simply does not count — no error. Own letters and
+/// receipts are left out: a returned letter is resent by `retry`, never by a
+/// sweep, and a receipt is never retried (ruling 131).
 pub fn unpark_refused(node: &str) -> Result<usize, String> {
     let parked: Vec<String> = list_entries(node)?
         .into_iter()
-        .filter(|e| e.refused && e.envelope.header.kind != crate::mail::ENTRY_TYPE_LETTER)
+        .filter(|e| {
+            e.refused
+                && e.envelope.header.kind != crate::mail::ENTRY_TYPE_LETTER
+                && e.envelope.header.kind != crate::mail::ENTRY_TYPE_RECEIPT
+        })
         .map(|e| e.envelope.msgid)
         .collect();
     let mut n = 0;
@@ -1115,25 +996,6 @@ pub fn unpark_refused(node: &str) -> Result<usize, String> {
         }
     }
     Ok(n)
-}
-
-/// Fallback for [`remove_entry`]'s rare unreadable/unparsable-entry case
-/// (review round 3 NIT): scan `<node>/.ack/` (only that small
-/// subdirectory, never the node's whole spool) for a marker whose
-/// content equals `msgid` — the entry being removed — and delete it.
-/// Tolerant of a missing `.ack/` (nothing to do) and of any individual
-/// marker being unreadable (skipped, not an error) — this is a
-/// best-effort cleanup, never load-bearing for correctness the way
-/// `has_pending_ack_unlocked`'s own self-heal already is.
-fn clear_marker_pointing_to_msgid(node: &str, msgid: &str) {
-    let dir = node_dir(node).join(".ack");
-    let Ok(read_dir) = std::fs::read_dir(&dir) else { return };
-    for dir_entry in read_dir.flatten() {
-        let path = dir_entry.path();
-        if std::fs::read_to_string(&path).map(|c| c.trim() == msgid).unwrap_or(false) {
-            let _ = std::fs::remove_file(&path);
-        }
-    }
 }
 
 /// Retire what a poller has filed out of its own spool: a hub's custody of a
@@ -1496,24 +1358,24 @@ pub fn parked_transit_refusal(msgid: &str) -> Option<String> {
     None
 }
 
-/// Retire the one local outbox entry `ack` confirms (spec item 7: "a
-/// receipt whose verified signer is that entry's `to.node` and whose text
-/// names that entry's `msgid`"). `Ok(None)` — never an error — covers
-/// every way an ack fails to match: `ack` is not a receipt at all, no
-/// entry was ever spooled under `ack.header.from.node`, or `ack.text`
-/// names a `msgid` that node's spool doesn't hold (wrong text, an
-/// already-retired entry, or a stale replay).
+/// Retire the one own letter a receipt confirms, and nothing else (ruling 131).
+/// A receipt from a build before the rule names a letter this box sent, and
+/// the letter goes when its `to.node` is the receipt's verified signer and the
+/// receipt is in the letter's mesh. Each retirement writes one
+/// `mail.outbox.retired` line before the removal. `Ok(None)` — never an error —
+/// covers every way a receipt matches no own letter: it is not a receipt at
+/// all, its text is not one msgid, no letter with that msgid is spooled, the
+/// signer is not the letter's `to.node`, or the mesh differs. A transit
+/// container or a charter with that msgid is never retired here: a transit
+/// entry ends when its next hop takes it, and a charter ends on its own
+/// verified answer.
 ///
 /// **The entry is found by `msgid` across the spool, and the `to.node` check is
-/// what makes that safe.** Under transit a letter's entry lives under the HOP it
-/// was handed to, not under its destination — the destination's spool was never
-/// this box's to write — so the spool directory a receipt's signer names is not
-/// where its entry sits. What still identifies the entry is what spec
-/// item 7 says: a receipt from `X` naming `msgid` M retires an entry whose own
-/// `to.node` is `X` and whose mesh is the receipt's own. So the lookup is the file
-/// named M in any node's spool, kept
-/// only when that entry's `envelope.header.to.node` is the ack's signer — no
-/// looser than before, and blind to where a hop put it. The ack's signer is
+/// what makes that safe.** Under transit a letter's entry lives under the HOP
+/// it was handed to, not under its destination, so the directory a receipt's
+/// signer names is not where the entry sits. The lookup is the file named by
+/// the msgid in any node's spool, kept only when that entry is an own letter
+/// whose `envelope.header.to.node` is the receipt's signer. The signer is
 /// already proven genuine by [`crate::mail::deposit`]'s own origin-signature
 /// check before this function is reached, never re-verified here.
 pub fn retire_by_ack(ack: &Envelope) -> Result<Option<String>, String> {
@@ -1535,7 +1397,7 @@ fn retire_by_ack_unlocked(ack: &Envelope) -> Result<Option<String>, String> {
         }
         let mut found = list_entries_unlocked(&node)?
             .into_iter()
-            .find(|entry| entry.envelope.msgid == acked_msgid);
+            .find(|entry| entry.envelope.msgid == acked_msgid && entry.envelope.header.kind == crate::mail::ENTRY_TYPE_LETTER);
         // **The mesh has to match too.** A receipt is signed in ONE mesh
         // (`header.origin_mesh`, inside its origin signature), and a letter rides
         // one: a receipt minted for another mesh — the same names, the same
@@ -1552,17 +1414,15 @@ fn retire_by_ack_unlocked(ack: &Envelope) -> Result<Option<String>, String> {
         }
         if let Some(entry) = &found {
             if entry.envelope.header.to.node == from {
-                if entry.envelope.header.kind == crate::mail::ENTRY_TYPE_LETTER {
-                    aoide_protocol::audit::audit(
-                        &aoide_protocol::audit::default_audit_log(),
-                        aoide_protocol::Door::Cli,
-                        aoide_protocol::audit::EventClass::Audit,
-                        "mail.outbox.retired",
-                        "ok",
-                        &format!("letter {acked_msgid} toward {from} retired: {from} sent a receipt"),
-                    )
-                    .map_err(|e| format!("the audit log cannot be written, so the letter stays: {e}"))?;
-                }
+                aoide_protocol::audit::audit(
+                    &aoide_protocol::audit::default_audit_log(),
+                    aoide_protocol::Door::Cli,
+                    aoide_protocol::audit::EventClass::Audit,
+                    "mail.outbox.retired",
+                    "ok",
+                    &format!("letter {acked_msgid} toward {from} retired: {from} sent a receipt"),
+                )
+                .map_err(|e| format!("the audit log cannot be written, so the letter stays: {e}"))?;
                 if remove_entry_unlocked(&node, &acked_msgid)? {
                     return Ok(Some(acked_msgid));
                 }
@@ -2030,6 +1890,98 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// **A receipt retires an own letter and nothing else (ruling 131).** A
+    /// transit container and a charter toward the receipt's signer, each named
+    /// by a receipt in the same mesh, both stay spooled.
+    #[test]
+    fn a_receipt_retires_no_transit_or_charter_entry_toward_its_signer() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("outbox-receipt-not-custody");
+        let transit_msgid = "aa".repeat(32);
+        let charter_msgid = "bb".repeat(32);
+
+        let container = crate::seal::Container {
+            v: crate::seal::CONTAINER_VERSION,
+            purpose: crate::seal::PURPOSE_MAIL.to_string(),
+            msgid: transit_msgid.clone(),
+            generation: 1,
+            origin: crate::seal::Party { node: "osaka".to_string(), key: "aa".repeat(32) },
+            to: crate::seal::Destination { node: "dave".to_string(), age: "age1x".to_string() },
+            origin_mesh: "home".to_string(),
+            mesh: "home".to_string(),
+            suite: crate::seal::SUITE_AGE_V1_X25519.to_string(),
+            ct: "00".to_string(),
+            sig: "00".to_string(),
+            transit: Vec::new(),
+            board: None,
+            epoch: None,
+        };
+        write_entry("chiyo", &OutboxEntry::transit(container)).unwrap();
+
+        let mut charter = charter_envelope("here", "dave", &charter_msgid);
+        charter.header.origin_mesh = "home".to_string();
+        write_entry("dave", &OutboxEntry::fresh(charter)).unwrap();
+
+        for msgid in [&transit_msgid, &charter_msgid] {
+            let mut receipt = ack_envelope("dave", "here", msgid);
+            receipt.header.origin_mesh = "home".to_string();
+            assert_eq!(retire_by_ack(&receipt).unwrap(), None, "a receipt retires no transit or charter entry: {msgid}");
+        }
+        assert_eq!(list_entries("chiyo").unwrap().len(), 1, "the transit custody survives");
+        assert_eq!(list_entries("dave").unwrap().len(), 1, "the charter survives");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **A verified receipt for a msgid this box never spooled retires nothing,
+    /// and writes no audit line (ruling 131).** The outbox holds one own letter
+    /// toward `there`, but not the msgid the receipt names. `retire_by_ack`
+    /// finds no entry, returns `Ok(None)`, writes no `mail.outbox.retired` line,
+    /// and leaves the outbox as it was.
+    #[test]
+    fn a_verified_receipt_for_an_unspooled_msgid_retires_nothing_and_writes_no_audit_line() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("outbox-receipt-unspooled");
+        let spooled = "ab".repeat(32);
+        let never_spooled = "cd".repeat(32);
+
+        write_entry("there", &own_letter("there", &spooled, Some("sess-a"), false)).unwrap();
+        let before: Vec<String> = list_entries("there").unwrap().into_iter().map(|e| e.envelope.msgid).collect();
+
+        let mut receipt = ack_envelope("there", "here", &never_spooled);
+        receipt.header.origin_mesh = "home".to_string();
+        assert_eq!(retire_by_ack(&receipt).unwrap(), None, "no entry names it, so nothing is retired");
+
+        assert!(audit_lines("mail.outbox.retired").is_empty(), "a receipt that retires nothing writes no line");
+        let after: Vec<String> = list_entries("there").unwrap().into_iter().map(|e| e.envelope.msgid).collect();
+        assert_eq!(after, before, "the outbox is unchanged");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **Nothing clears an `.ack` marker (ruling 131).** An older build's
+    /// marker is inert: removing the receipt entry that names it leaves the
+    /// marker in
+    /// place.
+    #[test]
+    fn removing_a_receipt_entry_leaves_an_older_builds_ack_marker_in_place() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("outbox-ack-marker-inert");
+        let acked = "ab".repeat(32);
+        let receipt = ack_envelope("there", "here", &acked);
+        let receipt_msgid = receipt.msgid.clone();
+        write_entry("there", &OutboxEntry::fresh(receipt)).unwrap();
+        let marker = node_dir("there").join(".ack").join(&acked);
+        std::fs::create_dir_all(marker.parent().unwrap()).unwrap();
+        std::fs::write(&marker, &acked).unwrap();
+
+        assert!(remove_entry("there", &receipt_msgid).unwrap(), "the receipt entry is removed");
+        assert!(list_entries("there").unwrap().is_empty());
+        assert!(marker.exists(), "removal leaves the older build's marker where it is");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn list_entries_orders_oldest_first_by_minted_at() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -2066,189 +2018,6 @@ mod tests {
 
         clear_link_state("there").unwrap();
         assert!(read_link_state("there").unwrap().is_none(), "success clears the link entirely");
-
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    /// A `receipt` entry acking `acked_msgid`, addressed back to `to_node`
-    /// — the shape `write_ack_if_absent` scans for.
-    ///
-    /// **The msgid is a filename, so it is built like one.** This spool names
-    /// each entry `<msgid>.json` (`entry_path`), and production mints a msgid
-    /// as a hex digest (`mail::compute_msgid`) — safe on every host. The
-    /// fixture used to build one out of `minted_at`, whose `:` is ILLEGAL in a
-    /// Windows filename, so the entry could not be spooled there at all
-    /// (`ERROR_INVALID_NAME`, os error 123). The ISO timestamp still lives in
-    /// the header, where colons are just characters.
-    fn ack_for(to_node: &str, acked_msgid: &str, minted_at: &str) -> Envelope {
-        Envelope {
-            header: Header {
-                version: "1".to_string(),
-                from: Address { node: "here".to_string(), name: "bob".to_string() },
-                to: Address { node: to_node.to_string(), name: "alice".to_string() },
-                kind: crate::mail::ENTRY_TYPE_RECEIPT.to_string(),
-                minted_at: minted_at.to_string(),
-                origin_mesh: String::new(),
-            },
-            text: acked_msgid.to_string(),
-            sig: "ef".repeat(32),
-            msgid: format!("ack-{acked_msgid}-{}", minted_at.replace(':', "-")),
-        }
-    }
-
-    /// The ack marker is written under a `state/` that may be wide, and the
-    /// write locks it before the first byte lands.
-    #[cfg(unix)]
-    #[test]
-    fn write_ack_if_absent_locks_a_wide_state_it_writes_into() {
-        use std::os::unix::fs::PermissionsExt;
-        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let (_env, dir) = root("write-ack-locks");
-        let state = crate::fs::state_dir();
-        std::fs::create_dir_all(&state).unwrap();
-        std::fs::set_permissions(&state, std::fs::Permissions::from_mode(0o755)).unwrap();
-
-        let ack = OutboxEntry::fresh(ack_for("there", "acked-msgid", "2026-09-13T00:00:00Z"));
-        assert!(write_ack_if_absent("there", "acked-msgid", &ack).unwrap());
-
-        let mode = std::fs::metadata(&state).unwrap().permissions().mode() & 0o777;
-        assert_eq!(mode, 0o700, "write_ack_if_absent left state/ at {mode:o}");
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn write_ack_if_absent_spools_once_while_pending_then_again_after_delivery() {
-        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let (_env, dir) = root("write-ack-if-absent");
-
-        // The first mint for a redelivered letter's ack spools normally.
-        let first = OutboxEntry::fresh(ack_for("there", "acked-msgid", "2026-09-13T00:00:00Z"));
-        assert!(write_ack_if_absent("there", "acked-msgid", &first).unwrap(), "the first ack for this msgid spools");
-        assert_eq!(list_entries("there").unwrap().len(), 1);
-
-        // Ten further redeliveries of the SAME letter, while the first ack
-        // is still sitting here undelivered, must spool NOTHING new — this
-        // is the outbox investigation's own bug: 16.5k duplicate receipts
-        // from exactly this loop.
-        for i in 0..10 {
-            let redelivered = OutboxEntry::fresh(ack_for("there", "acked-msgid", &format!("2026-09-13T00:0{i}:00Z")));
-            assert!(
-                !write_ack_if_absent("there", "acked-msgid", &redelivered).unwrap(),
-                "a pending ack for the same acked_msgid must block a second spool"
-            );
-        }
-        assert_eq!(list_entries("there").unwrap().len(), 1, "ten redeliveries while pending spool nothing new");
-
-        // Once the pending ack is actually delivered (removed — mirrors
-        // `mail_wire::drain_node`'s own `Delivered` arm), a LATER
-        // redelivery must be free to respool — spec item 5's "a duplicate
-        // re-sends the ack because the sender's earlier one evidently never
-        // arrived" must still hold for a genuine loss.
-        remove_entry("there", &first.envelope.msgid).unwrap();
-        assert!(list_entries("there").unwrap().is_empty());
-
-        let after_delivery = OutboxEntry::fresh(ack_for("there", "acked-msgid", "2026-09-13T01:00:00Z"));
-        assert!(
-            write_ack_if_absent("there", "acked-msgid", &after_delivery).unwrap(),
-            "once the earlier ack is gone, a fresh redelivery must respool it"
-        );
-        assert_eq!(list_entries("there").unwrap().len(), 1);
-
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn write_ack_if_absent_does_not_enumerate_the_spool_directory() {
-        // Review round 2 (mail register §26): `has_pending_ack_unlocked`
-        // must be a single `exists()` stat on the marker, never a
-        // directory scan — the live osaka spool holds 16.5k+ files, and
-        // this is exactly the O(n)-under-the-shared-stage-lock hazard the
-        // review flagged. Proven here by seeding the node's directory
-        // with a pile of entries that a directory scan would have to open
-        // and parse — including files a naive scan would choke or hang
-        // on (unreadable garbage, and a directory to recurse into) — and
-        // asserting the gate still answers correctly regardless.
-        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let (_env, dir) = root("write-ack-if-absent-no-scan");
-
-        // A pile of unrelated, perfectly ordinary entries.
-        for i in 0..200 {
-            let letter = envelope("here", "there", &format!("unrelated-{i}"));
-            write_entry("there", &OutboxEntry::fresh(letter)).unwrap();
-        }
-        // A file a naive directory scan would try to open and parse as
-        // JSON and choke on.
-        std::fs::write(node_dir("there").join("garbage.json"), b"not json at all").unwrap();
-        // A subdirectory a naive scan might try to recurse into.
-        std::fs::create_dir_all(node_dir("there").join("some-subdir")).unwrap();
-
-        // No ack for "acked-msgid" has ever been spooled — the marker
-        // does not exist — so the gate must say "not pending" despite the
-        // directory being full of unrelated files.
-        assert!(
-            !has_pending_ack_unlocked("there", "acked-msgid").unwrap(),
-            "no marker means not pending, regardless of what else is in the directory"
-        );
-
-        let ack = OutboxEntry::fresh(ack_for("there", "acked-msgid", "2026-09-13T00:00:00Z"));
-        assert!(write_ack_if_absent("there", "acked-msgid", &ack).unwrap());
-
-        // Now it IS pending — again, correctly answered without needing
-        // to find the one matching entry among the 200+ unrelated files.
-        assert!(has_pending_ack_unlocked("there", "acked-msgid").unwrap());
-        assert!(
-            !write_ack_if_absent("there", "acked-msgid", &ack).unwrap(),
-            "still pending — a redelivery spools nothing new"
-        );
-
-        // A DIFFERENT acked_msgid was never spooled either, even though
-        // an ack for a different one now sits in the same directory.
-        assert!(!has_pending_ack_unlocked("there", "some-other-msgid").unwrap());
-
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn an_orphaned_marker_self_heals_and_a_later_redelivery_respools() {
-        // Review round 3: the planned (out-of-scope-for-this-fix) archive
-        // script will `mv` receipt entries straight out of a node's
-        // directory, never touching `.ack/` — it doesn't know it exists
-        // and never needs to. A marker left behind by that MUST NOT
-        // suppress a genuinely-lost ack's respool forever; the gate has
-        // to notice its named entry is gone and self-heal.
-        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let (_env, dir) = root("write-ack-if-absent-orphan-marker");
-
-        let first = OutboxEntry::fresh(ack_for("there", "acked-msgid", "2026-09-13T00:00:00Z"));
-        assert!(write_ack_if_absent("there", "acked-msgid", &first).unwrap());
-        assert_eq!(list_entries("there").unwrap().len(), 1);
-        let marker = ack_marker_path("there", "acked-msgid");
-        assert!(marker.exists(), "write_ack_if_absent always leaves a marker behind a fresh spool");
-
-        // Simulate the out-of-band mover: the entry file is removed
-        // DIRECTLY, never through `remove_entry` — so the marker is left
-        // behind, orphaned, still naming a msgid that no longer exists.
-        std::fs::remove_file(node_dir("there").join(format!("{}.json", first.envelope.msgid))).unwrap();
-        assert!(list_entries("there").unwrap().is_empty(), "the entry is really gone");
-        assert!(marker.exists(), "nothing cleared the marker — it is genuinely orphaned");
-
-        // A later redelivery of the SAME acked_msgid must not be
-        // suppressed by the orphan — it respools, exactly like a genuine
-        // loss (spec item 5).
-        let redelivered = OutboxEntry::fresh(ack_for("there", "acked-msgid", "2026-09-13T00:05:00Z"));
-        assert!(
-            write_ack_if_absent("there", "acked-msgid", &redelivered).unwrap(),
-            "an orphaned marker must never block a real redelivery forever"
-        );
-        assert_eq!(list_entries("there").unwrap().len(), 1);
-
-        // The stale marker was healed away and replaced by one naming the
-        // freshly spooled entry — not left pointing at the vanished one.
-        let content = std::fs::read_to_string(&marker).unwrap();
-        assert_eq!(content, redelivered.envelope.msgid, "the marker now names the entry actually sitting here");
-
-        // And the gate correctly reports pending again for the new entry.
-        assert!(has_pending_ack_unlocked("there", "acked-msgid").unwrap());
 
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -2741,6 +2510,94 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// **A receipt is never offered to a poll, held or failing (ruling 131).** The
+    /// answer that filed a letter is its receipt, so a receipt left in the spool
+    /// waits for the tick's pre-131 pass, not for the far end's poll.
+    #[test]
+    fn a_receipt_is_never_offered_to_a_poll_held_or_failing() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("outbox-poll-receipts");
+        let held_letter = OutboxEntry::held(envelope("here", "there", "msg-held"));
+        let held_receipt = OutboxEntry::held(ack_envelope("there", "here", &"aa".repeat(32)));
+        let mut failing_receipt = OutboxEntry::fresh(ack_envelope("there", "here", &"bb".repeat(32)));
+        failing_receipt.tries = 2;
+        failing_receipt.last_outcome = "transport: connection refused".to_string();
+        for entry in [&held_letter, &held_receipt, &failing_receipt] {
+            write_entry("there", entry).unwrap();
+        }
+
+        assert!(pollable(&held_letter), "a held letter is offered");
+        assert!(!pollable(&held_receipt), "a held receipt is not");
+        assert!(!pollable(&failing_receipt), "a failing receipt is not");
+        let offered: Vec<String> = poll_payloads("there").unwrap().into_iter().map(|(_, e)| e.msgid).collect();
+        assert_eq!(offered, vec!["msg-held".to_string()], "{offered:?}");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **A held receipt survives a filed name unoffered, until the tick's pre-131
+    /// pass takes it (ruling 131).** A filed name ends a held letter and nothing
+    /// else, so the receipt stays spooled; no poll offers it, and the pass drops it.
+    #[test]
+    fn a_held_receipt_survives_a_filed_name_unoffered_until_the_pre_131_pass_takes_it() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("outbox-held-receipt-filed");
+        let receipt = ack_envelope("there", "here", &"cc".repeat(32));
+        let receipt_msgid = receipt.msgid.clone();
+        write_entry("there", &OutboxEntry::held(receipt)).unwrap();
+        write_entry("there", &own_letter("there", "msg-held", Some("sess-a"), true)).unwrap();
+
+        assert!(!retire_acknowledged("there", &receipt_msgid).unwrap(), "a filed name ends no receipt");
+        let offered: Vec<String> = poll_payloads("there").unwrap().into_iter().map(|(_, e)| e.msgid).collect();
+        assert_eq!(offered, vec!["msg-held".to_string()], "{offered:?}");
+
+        let pre_131 = |e: &OutboxEntry| e.envelope.header.kind == crate::mail::ENTRY_TYPE_RECEIPT || e.session.is_none();
+        assert_eq!(drop_letters_where(pre_131, usize::MAX, "pre-131").unwrap(), 1);
+        let left: Vec<String> = list_entries("there").unwrap().into_iter().map(|e| e.envelope.msgid).collect();
+        assert_eq!(left, vec!["msg-held".to_string()], "{left:?}");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **A dropped receipt's audit line names its msgid, its node and its reason,
+    /// and no letter text.** The acked msgid a receipt carries stays out of the log.
+    #[test]
+    fn a_dropped_receipt_is_logged_by_msgid_node_and_reason_and_no_text() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("outbox-drop-receipt-audit");
+        let acked = "dd".repeat(32);
+        let mut receipt = ack_envelope("there", "here", &acked);
+        receipt.msgid = "rcpt-audit-1".to_string();
+        let receipt_msgid = receipt.msgid.clone();
+        write_entry("there", &OutboxEntry::fresh(receipt)).unwrap();
+
+        let pre_131 = |e: &OutboxEntry| e.envelope.header.kind == crate::mail::ENTRY_TYPE_RECEIPT;
+        assert_eq!(drop_letters_where(pre_131, usize::MAX, "pre-131").unwrap(), 1);
+        let lines = audit_lines("mail.outbox.dropped");
+        assert_eq!(lines.len(), 1, "{lines:?}");
+        assert!(lines[0].contains(&format!("dropped receipt {receipt_msgid} toward there (pre-131)")), "{lines:?}");
+        assert!(!lines[0].contains(&acked), "the acked text is not logged: {lines:?}");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **A session end drops letters only: a receipt bound to that session is left
+    /// for the tick's pre-131 pass.** Only the letter kind is a session's to drop.
+    #[test]
+    fn a_session_end_never_drops_a_receipt_bound_to_it() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("outbox-drop-session-receipt");
+        let mut bound = OutboxEntry::fresh(ack_envelope("there", "here", &"ee".repeat(32)));
+        bound.session = Some("sess-a".to_string());
+        write_entry("there", &bound).unwrap();
+
+        assert_eq!(drop_for_session("sess-a").unwrap(), 0);
+        assert_eq!(list_entries("there").unwrap().len(), 1, "the receipt is still spooled");
+        assert!(audit_lines("mail.outbox.dropped").is_empty(), "and no drop line names it");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// **A receipt that retires an own letter says so, once.** A
     /// returned or a held letter that a receipt retires writes one
     /// `mail.outbox.retired` line naming the msgid, the node and `receipt`.
@@ -2822,8 +2679,8 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// **A letter with no session (spooled before ruling 131) is dropped by the
-    /// tick's sweep, with reason `pre-131`.** A letter bound to a session stays.
+    /// **A letter or receipt with no session (spooled before ruling 131) is dropped
+    /// by the tick's sweep, with reason `pre-131`.** A letter bound to a session stays.
     #[test]
     fn a_letter_with_no_session_is_dropped_by_the_sweep_with_its_reason() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -2834,13 +2691,15 @@ mod tests {
         write_entry("there", &own_letter("there", "msg-bound", Some("sess-a"), false)).unwrap();
         write_entry("there", &OutboxEntry::fresh(ack_envelope("there", "here", "msg-y"))).unwrap();
 
-        assert_eq!(drop_letters_where(|e| e.session.is_none(), usize::MAX, "pre-131").unwrap(), 2);
+        let pre_131 = |e: &OutboxEntry| e.envelope.header.kind == crate::mail::ENTRY_TYPE_RECEIPT || e.session.is_none();
+        assert_eq!(drop_letters_where(pre_131, usize::MAX, "pre-131").unwrap(), 3);
         let mut left: Vec<String> = list_entries("there").unwrap().into_iter().map(|e| e.envelope.msgid).collect();
         left.sort();
-        assert_eq!(left, vec!["ack-of-msg-y", "msg-bound"], "{left:?}");
+        assert_eq!(left, vec!["msg-bound"], "{left:?}");
         let lines = audit_lines("mail.outbox.dropped");
-        assert_eq!(lines.len(), 2, "{lines:?}");
+        assert_eq!(lines.len(), 3, "{lines:?}");
         assert!(lines.iter().all(|l| l.contains("pre-131")), "{lines:?}");
+        assert!(lines.iter().any(|l| l.contains("dropped receipt ack-of-msg-y")), "{lines:?}");
 
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -3324,6 +3183,24 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(&dir);
     }
+
+    /// **A receipt is never retried, so the un-park sweep leaves a parked
+    /// receipt parked (ruling 131).** Clearing `refused` would make a receipt
+    /// look retriable, and the sweep would then drain a node for it.
+    #[test]
+    fn unpark_leaves_a_parked_receipt_parked() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("outbox-unpark-skips-receipts");
+
+        let mut parked = OutboxEntry::fresh(ack_envelope("there", "here", &"ab".repeat(32)));
+        parked.refused = true;
+        parked.tries = 1;
+        write_entry("there", &parked).unwrap();
+        assert_eq!(unpark_refused("there").unwrap(), 0, "the sweep un-parks no receipt");
+        assert!(list_entries("there").unwrap()[0].refused, "it stays parked");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
 
 /// P-SEAL: a sealed entry's spool holds no letter bytes, and every reader of
@@ -3342,6 +3219,16 @@ mod sealed_spool_tests {
     /// A sealed entry for a real container: this node sealed to itself, so
     /// the container is a genuine one rather than a hand-built stub.
     fn sealed_entry(body: &str) -> OutboxEntry {
+        sealed_self_entry(|me| {
+            let mut envelope = crate::mail::mint_outbound_letter("alice", me, "bob", body).unwrap();
+            envelope.header.from.name = "alice".to_string();
+            envelope
+        })
+    }
+
+    /// The entry for the envelope `mint` makes toward this node, sealed to this node
+    /// under its own pairing, so the container is a genuine one.
+    fn sealed_self_entry(mint: impl FnOnce(&str) -> crate::mail::Envelope) -> OutboxEntry {
         let me = crate::display::local_node_name();
         let kp = crate::identity::load_or_mint().unwrap().0;
         let mut nodes = crate::node_store::load_nodes();
@@ -3356,8 +3243,7 @@ mod sealed_spool_tests {
         );
         crate::node_store::save_nodes(&nodes).unwrap();
         let binding = crate::seal::publish_binding().unwrap();
-        let mut envelope = crate::mail::mint_outbound_letter("alice", &me, "bob", body).unwrap();
-        envelope.header.from.name = "alice".to_string();
+        let envelope = mint(&me);
         let container = crate::seal::seal_envelope(
             &envelope,
             &binding,
@@ -3399,6 +3285,25 @@ mod sealed_spool_tests {
             }
             other => panic!("the stored container opens: {other:?}"),
         }
+    }
+
+    /// **A sealed receipt is dropped by the pre-131 pass like a plain one.** The
+    /// kind stays on the spooled envelope, so the container does not hide it.
+    #[test]
+    fn a_sealed_receipt_is_dropped_by_the_pre_131_pass() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _s = EnvSaver::capture(&["AOIDE_STATE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
+        env(&aoide_test_support::unique_tmp("outbox-sealed-receipt"));
+
+        let entry = sealed_self_entry(|me| {
+            let to = crate::mail::Address { node: me.to_string(), name: "bob".to_string() };
+            crate::mail::mint_ack("alice", to, &"ff".repeat(32)).unwrap()
+        });
+        write_entry("elsewhere", &entry).unwrap();
+
+        let pre_131 = |e: &OutboxEntry| e.envelope.header.kind == crate::mail::ENTRY_TYPE_RECEIPT || e.session.is_none();
+        assert_eq!(drop_letters_where(pre_131, usize::MAX, "pre-131").unwrap(), 1);
+        assert!(list_entries("elsewhere").unwrap().is_empty());
     }
 
     #[test]

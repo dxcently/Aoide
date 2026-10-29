@@ -212,6 +212,11 @@ pub enum EventClass {
     /// [`append_audit`] — the ban is enforced there, not only by this
     /// comment.
     Secret,
+    /// The stage-file state cue `aoide-server`'s watcher writes
+    /// (`producers::HandEditWatcher`): kind `changed`, `payload.files` naming
+    /// the stage file whose stat moved. Name-only: it says that a file changed,
+    /// never what the change was.
+    State,
 }
 
 /// A single record in the neutral event stream / audit log.
@@ -358,6 +363,11 @@ mod tests {
         assert!(Door::Daemon.can_approve());
         assert!(!Door::Mcp.can_approve());
         assert!(!Door::A2a.can_approve());
+    }
+
+    #[test]
+    fn the_state_class_serializes_as_the_word_state() {
+        assert_eq!(serde_json::to_string(&EventClass::State).unwrap(), "\"state\"");
     }
 
     use super::*;

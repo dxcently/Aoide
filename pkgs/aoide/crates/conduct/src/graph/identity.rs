@@ -2,7 +2,7 @@
 //! section; plan file "LANE IDENTITY (#63)"'s thesis) — the kernel-truth
 //! primitives the send gate and the per-session control socket both build
 //! on: `SO_PEERCRED` for a connecting `UnixStream` peer (Linux/Android — see
-//! [`peer_cred`]), and
+//! [`aoide_protocol::peercred::peer_cred`]), and
 //! [`attested_sender`], the pure decision function that walks a pid's real
 //! `/proc` ancestry to find the (verified) sealed session it is running
 //! under.
@@ -28,7 +28,7 @@
 //! decision onto the accept side would require inventing a wire protocol,
 //! which this phase does not do (scope fence: only the per-session socket
 //! + the send gate). `SO_PEERCRED` earns its keep at the accept side for a
-//! DIFFERENT, narrower property instead: [`peer_cred`] backs
+//! DIFFERENT, narrower property instead: [`aoide_protocol::peercred::peer_cred`] backs
 //! `pty.rs`'s own self-injection refusal (a connecting pid that is a
 //! descendant of the socket's OWN session gets dropped, unconditionally,
 //! un-bypassably — the replacement for the old client-side `is_self_send`
@@ -36,159 +36,6 @@
 
 use super::model::SessionRecord;
 use std::collections::HashSet;
-#[cfg(any(target_os = "linux", target_os = "android"))]
-use std::os::unix::io::AsRawFd;
-#[cfg(unix)]
-use std::os::unix::net::UnixStream;
-#[cfg(windows)]
-use aoide_protocol::win_unix::UnixStream;
-
-/// One side of an identity comparison: a user named in the host's own terms —
-/// a uid where the host has uids, a token-user SID where it has SIDs. The
-/// native-Windows arm cannot answer a uid (there is none there and none is
-/// invented from a SID), so the two never mix: [`PeerCred::user`] and
-/// [`own_user`] each return ONE of these, and equal variants are the only
-/// equality this gate ever tests.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum PeerUser {
-    Uid(u32),
-    Sid(String),
-}
-
-impl PeerUser {
-    /// How a refusal names the user it refused, in the host's own words.
-    pub(crate) fn label(&self) -> String {
-        match self {
-            PeerUser::Uid(uid) => format!("uid {uid}"),
-            PeerUser::Sid(sid) => format!("user {sid}"),
-        }
-    }
-}
-
-/// Kernel-truth identity of a connected `UnixStream`'s peer — mirrors
-/// `aoide_secrets::peercred::PeerCred` exactly (task brief: a small local
-/// reimplementation is fine here, `libc` already this crate's dependency for
-/// the PTY/signal code in `conduct.rs`; adding a cross-crate edge onto
-/// `aoide-secrets` for one struct+fn would invert nothing architecturally but
-/// buys nothing either) — INCLUDING its three-field shape: `uid` is present
-/// only where the host has uids, `sid` only where it has SIDs, and `pid` is
-/// the number both hosts can answer.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct PeerCred {
-    pub uid: Option<u32>,
-    pub sid: Option<String>,
-    pub pid: i32,
-}
-
-impl PeerCred {
-    /// This peer's user, in the host's own terms — what the gates compare.
-    /// `None` only for a credential that names no user at all.
-    pub(crate) fn user(&self) -> Option<PeerUser> {
-        match (self.uid, &self.sid) {
-            (Some(uid), _) => Some(PeerUser::Uid(uid)),
-            (None, Some(sid)) => Some(PeerUser::Sid(sid.clone())),
-            (None, None) => None,
-        }
-    }
-
-    /// The credential for a KNOWN user with no kernel stamp behind it — what a
-    /// test injects where a real read would go. Never produced by
-    /// [`peer_cred`], which only ever reports what a host answered.
-    #[cfg(test)]
-    pub(crate) fn for_user(user: &PeerUser) -> PeerCred {
-        match user {
-            PeerUser::Uid(uid) => PeerCred { uid: Some(*uid), sid: None, pid: 0 },
-            PeerUser::Sid(sid) => PeerCred { uid: None, sid: Some(sid.clone()), pid: 0 },
-        }
-    }
-}
-
-/// THIS process's own user, in the host's own terms — the other side every
-/// identity gate compares a peer against. Unix asks `geteuid(2)`, which takes
-/// no arguments and cannot fail; native Windows asks its own token's user SID
-/// (`aoide_protocol::win_proc::current_user_sid`, the same reader the peer
-/// side goes through), and a host that cannot answer returns `None` so its
-/// caller refuses rather than admitting by default.
-pub(crate) fn own_user() -> Option<PeerUser> {
-    #[cfg(unix)]
-    {
-        Some(PeerUser::Uid(unsafe { libc::geteuid() } as u32))
-    }
-    #[cfg(windows)]
-    {
-        aoide_protocol::win_proc::current_user_sid().ok().map(PeerUser::Sid)
-    }
-}
-
-/// Read `SO_PEERCRED` off `stream` — `None` on ANY failure (a non-`AF_UNIX`
-/// stream, an unexpected `getsockopt` error), or on any host that has no such
-/// mechanism at all (the arm below). Same fail-to-`None`, never-a-panic,
-/// never-a-fabricated-identity contract `aoide_secrets::peercred::peer_cred`
-/// documents for its own callers.
-///
-/// `SO_PEERCRED` is Linux/Android: POSIX.1 defines no peer-credential API, and
-/// BSD `getpeereid` carries no pid — it could not fill the `PeerCred.pid` that
-/// [`attested_sender`]/[`is_self_originated`] walk as the kernel's ancestry
-/// fact. Native Windows answers the same pair of facts through its own
-/// bindings (the arm below); every OTHER host gets the same UNIDENTIFIED `None`
-/// a failed read gives, and every caller keeps its existing posture:
-/// `shellbridge.rs`'s cross-user floor refuses, `pty.rs`'s self-injection
-/// guard sees not-self. A pid-less second mechanism is a design change to
-/// those gates, never a port.
-///
-/// `pub(crate)`, not `pub(in crate::graph)` (LANE IDENTITY P-ID3): this
-/// crate's `shellbridge.rs` — a sibling of `graph`, not a descendant — reuses
-/// this exact primitive for its own accept-time cross-uid floor rather than
-/// re-implementing a second `SO_PEERCRED` read (`graph.rs`'s own `mod
-/// identity` doc comment).
-#[cfg(any(target_os = "linux", target_os = "android"))]
-pub(crate) fn peer_cred(stream: &UnixStream) -> Option<PeerCred> {
-    let fd = stream.as_raw_fd();
-    let mut cred: libc::ucred = unsafe { std::mem::zeroed() };
-    let mut len = std::mem::size_of::<libc::ucred>() as libc::socklen_t;
-    // SAFETY: `fd` is a valid, open unix-domain socket fd owned by `stream`
-    // for the duration of this call (borrowed, never taken); `cred`/`len`
-    // are correctly sized out-parameters matching `SO_PEERCRED`'s
-    // documented `struct ucred` shape, and `getsockopt` never writes past
-    // `len` bytes into `cred`.
-    let ret = unsafe {
-        libc::getsockopt(
-            fd,
-            libc::SOL_SOCKET,
-            libc::SO_PEERCRED,
-            &mut cred as *mut libc::ucred as *mut libc::c_void,
-            &mut len,
-        )
-    };
-    if ret != 0 {
-        return None;
-    }
-    Some(PeerCred { uid: Some(cred.uid), sid: None, pid: cred.pid })
-}
-
-/// Native Windows: the peer's process from `SIO_AF_UNIX_GETPEERPID`, and its
-/// user from that process's token (`aoide_protocol::win_proc`, which RE-reads
-/// the process's creation time around the token read and refuses a pid that
-/// was reused between the two, rather than reporting the previous process's
-/// user). `None` on ANY failure — an unconnected socket, a peer this process
-/// may not query, a pid that no longer names the process it did — the same
-/// UNIDENTIFIED `None` the Unix arm's failed `getsockopt` gives: there is no
-/// uid here to fall back on and none is invented.
-#[cfg(windows)]
-pub(crate) fn peer_cred(stream: &UnixStream) -> Option<PeerCred> {
-    let pid = stream.peer_pid().ok()?;
-    let pid = i32::try_from(pid).ok()?;
-    let sid = aoide_protocol::win_proc::process_user_sid(pid as u32).ok()?;
-    Some(PeerCred { uid: None, sid: Some(sid), pid })
-}
-
-/// No peer-credential mechanism on this host — the same UNIDENTIFIED `None`
-/// a failed `SO_PEERCRED` read gives (doc above), so callers refuse as they
-/// already do.
-#[cfg(not(any(target_os = "linux", target_os = "android", windows)))]
-pub(crate) fn peer_cred(_stream: &UnixStream) -> Option<PeerCred> {
-    None
-}
 
 /// Reconstruct the exact `SealedIdentity` `rec.seal` was signed over and
 /// check it against `pubkey_hex` (LANE IDENTITY P-ID2). Fail-closed on
@@ -834,51 +681,5 @@ mod tests {
             ..Default::default()
         }];
         assert!(!is_self_originated(me, &sessions, "target"));
-    }
-
-    // ── peer_cred ────────────────────────────────────────────────────────
-
-    /// A `UnixStream::pair()` socketpair is entirely local to THIS process
-    /// — both ends' kernel identity must report exactly this process's own
-    /// user and pid, a real checkable fact (mirrors `aoide_secrets::peercred`'s
-    /// own test of the same shape, proving the local reimplementation here
-    /// behaves identically). Each host asserts it in its OWN terms — the uid
-    /// `SO_PEERCRED` carries here, the token-user SID the native arm reads
-    /// below — and both share this one contract: a local pair reports THIS
-    /// process, and neither host may answer with the other's kind of number.
-    #[cfg(any(target_os = "linux", target_os = "android"))]
-    #[test]
-    fn peer_cred_on_a_scratch_socketpair_matches_this_processs_own_identity() {
-        let (a, b) = UnixStream::pair().expect("socketpair");
-        let cred_a = peer_cred(&a).expect("SO_PEERCRED must be readable on a live socketpair");
-        let cred_b = peer_cred(&b).expect("SO_PEERCRED must be readable on a live socketpair");
-        let euid = unsafe { libc::geteuid() };
-        let pid = std::process::id() as i32;
-        assert_eq!(cred_a.uid, Some(euid));
-        assert_eq!(cred_a.pid, pid);
-        assert_eq!(cred_b.uid, Some(euid));
-        assert_eq!(cred_b.pid, pid);
-        assert_eq!(cred_a.sid, None, "no SID is invented where the host has uids");
-        assert_eq!(own_user(), Some(PeerUser::Uid(euid)));
-    }
-
-    /// The native-Windows half of the contract above (see its doc): the same
-    /// socketpair, the same two facts — the peer's pid from
-    /// `SIO_AF_UNIX_GETPEERPID` and its user from THAT pid's own token — and
-    /// the same refusal to invent the other host's number.
-    #[cfg(windows)]
-    #[test]
-    fn peer_cred_on_a_scratch_socketpair_matches_this_processs_own_identity() {
-        let (a, b) = UnixStream::pair().expect("socketpair");
-        let cred_a = peer_cred(&a).expect("the peer pid must be readable on a live socketpair");
-        let cred_b = peer_cred(&b).expect("the peer pid must be readable on a live socketpair");
-        let me = std::process::id() as i32;
-        let sid = aoide_protocol::win_proc::current_user_sid().expect("this token's user SID");
-        assert_eq!(cred_a.pid, me);
-        assert_eq!(cred_b.pid, me);
-        assert_eq!(cred_a.sid.as_deref(), Some(sid.as_str()));
-        assert_eq!(cred_b.sid.as_deref(), Some(sid.as_str()));
-        assert_eq!(cred_a.uid, None, "no uid is invented where the host has SIDs");
-        assert_eq!(own_user(), Some(PeerUser::Sid(sid)));
     }
 }

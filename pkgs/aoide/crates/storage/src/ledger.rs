@@ -75,6 +75,14 @@ pub struct LedgerEntry {
     /// the live record.
     #[serde(default)]
     pub restore: Option<RestoreSnapshot>,
+    /// Projected verbatim from `SessionRecord.log_path` as the session leaves
+    /// the roster. It names the record's own `logPath`: a conducted terminal's
+    /// pty transcript under `fs::session_logs_dir()`, or a harness's own
+    /// journal. The file may be gone by the time anything reads the line.
+    /// Always serializes: `null` when absent, and on a line that predates the
+    /// field.
+    #[serde(rename = "logPath", default)]
+    pub log_path: Option<String>,
 }
 
 /// The ledger's path: `state/session-ledger.jsonl`, under
@@ -163,6 +171,7 @@ mod tests {
                 idle: true,
                 argv: None,
             }),
+            log_path: Some("/r/s.eid".to_string()),
         };
         append_ledger_entry(&entry).unwrap();
 
@@ -172,6 +181,7 @@ mod tests {
         assert_eq!(back[0].harness_session_id.as_deref(), Some("h1"));
         assert_eq!(back[0].resumed_from, None);
         assert_eq!(back[0].origin.as_deref(), Some("node:yomi-strix"));
+        assert_eq!(back[0].log_path.as_deref(), Some("/r/s.eid"));
         assert_eq!(back[0].restore, entry.restore);
 
         std::env::remove_var("AOIDE_STATE_DIR");
@@ -202,6 +212,7 @@ mod tests {
             resumed_from: None,
             origin: None,
             restore: None,
+            log_path: None,
         };
         let mode = || std::fs::metadata(&state).unwrap().permissions().mode() & 0o777;
 
@@ -224,6 +235,7 @@ mod tests {
         // historical-record discipline `CONTRACTS.md` fixes for this file.
         let entry = LedgerEntry {
             session_id: "s1".to_string(),
+            log_path: None,
             ..Default::default()
         };
         let line = serde_json::to_string(&entry).unwrap();
@@ -245,6 +257,7 @@ mod tests {
         let mut legacy = serde_json::to_value(&LedgerEntry {
             session_id: "s-legacy".to_string(),
             restore: Some(RestoreSnapshot { cwd: Some("/w".into()), idle: true, argv: None }),
+            log_path: None,
             ..Default::default()
         })
         .unwrap();
@@ -260,6 +273,7 @@ mod tests {
 
         append_ledger_entry(&LedgerEntry {
             session_id: "s-new".to_string(),
+            log_path: None,
             restore: Some(RestoreSnapshot { cwd: Some("/w".into()), idle: true, argv: None }),
             ..Default::default()
         })
@@ -283,6 +297,49 @@ mod tests {
         assert_eq!(entry.restore, None);
     }
 
+    /// `logPath` is a closed-shape field like `restore`: an absent path
+    /// serializes as an explicit `null`, never a missing key.
+    #[test]
+    fn log_path_absent_serializes_as_explicit_null_never_omitted() {
+        let entry = LedgerEntry {
+            session_id: "s1".to_string(),
+            log_path: None,
+            ..Default::default()
+        };
+        let line = serde_json::to_string(&entry).unwrap();
+        assert!(line.contains("\"logPath\":null"), "serialised: {line}");
+    }
+
+    /// A line written before `logPath` existed parses, and re-serializes with
+    /// the key as `null`: no recorded path, so nothing guesses a journal.
+    #[test]
+    fn an_old_line_with_no_log_path_key_parses_as_null() {
+        let old_line = r#"{"v":0,"sessionId":"s0","agent":"eidolon","cwd":"/x","startedAt":"2026-01-01T00:00:00Z","endedAt":"2026-01-01T01:00:00Z"}"#;
+        let entry: LedgerEntry = serde_json::from_str(old_line).unwrap();
+        let line = serde_json::to_string(&entry).unwrap();
+        assert!(line.contains("\"logPath\":null"), "serialised: {line}");
+    }
+
+    /// The path a line names is read back verbatim, never rewritten on read.
+    #[test]
+    fn a_log_path_round_trips_through_the_reader() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let state = unique_state("log-path");
+        std::fs::create_dir_all(&state).unwrap();
+        let _env = aoide_test_support::EnvSaver::capture(&["AOIDE_STATE_DIR"]);
+        std::env::set_var("AOIDE_STATE_DIR", &state);
+        std::fs::write(
+            session_ledger_path(),
+            "{\"v\":0,\"sessionId\":\"s1\",\"agent\":\"eidolon\",\"logPath\":\"/r/s.eid\"}\n",
+        )
+        .unwrap();
+
+        let back = read_ledger().unwrap();
+        let json = serde_json::to_value(&back[0]).unwrap();
+        assert_eq!(json["logPath"], "/r/s.eid", "read back: {json}");
+        std::fs::remove_dir_all(&state).ok();
+    }
+
     #[test]
     fn append_never_truncates_across_multiple_calls() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -292,6 +349,7 @@ mod tests {
         for i in 0..5 {
             let entry = LedgerEntry {
                 session_id: format!("s{i}"),
+                log_path: None,
                 ..Default::default()
             };
             append_ledger_entry(&entry).unwrap();

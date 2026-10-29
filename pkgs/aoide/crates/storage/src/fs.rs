@@ -384,10 +384,11 @@ pub fn state_dir() -> std::path::PathBuf {
 }
 
 /// The CONDUCTING stage directory: `$AOIDE_ROOT/state/stage/` (default
-/// `~/.aoide/state/stage/`), holding the six core roster files: sessions.json,
-/// hooks.json, projects.json, graph.json, pending.json and notifications.json.
-/// `aoide`/`aoided` alone read and write them (the "L4 dual-writer surface",
-/// `conduct/README.md`, mirrored by `server/src/daemon.rs::stage_roster`).
+/// `~/.aoide/state/stage/`), holding the seven core roster files:
+/// sessions.json, hooks.json, projects.json, graph.json, pending.json,
+/// notifications.json and jobs.json. `aoide`/`aoided` alone read and write them
+/// (the "L4 dual-writer surface", `conduct/README.md`, mirrored by
+/// `server/src/daemon.rs::stage_roster`).
 ///
 /// `$AOIDE_STAGE_DIR` wins when set to an absolute path, and names this
 /// directory and nothing else: the rice stage never follows it.
@@ -427,8 +428,9 @@ fn legacy_stage_dir() -> std::path::PathBuf {
         .join("stage")
 }
 
-/// The six core stage-file names [`conducting_stage_dir`] owns — the same
-/// roster `server/src/daemon.rs::stage_roster` watches, named here once so
+/// The six core stage-file names [`conducting_stage_dir`] owns from before the
+/// split: the roster `server/src/daemon.rs::stage_roster` watches, less
+/// jobs.json, which has no pre-split copy. Named here once so
 /// [`migrate_conducting_stage`] doesn't hand-copy the list a second place.
 const CONDUCTING_STAGE_FILES: &[&str] = &[
     "sessions.json",
@@ -544,6 +546,19 @@ pub fn session_logs_dir() -> std::path::PathBuf {
     state_dir().join("sessions")
 }
 
+/// Whether `path` lies inside [`session_logs_dir`], by its raw spelling or, where
+/// both resolve, its canonical one. A path there is a conducted terminal's
+/// transcript, never a harness's journal, so a reader of a `logPath` refuses it.
+pub fn inside_session_logs(path: &str) -> bool {
+    let dir = session_logs_dir();
+    let canon_dir = std::fs::canonicalize(&dir).ok();
+    let inside = |p: &std::path::Path| {
+        p.starts_with(&dir) || canon_dir.as_deref().is_some_and(|d| p.starts_with(d))
+    };
+    let raw = std::path::Path::new(path);
+    inside(raw) || std::fs::canonicalize(raw).is_ok_and(|c| inside(&c))
+}
+
 
 /// The Aoide FLAKE root: the git checkout `nix eval` shells out against
 /// (`crate::widgets`'s rices manifest/registry regeneration, C4/W3) —
@@ -601,6 +616,69 @@ pub fn atomic_symlink(target: &std::path::Path, link: &std::path::Path) -> std::
 }
 
 
+/// A watch over the atomic writes of some paths. [`atomic_write_bytes`] runs
+/// its rename inside [`around_write`](WriteWatch::around_write) of every live
+/// watch registered for the path ([`watch_writes`]). A watch calls `rename`
+/// exactly once and returns its result. It never writes a watched path from
+/// inside `rename`, nor while it holds its own lock around the call.
+pub trait WriteWatch: Send + Sync {
+    /// Runs `rename` once, with whatever this watch does around the write of
+    /// `path`, and returns `rename`'s result.
+    fn around_write(
+        &self,
+        path: &std::path::Path,
+        rename: &mut dyn FnMut() -> std::io::Result<()>,
+    ) -> std::io::Result<()>;
+}
+
+/// Every registered watch, in registration order. A registration holds its
+/// watch weakly, so it lasts as long as the watch's last `Arc`.
+static WRITE_WATCHES: std::sync::Mutex<Vec<WriteWatchEntry>> = std::sync::Mutex::new(Vec::new());
+
+struct WriteWatchEntry {
+    paths: Vec<std::path::PathBuf>,
+    watch: std::sync::Weak<dyn WriteWatch>,
+}
+
+/// Registers `watch` for the atomic writes of `paths`. The registration lasts
+/// as long as the watch's last `Arc`; a dead entry is dropped by the next write
+/// that scans the registry.
+pub fn watch_writes(paths: Vec<std::path::PathBuf>, watch: std::sync::Weak<dyn WriteWatch>) {
+    WRITE_WATCHES
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .push(WriteWatchEntry { paths, watch });
+}
+
+/// The live watches registered for `path`, in registration order. The registry
+/// lock is released before any of them runs.
+fn live_write_watches(path: &std::path::Path) -> Vec<std::sync::Arc<dyn WriteWatch>> {
+    let mut registry = WRITE_WATCHES.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut live = Vec::new();
+    registry.retain(|entry| {
+        let Some(watch) = entry.watch.upgrade() else {
+            return false;
+        };
+        if entry.paths.iter().any(|p| p == path) {
+            live.push(watch);
+        }
+        true
+    });
+    live
+}
+
+/// Runs `rename` inside each of `watches`, the first one outermost.
+fn around_write_watches(
+    path: &std::path::Path,
+    watches: &[std::sync::Arc<dyn WriteWatch>],
+    rename: &mut dyn FnMut() -> std::io::Result<()>,
+) -> std::io::Result<()> {
+    match watches.split_first() {
+        None => rename(),
+        Some((first, rest)) => first.around_write(path, &mut || around_write_watches(path, rest, rename)),
+    }
+}
+
 /// Atomic write-temp-then-rename into a file within a directory —
 /// symlink-transparent: if `path` is CURRENTLY a symlink, the temp is
 /// renamed into whatever it points at instead, leaving the symlink itself
@@ -630,7 +708,8 @@ pub fn atomic_symlink(target: &std::path::Path, link: &std::path::Path) -> std::
 /// Bytes-oriented; [`atomic_write`] is the `&str` convenience wrapper every
 /// existing JSON/text caller uses. Binary payloads (a widget QML file carried
 /// verbatim into the runtime tree, `crate::widgets`-equivalent callers) route
-/// through here directly instead of paying a lossy UTF-8 round-trip.
+/// through here directly instead of paying a lossy UTF-8 round-trip. The rename
+/// runs inside the live [`WriteWatch`]es of `path` ([`watch_writes`]).
 pub fn atomic_write_bytes(path: &std::path::Path, contents: &[u8]) -> std::io::Result<()> {
     atomic_write_bytes_impl(path, contents, None)
 }
@@ -672,7 +751,10 @@ fn atomic_write_bytes_impl(
     // stranded that way is worse than one the rename left: the file it belongs to
     // may never be written again (an outbox entry is keyed by a msgid that occurs
     // once), so nothing would ever come back for it.
-    let res = write_temp_file(&tmp, contents, create_mode).and_then(|()| std::fs::rename(&tmp, &target));
+    let res = match write_temp_file(&tmp, contents, create_mode) {
+        Ok(()) => around_write_watches(path, &live_write_watches(path), &mut || std::fs::rename(&tmp, &target)),
+        Err(e) => Err(e),
+    };
     if res.is_err() {
         let _ = std::fs::remove_file(&tmp);
     }
@@ -1438,7 +1520,8 @@ impl Drop for HeldLock {
 
 /// Runs `f` under the CONDUCTING stage's lock (`state/stage/.stage.lock`, see
 /// [`conducting_stage_dir`]), held for the closure's duration. Every core writer
-/// of the six roster files and the `state/` records takes it.
+/// of the seven roster files (jobs.json among them) and the `state/` records
+/// takes it.
 ///
 /// Best-effort, and re-entrant on the thread that already holds it: a nested
 /// call runs its closure directly. Every other thread still waits, and two
@@ -3875,6 +3958,236 @@ mod tests {
             .filter(|n| n.contains(".tmp-"))
             .collect();
         assert!(leftovers.is_empty(), "temp links left behind: {leftovers:?}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Runs `f` with `AOIDE_STATE_DIR` at a fresh dir whose session logs dir
+    /// exists, and restores the variable after.
+    #[cfg(unix)]
+    fn with_session_logs<T>(name: &str, f: impl FnOnce(&std::path::Path) -> T) -> T {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        in_session_logs(name, f)
+    }
+
+    /// Restores `AOIDE_STATE_DIR` and removes the temp root when it drops, so a
+    /// closure that panics leaves neither set.
+    struct SessionLogsScope {
+        saved: Option<String>,
+        root: std::path::PathBuf,
+    }
+
+    impl Drop for SessionLogsScope {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.root);
+            match self.saved.take() {
+                Some(v) => std::env::set_var("AOIDE_STATE_DIR", v),
+                None => std::env::remove_var("AOIDE_STATE_DIR"),
+            }
+        }
+    }
+
+    /// The body of [`with_session_logs`], for a caller that already holds
+    /// `crate::env_lock()`.
+    fn in_session_logs<T>(name: &str, f: impl FnOnce(&std::path::Path) -> T) -> T {
+        let root = std::env::temp_dir().join(format!("aoide-inside-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let _scope = SessionLogsScope { saved: std::env::var("AOIDE_STATE_DIR").ok(), root: root.clone() };
+        std::env::set_var("AOIDE_STATE_DIR", root.join("state"));
+        std::fs::create_dir_all(super::session_logs_dir()).unwrap();
+        f(&root)
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_panicking_session_logs_scope_leaves_the_state_dir_as_it_was() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let before = std::env::var("AOIDE_STATE_DIR").ok();
+        for (name, set) in [("panics-set", Some("/sentinel/state")), ("panics-unset", None)] {
+            match set {
+                Some(v) => std::env::set_var("AOIDE_STATE_DIR", v),
+                None => std::env::remove_var("AOIDE_STATE_DIR"),
+            }
+            let root = std::env::temp_dir().join(format!("aoide-inside-{name}-{}", std::process::id()));
+            let caught = std::panic::catch_unwind(|| {
+                in_session_logs(name, |_| -> () { panic!("the closure panics") });
+            });
+            let after = std::env::var("AOIDE_STATE_DIR").ok();
+            let root_left = root.exists();
+            match &before {
+                Some(v) => std::env::set_var("AOIDE_STATE_DIR", v),
+                None => std::env::remove_var("AOIDE_STATE_DIR"),
+            }
+            assert!(caught.is_err(), "the closure panics");
+            assert_eq!(after.as_deref(), set, "a panic leaves the state dir as it was");
+            assert!(!root_left, "a panic leaves no temp root: {}", root.display());
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_raw_path_inside_the_session_logs_dir_is_inside() {
+        with_session_logs("raw", |_| {
+            let raw = super::session_logs_dir().join("t.log");
+            assert!(super::inside_session_logs(&raw.to_string_lossy()));
+        });
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_dotdot_path_that_comes_back_into_the_session_logs_dir_is_inside() {
+        with_session_logs("back-in", |_| {
+            let back = super::session_logs_dir().join("..").join("sessions").join("t.log");
+            assert!(super::inside_session_logs(&back.to_string_lossy()));
+        });
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symlink_into_the_session_logs_dir_is_inside() {
+        with_session_logs("link-in", |root| {
+            let target = super::session_logs_dir().join("t.log");
+            std::fs::write(&target, "").unwrap();
+            let link = root.join("elsewhere.log");
+            std::os::unix::fs::symlink(&target, &link).unwrap();
+            assert!(super::inside_session_logs(&link.to_string_lossy()));
+        });
+    }
+
+    /// Inside by its raw spelling, so a `..` that leaves the dir is refused.
+    #[cfg(unix)]
+    #[test]
+    fn a_dotdot_path_that_leaves_the_dir_is_inside_by_its_spelling() {
+        with_session_logs("leaves", |root| {
+            std::fs::write(root.join("state").join("elsewhere.log"), "").unwrap();
+            let leaves = super::session_logs_dir().join("..").join("elsewhere.log");
+            assert!(super::inside_session_logs(&leaves.to_string_lossy()));
+        });
+    }
+
+    // ── the write watch (`watch_writes`) ─────────────────────────────────────
+
+    /// Records the bytes at its path before and after each rename, and the kind
+    /// of any error the rename returned, which it passes on.
+    struct Spy {
+        calls: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+        seen: std::sync::Mutex<Vec<Option<Vec<u8>>>>,
+        rename_error: std::sync::Mutex<Option<std::io::ErrorKind>>,
+    }
+
+    impl super::WriteWatch for Spy {
+        fn around_write(
+            &self,
+            path: &std::path::Path,
+            rename: &mut dyn FnMut() -> std::io::Result<()>,
+        ) -> std::io::Result<()> {
+            self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            self.seen.lock().unwrap().push(std::fs::read(path).ok());
+            let result = rename();
+            if let Err(e) = &result {
+                *self.rename_error.lock().unwrap() = Some(e.kind());
+            }
+            self.seen.lock().unwrap().push(std::fs::read(path).ok());
+            result
+        }
+    }
+
+    /// A fresh scratch directory for one write-watch test.
+    fn watch_dir(tag: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("aoide-write-watch-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// Registers a [`Spy`] for `path` and returns it. The caller's `Arc` keeps
+    /// the registration alive.
+    fn spy_on(path: &std::path::Path, calls: &std::sync::Arc<std::sync::atomic::AtomicUsize>) -> std::sync::Arc<Spy> {
+        let spy = std::sync::Arc::new(Spy {
+            calls: std::sync::Arc::clone(calls),
+            seen: std::sync::Mutex::new(Vec::new()),
+            rename_error: std::sync::Mutex::new(None),
+        });
+        let watch: std::sync::Arc<dyn super::WriteWatch> = spy.clone();
+        super::watch_writes(vec![path.to_path_buf()], std::sync::Arc::downgrade(&watch));
+        spy
+    }
+
+    fn new_calls() -> std::sync::Arc<std::sync::atomic::AtomicUsize> {
+        std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0))
+    }
+
+    #[test]
+    fn a_write_to_a_watched_path_renames_inside_its_watch() {
+        let dir = watch_dir("renames");
+        let path = dir.join("watched.json");
+        super::atomic_write(&path, "old").unwrap();
+        let calls = new_calls();
+        let spy = spy_on(&path, &calls);
+
+        super::atomic_write(&path, "new").unwrap();
+
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert_eq!(*spy.seen.lock().unwrap(), vec![Some(b"old".to_vec()), Some(b"new".to_vec())]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_write_to_an_unwatched_path_never_calls_the_watch() {
+        let dir = watch_dir("unwatched");
+        let calls = new_calls();
+        let _spy = spy_on(&dir.join("watched.json"), &calls);
+
+        super::atomic_write(&dir.join("other.json"), "bytes").unwrap();
+
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_dropped_write_watch_is_never_called_again() {
+        let dir = watch_dir("dropped");
+        let path = dir.join("watched.json");
+        let calls = new_calls();
+        let spy = spy_on(&path, &calls);
+        super::atomic_write(&path, "first").unwrap();
+        drop(spy);
+
+        super::atomic_write(&path, "second").unwrap();
+
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_write_whose_temp_cannot_be_created_never_calls_its_watch() {
+        let dir = watch_dir("no-temp");
+        let path = dir.join("blocked.json");
+        // The temp is `<stem>.tmp.<pid>`; a directory of that name makes the
+        // create fail.
+        std::fs::create_dir_all(dir.join(format!("blocked.tmp.{}", std::process::id()))).unwrap();
+        let calls = new_calls();
+        let _spy = spy_on(&path, &calls);
+
+        assert!(super::atomic_write(&path, "x").is_err());
+
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_failed_rename_returns_its_error_through_its_watch() {
+        let dir = watch_dir("failed-rename");
+        // A file cannot be renamed onto a directory, so the rename fails after
+        // the temp is written.
+        let path = dir.join("is-a-dir");
+        std::fs::create_dir_all(&path).unwrap();
+        let calls = new_calls();
+        let spy = spy_on(&path, &calls);
+
+        let err = super::atomic_write(&path, "x").expect_err("a rename onto a directory must fail");
+
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert_eq!(*spy.rename_error.lock().unwrap(), Some(err.kind()));
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

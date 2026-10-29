@@ -13,6 +13,7 @@ pub mod host_shell;
 /// `BCryptGenRandom` on native Windows) — no pool, no fallback.
 pub mod host_random;
 pub mod invocation;
+pub mod local_socket;
 pub mod model;
 /// The owner-only policy a native-Windows core attaches to a private file or
 /// directory — one implementation for `feed`'s writer and `aoide-storage`'s
@@ -32,8 +33,11 @@ pub mod win_proc;
 #[cfg(windows)]
 pub mod win_unix;
 pub mod pick;
+pub mod peercred;
 pub mod policy;
 pub mod registry;
+/// The shellbridge socket framework: the loop every bridge socket runs, and its cross-uid floor.
+pub mod shellbridge;
 pub mod state;
 pub mod style;
 pub mod suggest;

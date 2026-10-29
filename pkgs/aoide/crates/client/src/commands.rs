@@ -2275,6 +2275,7 @@ pub fn register_nodes(r: &mut Registry) {
         handler: handle_node_spawn,
         examples: ["node spawn yomi-strix -- status check please"],
         brief: "Start a session on a paired node and type its first turn.",
+        approves: true, launches: true,
     ));
 }
 
@@ -5014,6 +5015,7 @@ pub fn register_mail_send(r: &mut Registry) {
         handler: handle_mail_send,
         examples: ["mail send --to self/conductor -- status?", "mail send --to yomi-strix/conductor -- build finished"],
         brief: "Send a letter to self/<name> or to <node>/<name>.",
+        approves: true,
     ));
 }
 
@@ -5300,6 +5302,12 @@ fn held_delivery() -> Value {
     delivery_shape("held", None, Some("entry"), None, false)
 }
 
+/// What a build before ruling 131 left a receipt as. No node dials one now, so
+/// the next daemon tick drops it. The projection and the retry answer both say
+/// these words.
+const PRE_131_RECEIPT: &str =
+    "a build before ruling 131 spooled it; no node dials a receipt now, and the next daemon tick drops it";
+
 /// An own letter a build before ruling 131 left in the spool: the next daemon
 /// tick drops it ([`own_letter_delivery`]).
 fn pre_131_delivery() -> Value {
@@ -5312,13 +5320,20 @@ fn pre_131_delivery() -> Value {
     )
 }
 
+/// A receipt entry, whatever its flags, reads as [`PRE_131_RECEIPT`].
+fn pre_131_receipt_delivery() -> Value {
+    delivery_shape("pre-131", Some(PRE_131_RECEIPT.to_string()), Some("entry"), None, false)
+}
+
 /// One outbox entry's delivery status, joined with its node's own link
 /// state (MAIL.md "Outbox" / "Status and the nodelist view") — the ONE
 /// projection `mail outbox` and its retries render from, so they can never
 /// drift on what "queued"/"retrying"/etc. mean. An own letter has three states
-/// of its own (see [`own_letter_delivery`]). Vocabulary, in precedence order:
+/// of its own (see [`own_letter_delivery`]), and a receipt is always
+/// `pre-131` (see [`pre_131_receipt_delivery`]). The rest, in precedence
+/// order:
 ///
-/// - `refused` (`entry.refused`) beats everything else outright —
+/// - `refused` (`entry.refused`) beats every state below it outright —
 ///   automatic retries have already stopped for this one entry.
 /// - `delivered`: a real, destination-signed ack already sits in this
 ///   box's own mailbase for this exact msgid ([`has_delivered_ack`]) —
@@ -5355,6 +5370,9 @@ fn delivery_projection(
             return delivery_shape("delivered", None, None, None, false);
         }
         return own_letter_delivery(entry);
+    }
+    if entry.envelope.header.kind == aoide_storage::mail::ENTRY_TYPE_RECEIPT {
+        return pre_131_receipt_delivery();
     }
     if entry.refused {
         return delivery_shape("refused", crate::mail_wire::outcome_line(&entry.last_outcome), Some("entry"), None, false);
@@ -6368,8 +6386,8 @@ fn outbox_msgids() -> Vec<String> {
     ids
 }
 
-/// `aoide mail outbox rm <msgid> [--json]` — explicit retirement (spec item
-/// 7's other half, beside a valid ack). Searches every node's spool for
+/// `aoide mail outbox rm <msgid> [--json]` — explicit retirement by the
+/// operator, with no receipt needed. Searches every node's spool for
 /// `msgid`; in practice at most one holds it, since an entry always lives
 /// under the exact node its own `to.node` named at spool time.
 fn handle_mail_outbox_rm(inv: &Invocation) -> Outcome {
@@ -6421,6 +6439,9 @@ fn unknown_outbox_msgid(inv: &Invocation, cmd: &str, msgid: &str) -> Outcome {
 /// same bytes ([`resend_returned_letter`]), and refuses a held one
 /// ([`retry_own_letter`]).
 ///
+/// A receipt is not un-parked and not drained: no node dials one (ruling 131),
+/// so the answer is `pre-131` ([`PRE_131_RECEIPT`]).
+///
 /// `--refused` is the sweep: every currently parked entry for the named node,
 /// or for every node with an outbox when no node is named. An entry that
 /// vanishes mid-sweep (a concurrent `mail outbox rm`, or a real ack) simply
@@ -6457,6 +6478,10 @@ fn handle_mail_outbox_retry(inv: &Invocation) -> Outcome {
         let Some(entry) = entries.iter().find(|e| e.envelope.msgid == msgid) else { continue };
         if entry.envelope.header.kind == aoide_storage::mail::ENTRY_TYPE_LETTER {
             return retry_own_letter(cmd, node, entry.clone());
+        }
+        if entry.envelope.header.kind == aoide_storage::mail::ENTRY_TYPE_RECEIPT {
+            return Outcome::ok(cmd, format!("{msgid} is not retried — {PRE_131_RECEIPT}"))
+                .with_data(json!({ "reason": "pre-131", "node": node, "msgid": msgid }));
         }
         if !entry.refused {
             return Outcome::ok(cmd, format!("{msgid} is not parked — a drain already attempts it"))
@@ -6765,22 +6790,21 @@ fn retry_refused_entries(cmd: &str, target: Option<&str>) -> Outcome {
     let mut per_node: Vec<Value> = Vec::new();
     for node in &nodes {
         // The parked set is read BEFORE the un-park so the report can say which
-        // entries were retried, and whether a vanished one was a receipt —
-        // whose own confirmed deposit IS its confirmation (ruling 4), the one
-        // case an absence legitimately means delivered.
+        // entries were retried.
         let entries = match aoide_storage::outbox::list_entries(node) {
             Ok(es) => es,
             Err(e) => return teach::store_failed(cmd, "state/outbox", &e),
         };
-        let (letters, others): (Vec<_>, Vec<_>) = entries
+        let (letters, rest): (Vec<_>, Vec<_>) = entries
             .into_iter()
             .filter(|e| e.refused)
             .partition(|e| e.envelope.header.kind == aoide_storage::mail::ENTRY_TYPE_LETTER);
-        let parked: Vec<(String, bool)> = others
+        // A parked receipt is neither un-parked nor drained: no node dials one.
+        let (receipts, others): (Vec<_>, Vec<_>) = rest
             .into_iter()
-            .map(|e| (e.envelope.msgid, e.envelope.header.kind == aoide_storage::mail::ENTRY_TYPE_RECEIPT))
-            .collect();
-        if parked.is_empty() && letters.is_empty() {
+            .partition(|e| e.envelope.header.kind == aoide_storage::mail::ENTRY_TYPE_RECEIPT);
+        let parked: Vec<String> = others.into_iter().map(|e| e.envelope.msgid).collect();
+        if parked.is_empty() && letters.is_empty() && receipts.is_empty() {
             continue;
         }
         let mut rows: Vec<Value> = Vec::new();
@@ -6804,6 +6828,10 @@ fn retry_refused_entries(cmd: &str, target: Option<&str>) -> Outcome {
             }
             resent += 1;
         }
+        for receipt in receipts {
+            rows.push(json!({ "msgid": receipt.envelope.msgid, "delivery": pre_131_receipt_delivery() }));
+            left += 1;
+        }
         let mut unparked = 0usize;
         if !parked.is_empty() {
             unparked = match aoide_storage::outbox::unpark_refused(node) {
@@ -6814,16 +6842,14 @@ fn retry_refused_entries(cmd: &str, target: Option<&str>) -> Outcome {
             // ONE post-drain read for the whole node, never one per entry — the
             // same single-read discipline `handle_mail_outbox` holds.
             let after = aoide_storage::outbox::list_entries(node);
-            for (msgid, was_receipt) in &parked {
+            for msgid in &parked {
                 let delivery = match &drain {
                     Err(e) => delivery_shape("failed", Some(e.clone()), Some("local"), None, false),
                     Ok(()) => match &after {
                         Ok(now) if now.iter().any(|e| e.envelope.msgid == *msgid) => post_send_delivery(node, msgid),
-                        // Gone from the spool: a receipt's own successful
-                        // deposit removes it outright, so that IS delivery;
-                        // anything else vanishing is not read from an absence
-                        // (the rule `post_send_delivery` holds).
-                        Ok(_) if *was_receipt => delivery_shape("delivered", None, None, None, false),
+                        // Gone from the spool is not read as delivered: an
+                        // absence is never a verdict (the rule `post_send_delivery`
+                        // holds).
                         Ok(_) => delivery_status_unavailable("entry no longer spooled"),
                         Err(e) => delivery_status_unavailable(e),
                     },
@@ -11472,9 +11498,9 @@ mod tests {
     /// via `mail poll`.** This is the case `poll-on-contact` cannot reach —
     /// an empty outbox has no dial, so no contact, so no poll (the drain's
     /// own doc says so) — and it is the relay model's only receive path. The
-    /// poll files the envelope through the same chain a pushed deposit gets
-    /// and spools the ack back toward its origin, exactly as the hand-over
-    /// would if a drain had carried it.
+    /// poll files the envelope through the same chain a pushed deposit gets,
+    /// and owes its origin nothing: the filed letter is its own answer
+    /// (ruling 131), so no receipt is minted or spooled back.
     #[test]
     fn mail_poll_receives_a_held_letter_with_nothing_to_send() {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -11484,8 +11510,8 @@ mod tests {
         // identity and stamped `from.node = local_host_name()`, so the
         // ORIGIN record this box must hold is one named exactly that (the
         // same one-process-plays-both-roles shortcut `mail_wire`'s own tests
-        // document). Its url points nowhere: the ack this poll spools has to
-        // STAY spooled for the assertion below.
+        // document). Its url points nowhere, so the sweep's own ask of it is
+        // reported unreachable below.
         let me = aoide_storage::display::local_node_name();
         let (kp, _) = aoide_storage::identity::load_or_mint().unwrap();
         aoide_storage::mail::box_add("conductor").unwrap();
@@ -11534,8 +11560,7 @@ mod tests {
         assert_eq!(base[0].via, "relay", "via is the node that was polled");
 
         let acks = aoide_storage::outbox::list_entries(&me).unwrap();
-        assert_eq!(acks.len(), 1, "and its ack is spooled back toward the origin");
-        assert_eq!(acks[0].envelope.header.kind, aoide_storage::mail::ENTRY_TYPE_RECEIPT);
+        assert!(acks.is_empty(), "and no receipt is spooled back toward the origin (ruling 131)");
 
         drop(listener);
         let _ = std::fs::remove_dir_all(&root);
@@ -11826,6 +11851,38 @@ mod tests {
         assert_eq!(outcome, aoide_storage::mail::DepositOutcome::BadMsgid);
         let base = aoide_storage::mail::read_base().unwrap();
         assert_ne!(delivery_projection(&base, &node_name, &entry, None)["status"], "delivered");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// **An unverified or tampered receipt retires no spooled letter, through
+    /// the whole deposit (ruling 131).** Each receipt goes through
+    /// `mail::deposit` and then `settle_deposit` with the outcome deposit
+    /// returned, and the letter stays spooled after each.
+    #[test]
+    fn an_unverified_or_tampered_receipt_retires_no_spooled_letter() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, root) = aoide_test_support::isolated_mail_root("settle-unverified-receipt");
+
+        let node_name = aoide_storage::display::local_node_name();
+        let letter = aoide_storage::mail::mint_outbound_letter("here", &node_name, "bob", "hi").unwrap();
+        let msgid = letter.msgid.clone();
+        aoide_storage::outbox::write_entry(&node_name, &aoide_storage::outbox::OutboxEntry::fresh(letter)).unwrap();
+
+        // No node is registered, so the signer has no key on record.
+        let to = aoide_storage::mail::Address { node: "origin".to_string(), name: "alice".to_string() };
+        let unrecorded = aoide_storage::mail::mint_ack("bob", to.clone(), &msgid).unwrap();
+        let outcome = aoide_storage::mail::deposit(unrecorded.clone(), "test").unwrap();
+        assert_eq!(outcome, aoide_storage::mail::DepositOutcome::UnverifiedOrigin);
+        crate::mail_wire::settle_deposit(&unrecorded, &outcome);
+        assert_eq!(aoide_storage::outbox::list_entries(&node_name).unwrap().len(), 1, "an unrecorded signer retires nothing");
+
+        let mut tampered = aoide_storage::mail::mint_ack("bob", to, &msgid).unwrap();
+        tampered.text = "not-the-real-msgid".to_string();
+        let outcome = aoide_storage::mail::deposit(tampered.clone(), "test").unwrap();
+        assert_eq!(outcome, aoide_storage::mail::DepositOutcome::BadMsgid);
+        crate::mail_wire::settle_deposit(&tampered, &outcome);
+        assert_eq!(aoide_storage::outbox::list_entries(&node_name).unwrap().len(), 1, "a tampered receipt retires nothing");
 
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -12618,6 +12675,29 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    /// **A receipt entry projects as pre-131, whatever its flags
+    /// (ruling 131).** No node dials a receipt now, so none of its statuses
+    /// is a delivery state: the next daemon tick drops it.
+    #[test]
+    fn a_receipt_entry_projects_as_pre_131_whatever_its_flags() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, root) = aoide_test_support::isolated_mail_root("delivery-receipt-pre-131");
+        let to = aoide_storage::mail::Address { node: "peer-node".to_string(), name: "alice".to_string() };
+        let receipt = aoide_storage::mail::mint_ack("bob", to, &"ab".repeat(32)).unwrap();
+        let fresh = aoide_storage::outbox::OutboxEntry::fresh(receipt.clone());
+        let mut refused = aoide_storage::outbox::OutboxEntry::fresh(receipt);
+        refused.refused = true;
+        refused.tries = 1;
+        refused.last_outcome = "refused: bad-msgid".to_string();
+
+        for entry in [&fresh, &refused] {
+            let shown = delivery_projection(&[], "peer-node", entry, None);
+            assert_eq!(shown["status"], "pre-131", "{shown}");
+        }
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     /// **An own letter projects as held, returned or pre-131, or as delivered
     /// once a genuine receipt for it is filed.** The link's back-off and the
     /// entry's own outcome say nothing about a letter, which the drain never
@@ -12748,6 +12828,71 @@ mod tests {
         assert_eq!(retry.data.as_ref().unwrap()["delivery"]["status"], "delivered", "{:?}", retry.data);
         assert!(aoide_storage::outbox::list_entries("peer-node").unwrap().is_empty(), "delivered, so the box keeps nothing");
         assert_eq!(deposits_heard(&seen).len(), 1, "one retry, one dial");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// **A retry sweep leaves a parked receipt parked, and reports it pre-131
+    /// (ruling 131).** A receipt is never dialled or un-parked, so the sweep
+    /// neither drains its node for it nor clears its flag. Its row is its
+    /// status, and the tick drops it.
+    #[test]
+    fn a_refused_retry_sweep_leaves_a_parked_receipt_parked_as_pre_131() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, root) = aoide_test_support::isolated_mail_root("mail-refused-receipt");
+        let accepted = r#"{"jsonrpc":"2.0","id":1,"result":{"status":"accepted"}}"#;
+        let (_door, port, seen) = spawn_recording_door(accepted.to_string());
+        aoide_storage::node_store::save_nodes(&[verified_node("peer-node", &format!("http://127.0.0.1:{port}/"))]).unwrap();
+        // Addressed to peer-node, where it is spooled: a direct entry, sealed to
+        // peer-node's binding, so the retry's drain would dial it if it could.
+        aoide_storage::seal::learn_binding("peer-node", &aoide_storage::seal::publish_binding().unwrap()).unwrap();
+        let to = aoide_storage::mail::Address { node: "peer-node".to_string(), name: "alice".to_string() };
+        let receipt = aoide_storage::mail::mint_ack("bob", to, &"ab".repeat(32)).unwrap();
+        let mut parked = aoide_storage::outbox::OutboxEntry::fresh(receipt);
+        parked.refused = true;
+        parked.tries = 1;
+        parked.last_outcome = "refused: bad-msgid".to_string();
+        aoide_storage::outbox::write_entry("peer-node", &parked).unwrap();
+
+        let sweep = handle_mail_outbox_retry(&mail_inv_with_flag(&["mail", "outbox", "retry"], &[], "refused"));
+        assert_eq!(sweep.status, aoide_protocol::output::Status::Ok, "msg: {}", said(&sweep));
+        assert!(deposits_heard(&seen).is_empty(), "a receipt is never dialled by a sweep");
+        let data = sweep.data.as_ref().unwrap();
+        assert_eq!(data["nodes"][0]["retries"][0]["delivery"]["status"], "pre-131", "{data}");
+        assert_eq!(data["nodes"][0]["left"], 1, "the receipt is left in place: {data}");
+        assert_eq!(data["unparked"], 0, "the sweep un-parks no receipt: {data}");
+        let kept = aoide_storage::outbox::list_entries("peer-node").unwrap();
+        assert!(kept.len() == 1 && kept[0].refused, "it stays parked for the tick: {kept:?}");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// **A retry on a parked receipt answers pre-131 and leaves it parked
+    /// (ruling 131).** A receipt is never retried: no un-park and no dial,
+    /// so no change.
+    #[test]
+    fn a_retry_on_a_parked_receipt_answers_pre_131_and_leaves_it_parked() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, root) = aoide_test_support::isolated_mail_root("mail-retry-parked-receipt");
+        let accepted = r#"{"jsonrpc":"2.0","id":1,"result":{"status":"accepted"}}"#;
+        let (_door, port, seen) = spawn_recording_door(accepted.to_string());
+        aoide_storage::node_store::save_nodes(&[verified_node("peer-node", &format!("http://127.0.0.1:{port}/"))]).unwrap();
+        let to = aoide_storage::mail::Address { node: "peer-node".to_string(), name: "alice".to_string() };
+        let receipt = aoide_storage::mail::mint_ack("bob", to, &"ab".repeat(32)).unwrap();
+        let msgid = receipt.msgid.clone();
+        let mut parked = aoide_storage::outbox::OutboxEntry::fresh(receipt);
+        parked.refused = true;
+        parked.tries = 1;
+        parked.last_outcome = "refused: bad-msgid".to_string();
+        aoide_storage::outbox::write_entry("peer-node", &parked).unwrap();
+
+        let retry = handle_mail_outbox_retry(&mail_inv(&["mail", "outbox", "retry"], &[msgid.as_str()]));
+        assert_eq!(retry.status, aoide_protocol::output::Status::Ok, "msg: {}", said(&retry));
+        assert_eq!(retry.data.as_ref().unwrap()["reason"], "pre-131", "{:?}", retry.data);
+        assert!(retry.changed.is_empty(), "nothing is changed: {:?}", retry.changed);
+        assert!(deposits_heard(&seen).is_empty(), "a receipt is never dialled by a retry");
+        let kept = aoide_storage::outbox::list_entries("peer-node").unwrap();
+        assert!(kept.len() == 1 && kept[0].refused, "it stays parked: {kept:?}");
 
         let _ = std::fs::remove_dir_all(&root);
     }

@@ -62,7 +62,6 @@ use std::os::unix::net::UnixStream;
 use aoide_protocol::win_unix::UnixStream;
 use std::path::Path;
 use std::path::PathBuf;
-use std::sync::mpsc;
 use std::time::Duration;
 
 // ── the process facts: `/proc` on Unix, `win_proc` on Windows ────────────
@@ -327,33 +326,20 @@ pub fn daemon_socket_path() -> PathBuf {
     runtime.join("aoided.sock")
 }
 
-/// Bound a local-socket connect with a background-thread-plus-channel race
-/// (moved from `aoide_client::daemon`, same mechanism, same doc): `None`
-/// when the connect fails or `timeout` elapses first — including the racer
-/// thread failing to spawn at all, treated as "no daemon."
+/// The bounded unix connect, as an `Option`: `None` when the connect fails or
+/// `timeout` passes first. It is protocol's
+/// [`aoide_protocol::local_socket::connect_bounded`], so no thread is left
+/// behind: the connect never blocks past `timeout`.
 ///
-/// **One seam, two hosts, the same mechanism**: `UnixStream` is `std`'s on
-/// Unix and `aoide_protocol::win_unix`'s native `AF_UNIX` on Windows, so the
-/// body below — the thread, the channel, the timeout — is not host-split at
-/// all. [`daemon_seal_pubkey_hex`] therefore answers on BOTH hosts, and the
-/// "unreachable daemon" `None` covers "no daemon", "a daemon that cannot be
-/// reached" and a socket path whose directory does not exist as ONE answer
-/// rather than three shapes a caller would have to tell apart.
+/// **One seam, two hosts**: the body is not host-split. Protocol's connect has
+/// a Unix arm and a Windows arm, `UnixStream` being `std`'s on Unix and
+/// `aoide_protocol::win_unix`'s native `AF_UNIX` on Windows, so
+/// [`daemon_seal_pubkey_hex`] answers on BOTH hosts. The "unreachable daemon"
+/// `None` covers "no daemon", "a daemon that cannot be reached" and a socket
+/// path whose directory does not exist as ONE answer rather than three shapes
+/// a caller would have to tell apart.
 pub fn connect_bounded(socket_path: &Path, timeout: Duration) -> Option<UnixStream> {
-    let (tx, rx) = mpsc::channel();
-    let sp = socket_path.to_path_buf();
-    if std::thread::Builder::new()
-        .spawn(move || {
-            let _ = tx.send(UnixStream::connect(&sp));
-        })
-        .is_err()
-    {
-        return None; // Could not even spawn the racer thread — treat as "no daemon."
-    }
-    match rx.recv_timeout(timeout) {
-        Ok(Ok(stream)) => Some(stream),
-        Ok(Err(_)) | Err(_) => None,
-    }
+    aoide_protocol::local_socket::connect_bounded(socket_path, timeout).ok()
 }
 
 /// The daemon's CURRENT seal-signing public key, fetched fresh over a

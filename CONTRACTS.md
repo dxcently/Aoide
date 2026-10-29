@@ -684,6 +684,22 @@ Contract guarantees:
   is not a second
   `implemented`-style capability filter, it is purely a display hint for one
   consumer.
+- `approves` and `launches` (optional bools, default omitted = `false`) — the
+  marks the desktop app reads to refuse a grant that names the verb. `approves`
+  is set on a verb that approves or denies a hold, re-parents, answers for a
+  person, or types into a session, or that reaches a check that refuses a door
+  that cannot approve. `launches` is set on a verb that starts an agent, or arms
+  a timer, a sweep or a listener that starts a program later. The desktop app's
+  floor also refuses six classes by name: the custody, trust and self-change
+  verbs, Melete's tools, Mneme's writes and any Eidolon exec. The verbs among
+  them carry neither mark, even where a rule fits one. The floor refuses, too, a
+  grant for any call that carries `--node` or `--typed`. A verb is marked for
+  what its own handler does: an action it hands to the dispatcher carries the
+  marks of the verb it dispatches. `schema --json` shows which verbs carry each
+  mark, and the golden snapshots in cli/src/registry.rs pin them. **Additive**,
+  same discipline as `internal`: each key is omitted entirely when `false`, so
+  an unmarked command serializes byte-identical to before. `Command::check`
+  reads neither mark.
 - `doors` (optional string array on a command, and on a flag) — the doors that
   may call the command, from `cli`, `daemon`, `mcp`, `a2a`. **Additive**, same
   discipline: omitted from `schema --json` when it is the default `["cli",
@@ -752,7 +768,9 @@ Contract guarantees:
   never at the MCP, A2A or aoided-socket doors, where an outcome is data;
   the global `--color=auto|always|never` (also `--color <mode>`), read once by
   the CLI door before parsing and ignored after a bare `--`, overrides the
-  environment but never `--json`.
+  environment but never `--json`. The trace's dim (`session trace`) follows this
+  rule, except that `--color` does not reach it: the trace builds its text
+  before the door renders.
 - **Exit codes and the refusal shape.** `2` means the invocation can never be
   valid whatever the world looks like: a missing, unknown or ill-typed
   argument, flag or value, or a command typed at the wrong binary (`strx spawn …` names `aoide spawn …`
@@ -852,9 +870,10 @@ count.
   backends" section for the full flow; `events tail`, appended newest, P-D3
   (`docs/architecture/AOIDED.md`) — a foreground, line-mode follow of
   `aoided`'s own events feed (the secrets-feed mirror's name-only lines,
-  the #69 hand-edit watcher, and any future tick producer), `--class`
-  filtering to matching event classes (comma-separated), blocking until
-  Ctrl-C; CLI-only, the same door-policy shape `secrets watch` already holds
+  the #69 hand-edit watcher and its `state` cues, and any future tick
+  producer), `--class` filtering to matching event classes (comma-
+  separated), blocking until Ctrl-C; CLI-only, the same door-policy shape
+  `secrets watch` already holds
   for a foreground/blocking command — see `crates/server/README.md`'s
   "Named seams" section for the producer/tail mechanism; `node hub`,
   appended newest, P-D5 (`docs/architecture/AOIDED.md`'s "The hub option")
@@ -908,7 +927,9 @@ count.
   idle session included), `not-ready` (nothing typed), `skipped-unregistered`
   (no live pty) or `failed: <reason>` (the send failed).
   An idle session delivers nothing, its cwd
-  alone is restored. Also the command core the daemon's own boot-time
+  alone is restored. `--dry-run` lists the rows the same invocation would
+  act on and launches, holds and sends nothing; its data is in the bare
+  `resurrect` section below. Also the command core the daemon's own boot-time
   auto-resume trigger calls in-process — see `state/stage/projects.json`'s
   `autoResume` paragraph below for that trigger's own contract. `identity`,
   appended newest, P-P1 (`docs/architecture/PAIRING.md`) — this instance's
@@ -1257,6 +1278,49 @@ other argv, and so is any argv the walk does not recognise. Held entries launch
 only through `pending approve` on a human door. Nothing is refused outright. A launched harness is an agent with its
 own shell, so it can steer its own child; that residual is accepted.
 
+### The `state` cue on aoided's events feed
+
+Every stage file `aoided` watches (the seven in `daemon::stage_roster`) raises
+a `class:"state"` line when its `(mtime, len)` moves, whoever moved it: a hand
+edit (which also raises its `hand-edit` audit line), a dispatched write, or the
+tick's own reconcile, seal and reap writes. The line keeps the feed's usual
+envelope:
+
+```json
+{"v":0,"ts":1756100000,"class":"state","kind":"changed","source":"aoided","payload":{"files":["sessions.json"]}}
+```
+
+`payload.files` names the file by base name, as a `hand-edit` line's
+`payload.file` does. The line is a cue to re-read and is name-only: it says
+that the file changed, never what changed. A subscriber receives it through
+`subscribe` with `"classes":["state"]`, and `aoide events tail --class state
+--json` prints it verbatim.
+
+Coalescing is per file: at most one `state` line per file per second. A change
+that lands inside that second writes nothing at once. The first observation
+after the second closes writes one line for the file: a sweep (the tick's), or
+the next atomic write of that file through aoided's write seam, so a burst
+cannot flood the feed. A write that changes two files raises one line for each,
+so one `session start`, which writes `sessions.json` and `graph.json`, raises
+two.
+
+A change `aoided` did not make keeps its `hand-edit` line, and so does a foreign
+write that one of `aoided`'s own writes then replaces. The watcher sees a change
+as a move in a file's length or mtime, so it misses a write that keeps both: a
+same-uid writer can set the mtime back. It sees only what happens while it is
+registered. A write made while `aoided` is down, or at start before the watcher
+registers, is part of its first baseline and raises no line: the start-up
+migration, and the seed of an absent or corrupt `sessions.json` or `hooks.json`,
+which keeps no copy of the file it replaces. One race remains: a foreign write
+that lands between the watcher's check and its fold, around the rename of
+`aoided`'s own write, is folded, with one `state` line and no `hand-edit` line.
+
+While `aoided` runs, no change the watcher sees is lost to the state cue: each
+change is written as a line or owed to one. Its watcher starts from what is on
+disk, so a consumer re-reads every file when it attaches.
+An unfiltered `aoide events tail` prints every class, `state` included; the
+`state` cue is what `--class state` prints.
+
 ---
 
 ## 4. Stage file formats — **v0**
@@ -1273,12 +1337,12 @@ applied to the stage tree itself):
   (`apps.json`; the `aoide-apps` user unit that keeps it current is planned) and QML itself
   (`grimoire.json`); read by Quickshell. This is strillix's tree.
 - **`state/stage/`** — CONDUCTING state: `sessions.json`, `hooks.json`,
-  `projects.json`, `graph.json`, `pending.json`, `notifications.json`. Written by
-  shellbridge and the `aoide`/`aoided` binaries (`aoide graph`, `aoide
-  notifications`); read by the conductor TUI and by Quickshell. This is core's
-  tree — the `aoide`/`aoided` binaries alone read and write it, never
-  `strillix`, and QML READS it (display only, CONTRACTS.md §0's corollary) but
-  never writes it.
+  `projects.json`, `graph.json`, `pending.json`, `notifications.json`,
+  `jobs.json`. Written by shellbridge and the `aoide`/`aoided` binaries
+  (`aoide graph`, `aoide notifications`, `aoide job`); read by the conductor TUI
+  and by Quickshell. This is core's tree — the `aoide`/`aoided` binaries alone
+  read and write it, never `strillix`, and QML READS it (display only,
+  CONTRACTS.md §0's corollary) but never writes it.
 
 `state/` is owner-only and is the privacy boundary for everything under it;
 file and subdirectory modes inside it are not relied on. Every storage write
@@ -3681,18 +3745,15 @@ every one of them the OPERATOR's own uid, none of them the daemon's;
 `aoided`'s dispatch socket serves the CLI's own `daemon_dispatch` proxy (a
 session-write handler trying the resident daemon before its direct
 stage-write fallback) and any other same-uid caller of `aoide` itself.
-`aoide_conduct::shellbridge::serve` and `aoide_server::daemon::accept_loop`
-both now read `SO_PEERCRED` on accept (`aoide_conduct::graph::
-identity::peer_cred`, widened `pub(crate)` from `pub(in crate::graph)` so
-`shellbridge.rs` — a sibling of `graph`, not a descendant — reuses it
-rather than a second reimplementation; `aoide-server` reuses
-`aoide_secrets::peercred` instead, already `pub`, already a dependency, so
-no widening needed there) and refuse a connection outright — never
-forwarded — whose peer uid does not match the process's own euid,
-fail-closed exactly like the secrets broker's `admin_gate` on an
-unidentified peer (`cross_uid_gate`, restated identically in both files,
-pure and unit-tested without a real different-uid connection). **This is a
-CROSS-uid floor, not a same-uid guarantee** — under OQ1-A every legitimate
+`aoide_protocol::shellbridge::serve` and `aoide_server::daemon::accept_loop`
+both read `SO_PEERCRED` on accept through `aoide_protocol::peercred::
+peer_cred`, the one copy every identity gate shares (`aoide-secrets`
+re-exports it). Both refuse a connection outright, never forwarded, whose
+peer uid does not match the process's own euid, fail-closed exactly like the
+secrets broker's `admin_gate` on an unidentified peer. The bridge's floor is
+`aoide_protocol::shellbridge::cross_uid_gate`, pure and unit-tested without a
+real different-uid connection; `aoide-server` keeps its own gate in
+`daemon.rs`. **This is a CROSS-uid floor, not a same-uid guarantee** — under OQ1-A every legitimate
 connector named above already runs as the SAME uid a prompt-injected agent
 would, so a same-uid process forging `{"cmd":"notificationsverdict",...}` on
 shellbridge's socket, or a raw `{"op":"dispatch","path":["send"],...}` on
@@ -3910,14 +3971,20 @@ listing `--after` — before each export, without caching the answer. An
 unavailable or negative answer prevents that export. Probe and export are
 separate invocations; replacing the runtime between them can still race.
 
-`state/stage/sessions.json`'s own record for such a session does not carry
-any path — the trace is resolved through the producer's presence metadata at
+The record in `state/stage/sessions.json` for such a session carries its
+`logPath`: for a session enrolled from its presence, the journal the session
+named; for a conducted session, its wrapper log, `session_logs_dir()/<id>.log`,
+which is never a journal. `aoide session trace` takes its sources in order: the
+presence metadata at
 `$XDG_RUNTIME_DIR/eidolon/<id>/meta.json`, whose `log` field every generation
-writes and whose `trace` field the installed one adds. Aoide's presence parse
-yields both, and `aoide_protocol::agents::eidolon_transcript_locate` answers the
-mirror while it is current, else the journal when the door is there, else
-`meta.json` as before. `aoide session trace` resolves a path
-the same way, through `TranscriptSpec::locate` — never a path of its own.
+writes and whose `trace` field the installed one adds; then the record's
+`logPath`, or, for a session that has left the roster, the newest exact ledger
+line's `logPath`. Each `logPath` is a source only outside `session_logs_dir()`.
+Aoide's presence parse yields both, and
+`aoide_protocol::agents::eidolon_transcript_locate` answers the mirror while it
+is current, else the journal when the door is there, else `meta.json`.
+`aoide session trace` resolves a path the same way, through
+`TranscriptSpec::locate` — never a path of its own.
 
 **Line.** `serde_json::to_string(&Record)` + `\n` — the record's own serde
 form, which `Record`/`RecordKind` already derive, so the shape is not
@@ -3973,10 +4040,15 @@ shows its thinking (dimmed, cut) then its text then each `→ tool(name)`, a
 tool result shows its first line prefixed `!` when `is_error`, and a settled
 turn shows its stop reason and input/output tokens. `--tail N` shows the
 last N records (default 50); `--follow` re-reads for new lines until Ctrl-C
-(CLI-only); `--json` passes the raw lines through unchanged. Read-only — no
+(CLI-only); `--json` carries `data.lines`, the journal's own JSON lines: raw
+unsafe characters removed, JSON escapes kept, so a decoded line holds untrusted
+strings, and a consumer shows `data.steps`. Read-only — no
 stage write, no daemon. A session whose harness keeps no trace, or whose
 presence names none, is a taught error naming which of the two it is, never
-an empty listing.
+an empty listing. A session that has left the roster is named by its ledger
+line, by exact `sessionId` only: its journal is the trace, its message says it
+ended and when, and `--follow` prints the window and returns. A `done` record
+prints its window with no ended line, and `--follow` returns for it too.
 
 ### `state/stage/projects.json` — **v0**
 
@@ -4063,8 +4135,8 @@ data?}`, the CLI's own `message`/`data` verbatim, `project` only on `set`.
 `workspace` is ABSENT only on the `no-compositor` refusal (`{ok:false, action,
 reason, message}` — nothing was resolved to name), and BOTH `workspace` and
 `action` are absent on a `bad-request` refusal (nothing parsed to echo back). A
-malformed line that NAMES this verb is answered rather than dropped, the same
-rule `sessiontrace` holds — one rule for every parked caller.
+malformed line that NAMES this verb is answered rather than dropped, the rule
+the core socket's `sessiontrace` holds — one rule for every parked caller.
 The action resolves an omitted `workspace` to the focused one, then re-execs
 `aoide workspace set|clear` (an explicit id only) and writes nothing itself, so
 the invariant above holds no matter which door the mutation came through.
@@ -4583,6 +4655,106 @@ answer like a permission-verdict digit never does), the payload is prefixed
 sent it — attribution, not authentication; both `--from` and
 `AOIDE_SESSION_ID` are ordinary same-user process state, spoofable by
 anyone who can already write to the target's control socket.
+
+### `state/stage/jobs.json` — **v0**
+
+The record of the local jobs `aoide job add` writes and `aoide job remove`
+drops. It is `{ "jobs": [ … ] }`, and each job is one object:
+
+- `name` — `[a-z0-9-]{1,48}`, unique. It names the unit files. A record that
+  holds any other name, or one name twice, is unreadable: `add`, `remove`,
+  `list` and an unnamed `runs` refuse it with `the job record cannot be read`,
+  and write nothing.
+- `calendar` — the `OnCalendar=` text that `systemd-analyze calendar` accepted.
+- `argv` — the absolute program path, then its arguments, verbatim.
+- `cwd` — an absolute directory, or `null` when no `--cwd` was given.
+- `timerSha256`, `serviceSha256` — the hex digest of each unit file as written.
+- `addedAt` — ISO-8601 UTC. `addedBy` — the door the add came through (`cli`
+  or `daemon`).
+
+The unit files live in `$XDG_CONFIG_HOME/systemd/user/` (default
+`~/.config/systemd/user/`), as `aoide-job-<name>.timer` and
+`aoide-job-<name>.service`. The timer's `Unit=` names the service, and there is
+no `Persistent=`. The service is `Type=oneshot`, with `WorkingDirectory=` only
+when a `cwd` was given, `Environment="AOIDE_ROOT=<root>"`, and `ExecStart=`
+running the recorded argv. Each word is double-quoted and escaped the way the
+unit format reads it; the golden test in `graph/job.rs` pins the exact bytes.
+Nothing is looked up on PATH except `systemctl`, `journalctl` and
+`systemd-analyze`.
+
+`add` runs the probe (`systemctl --user show --property=Version`) and checks the
+calendar before it takes the stage lock. An `--on` that starts with `-`, or
+holds `%` or `\`, is a usage error, refused before the probe. If
+`systemd-analyze` gives no answer, `add` refuses as failed, not as a usage
+error, and writes nothing. Under the lock, `add` writes both units atomically,
+records their digests, runs `daemon-reload`, and runs `enable --now` on the
+timer. If systemd refuses after the record is written, the job stays recorded,
+and `remove` clears it. `remove` runs the same probe before the lock. Under the
+lock it deletes each unit that still hashes to the record: it runs `disable
+--now` on the timer first, when that file is aoide's, deletes the units, runs
+`daemon-reload`, and drops the record. A unit already gone is skipped and named
+in the outcome. When the timer is gone, the outcome also prints `systemctl
+--user stop aoide-job-<name>.timer`, which aoide never runs itself. A unit that
+was edited, or is a link, makes `remove` refuse and delete nothing; the outcome
+then prints the lines that remove them by hand.
+
+Every `systemctl`, `journalctl` and `systemd-analyze` call answers within 10 s,
+plus up to 2 s while its pipes drain. A call that outlives its 10 s is killed
+and reaped. For a child that can be killed, a wedged user manager stalls a stage
+writer for about 24 s at most, since `add` and `remove` each make at most two
+calls under the lock. A child the kernel holds in uninterruptible sleep is never
+reaped, and its call waits with it; under the lock, the stage lock stays held
+until the child leaves that state. A call that gives no answer is never read as
+a no: `add` and `remove` refuse, `list` reads `unknown` and ends the asking, and
+`runs` lists the job under `unread` and ends its reads, or refuses when a name
+was asked for or no call answered. Only a call that gives no answer ends `runs`'
+reads or `list`'s asking. A tool that answers or fails slowly on every call
+costs each call its own bound, with no total budget.
+
+`list` gives each job one status. The first of `missing` (a unit is gone),
+`changed` (a unit's bytes differ from the record) and `stale` (argv0 is gone or
+not executable) that holds decides it. Otherwise the timer's state is read with
+`systemctl --user show --property=ActiveState --value <timer>`: `ok` when it
+answers `active`, `inactive` when it answers `inactive` or `failed`, and
+`unknown` for any other answer or a non-zero exit. A read that gives no answer
+is `unknown` and ends the asking: `list` makes no further state read, and each
+later job that reaches that step is `unknown`. It adds `foreign` for each
+`aoide-job-*` unit that no record names. Jobs fire only while the user manager
+runs, and aoide never enables linger.
+
+`runs` reads the user journal one job at a time. With a name it makes one call:
+`journalctl --user _SYSTEMD_USER_UNIT=aoide-job-<name>.service -o json
+--output-fields=MESSAGE,_SYSTEMD_USER_UNIT --all --no-pager -n 200`. Without a
+name it makes that same call for each recorded job, in name order, until a call
+gives no answer. When no job is recorded it makes none, and answers
+`no local jobs`. Each call's window is that one job's own unit, its newest 200
+entries, so no other job's rows can use it up. `--all` keeps a field over 4096
+bytes whole, since journalctl otherwise prints it as null. An answer past the 4
+MiB read ceiling is discarded, so its call gives no answer. An entry is a row
+when its MESSAGE is one JSON object with a known `status` (`completed`,
+`parked`, `failed` or `refused`) and its own `_SYSTEMD_USER_UNIT` is
+`aoide-job-<job>.service`. A `UNIT` or `USER_UNIT` field that a client sets
+names no job. A status line that journald split (longer than its `LineMax`, 48
+KiB by default) gives no row. Rows are sorted oldest first by the entry's
+`__REALTIME_TIMESTAMP`, and a tie keeps name order. A row carries its job, the
+entry's time, and any of `session`, `run`, `report`, `question`, `reason` and
+`error` that the object sets. A row is the job's own claim: it is read through
+the `journalctl` on PATH, and aoide attests neither that tool nor the claim. A
+job's own output shares its unit's 200-entry window, so a run that logs more
+than 200 lines after its status line pushes that row out of `runs`. A same-uid
+process can start a unit named `aoide-job-<name>.service` and write rows under
+that job's name.
+
+Without a name, a call that exits non-zero lists its own job under `unread` as
+`{"name": ..., "why": ...}`, and the reads go on. The first call that gives no
+answer lists its job under `unread` the same way, and it ends the reads: each
+later job is listed under `unread` as `not asked: journalctl did not answer for
+<silent job>`, and no further call is made. When no call answered, the verb
+refuses with the first failure, as the named form does; a read with some answers
+stays ok, with its `unread` rows. With a name, any failure refuses the verb. A
+`journalctl` that is not on PATH refuses the verb whenever a call is made. Those
+texts are untrusted: `--json` carries them as strings, and the text render shows
+them visibly.
 
 ### `state/stage/pingback.json` — **v0**
 
@@ -5262,9 +5434,9 @@ outside the home mesh (`docs/architecture/MAIL.md` §Transit; mint sites
 mesh with the home mesh not among them refuses the send
 (`mesh-ambiguous`, naming them) rather than minting with no mesh; `""` is
 carried by everything that never chose one — `mail send --to self/<name>`,
-every receipt this box files about itself, and a receipt for a letter that
-arrived UNNAMED, which rides that letter's own `originMesh` back — not a
-third mesh choice.
+every receipt this box files about itself, and a receipt an older build
+sends for a letter that arrived UNNAMED, which rides that letter's own
+`originMesh` back — not a third mesh choice.
 
 `seq` is local to the node, like an NNTP article number — never crosses a link;
 it is the next number of the `state/mail/seq` counter, issued under the lock
@@ -5285,11 +5457,12 @@ into THIS box's own boxes at send time — it mints a signed envelope and
 dials it at once, in the sending process, over `aoide/mailDeposit`. It spools
 the envelope into `state/outbox/` (below) only when the dial returns it or the
 hop is a `hold` one: a delivered letter is written nowhere (ruling 131). The
-daemon's own periodic sweep and a door's post-heard drain carry the other
-entries (receipts, charters, transit) of that node. The letter lands
+daemon's own periodic sweep carries the other entries (charters, transit) of
+that node, and a hop's drain carries a relayed container on at once. The letter
+lands
 in a box only on the FAR box, once ITS OWN `mail_deposit` files it;
-this box's own receipts gain an entry only when that far box's ack (a `receipt`) is
-deposited back here in turn.
+since ruling 131 no receipt entry is spooled for a letter this box files; an
+older build's receipt for it still lands here as a deposit.
 
 Every mutation of the mailbase runs under the stage lock and refuses when
 the lock is not held: `try_stage_lock` (`storage/src/fs.rs`) blocks for
@@ -5382,21 +5555,14 @@ state/outbox/<node>/link.json      that LINK's own backoff state (absent
                                     = not held off)
 state/outbox/<node>/.bsy           a drain's lock file — never data
 state/outbox/<node>/.poll          a poll's lock file — never data; one poll of a node at a time
-state/outbox/<node>/.ack/<acked>   pending-ack marker: its content is the
-                                    msgid of the receipt entry covering
-                                    letter <acked> — never data, never
-                                    drained
+state/outbox/<node>/.ack/<acked>   older build's marker, inert (ruling 131).
+                                   Nothing reads, writes or removes one.
 ```
 
-The `.ack/<acked_msgid>` marker makes "is an ack for this letter already
-sitting undelivered" one stat plus one small read, never a scan of the
-node's directory, so a duplicate of a filed letter arriving while the
-link is dead re-spools nothing (MAIL.md item 5 still holds once the
-pending ack has actually gone out: the marker leaves with the entry).
-The marker is never authoritative on its own — a reader confirms the
-msgid it names is still spooled before treating it as pending, and a
-marker naming a msgid no longer on disk is stale: deleted on the next
-check, the ack re-spooled. A tool that moves or archives entries out of
+Nothing reads a `.ack/` marker or `reacks.log` to decide anything, and nothing
+removes one: removing an entry deletes that entry's file and nothing else. The
+markers and `reacks.log` an older build left are inert and safe to delete by
+hand (MAIL.md, Wire, Inert files). A tool that moves or archives entries out of
 `state/outbox/<node>/` need not know `.ack/` exists.
 
 ```json
@@ -5424,12 +5590,12 @@ is the sender's routing intent, not part of the letter.
 
 `session` is **v0+2 (ruling 131, additive)**: the id of the conducted session
 that sent an OWN letter (`aoide mail send` with `AOIDE_SESSION_ID` set; never
-`--from`), with control characters stripped. It is written only on a letter
-that is returned or held, and omitted from every other entry, so a pre-131
-spool file is byte-identical. The session's roster exit drops its letters
-(`mail.outbox.dropped`, reason `session-ended`); the tick sweep drops a letter
-with no session (`pre-131`) or whose session is off the roster or `done`
-(`session-gone`).
+`--from`), with control characters stripped. It is written only on a letter that
+is returned or held, and omitted from every other entry, so a pre-131 spool file
+is byte-identical. The session's roster exit drops its letters
+(`mail.outbox.dropped`, reason `session-ended`); the drain tick sweep drops
+every receipt, whatever its session, and a letter with no session (`pre-131`),
+and a letter whose session is off the roster or `done` (`session-gone`).
 
 **Amendment (P-CHARTER): a `poll` destination's entry is `hold`, decided for
 the caller.** The design's third transport member name is the ABSENCE of an
@@ -5442,9 +5608,7 @@ node is `hold`-flavored. The hub never dials it, and only the node's own
 nothing else):
 
 - `aoide_client::mail_wire::spool_entry` holds the entry whatever its caller
-  asked for — so no caller has to remember, including `spool_and_drain_ack`,
-  whose own argument is a literal `false` and whose ack toward a `poll` origin
-  is held by this line;
+  asked for — so no caller has to remember;
 - `drain_node` returns without opening a link at all, BEFORE the binding
   exchange — a dial a held-entry filter runs too late to prevent;
 - `pollable_nodes` leaves such a node out of a bare `aoide mail poll`: polling
@@ -5494,55 +5658,50 @@ or a REFUSAL, which is the entry's problem, not the link's — clears the
 backoff outright (`link.json` removed, never merely reset), the ordinary
 "not held off" state a drain reads as `None`.
 
-A **letter** entry that comes back delivered (`"accepted"` or
-`"duplicate"` — either way the far end has it) is NOT removed: it waits
-for a REAL ack (spec item 7), only its `tries`/`lastTryAt`/`lastOutcome`
-bookkeeping advancing. A **receipt** entry's own successful deposit IS its
-confirmation (ruling 4: no separate ack-of-an-ack), so it is removed
-outright on delivery. `retire_by_ack` is the other half of that same
-ruling — the local outbox entry a genuine ack confirms is retired when a
-receipt deposits back in (`aoide/mailDeposit` on the ORIGIN's own door):
-its two checks ("verified signer is that entry's `to.node`" and "names
-that entry's `msgid`") collapse into ONE path lookup, since an entry is
-always spooled under the exact node its own `envelope.header.to.node`
-names — indexing by the receipt's already-origin-verified `from.node`
-(`mail::deposit` refuses a forged signer before `retire_by_ack` is ever
-reached) IS the first check, and keying the file by `msgid` makes the
-second a plain hit-or-miss, never a partial match. `Ok(None)` — never an
-error — covers every way an ack fails to match: not a receipt at all, no
-entry ever spooled under that node, or a `msgid` that node's spool
-doesn't hold.
+A **letter** whose dial comes back verified (`"accepted"` or `"duplicate"` —
+either way the far end has it) is removed at once: that answer is its receipt
+(ruling 131), and the sender keeps no copy after it. A **receipt** entry is
+never dialled (ruling 131): the verified answer that filed its letter was its
+confirmation, and the drain tick's pre-131 pass drops one still spooled.
+`retire_by_ack` is the older-build path: a receipt from an older build that
+deposits back in (`aoide/mailDeposit` on the ORIGIN's own door) retires the one
+own `letter` it confirms, and nothing else. The letter is found by its `msgid`
+across the spools; it goes only when its `to.node` is the receipt's verified
+signer and the receipt is in the letter's mesh, and each retirement writes one
+`mail.outbox.retired` line. A transit, charter or receipt entry with that
+`msgid` is never retired by it. `Ok(None)` — never an error — covers every way a
+receipt matches no own letter: not a receipt at all, a `msgid` no spooled letter
+holds, a signer that is not the letter's `to.node`, or another mesh.
 
-Read/resolved by `aoide mail outbox [node]`/`mail outbox rm <msgid>` —
-a separate CLI surface from the mailbase's own `mail` family above,
-touching `state/outbox/` only. `mail outbox` (no `node`) lists every
-node with a non-empty outbox; `mail outbox <node>` narrows to one; each
-row is `msgid`/`to`/`tries`/`lastTryAt`/`lastOutcome`/`refused` plus a
-`delivery` object — the same read-only projection `mail send --json`
-returns after its spool — `status` (`refused` > `delivered` > `accepted`
-> `retrying` > `queued`; `failed` only for a local I/O error observed by
-the reporting command), `reason`, `reasonScope` (`link` | `entry` |
-`local`), `nextAttemptAt` (the earliest allowed attempt from the node's
-link state, never a promised schedule), `ackPending`. `delivered` is only
-ever a matching destination-signed ack, never an entry's absence; the
-node's link state is read once per listing and joined onto its rows; an
-unreadable state reports `queued` with `status unavailable` as the
+Read/resolved by `aoide mail outbox [node]`/`mail outbox rm <msgid>` — a
+separate CLI surface from the mailbase's own `mail` family above, touching
+`state/outbox/` only. `mail outbox` (no `node`) lists every node with a
+non-empty outbox; `mail outbox <node>` narrows to one; each row is
+`msgid`/`to`/`tries`/`lastTryAt`/`lastOutcome`/`refused` plus a `delivery`
+object — the same read-only projection `mail send --json` returns after its
+spool — `status` (`refused` > `delivered` > `accepted` > `retrying` > `queued`;
+`failed` only for a local I/O error observed by the reporting command),
+`reason`, `reasonScope` (`link` | `entry` | `local`), `nextAttemptAt` (the
+earliest allowed attempt from the node's link state, never a promised schedule),
+`ackPending`. A `receipt` entry reads `pre-131` whatever its flags. `delivered`
+is only ever a destination-signed receipt filed by an older build, never an
+entry's absence; the node's link state is read once per listing and joined onto
+its rows; an unreadable state reports `queued` with `status unavailable` as the
 reason. That fallback is for any entry, own letters included, and for an entry
 removed while it is read; an own letter otherwise reads `held`, `returned`,
-`pre-131` or `delivered`, never `queued`, in normal operation. `mail
-outbox rm <msgid>` is an exact-msgid removal — it walks every node with an
-outbox and removes the first match, erroring `not-found` if none held it;
-NOT the mailbase `mail rm`'s age-based prune, and neither command ever
-touches `state/mail/`. `mail outbox --json` additionally carries
-`data.summary`, one entry per node whose outbox is non-empty (omitted for
-a node with nothing spooled, swept or named), shaped `{"depth": <count>,
-"oldestMintedAtAgeSecs": <secs|null>, "tries": {"<tries>": <count>},
-"lastOutcomeCounts": {"<outcome|(none)>": <count>}, "refused": <count>}`
-— additive to `rows`, no change to `OutboxEntry` or `link.json` on disk.
-See §6's `aoide/mailDeposit` for the wire method that actually drains
-this spool; one `drain_node` call attempts at most `DRAIN_BATCH_CAP` (50)
-entries, a per-call cost bound, so a deep backlog drains across ticks
-rather than in one.
+`pre-131` or `delivered`, never `queued`, in normal operation. `mail outbox rm
+<msgid>` is an exact-msgid removal — it walks every node with an outbox and
+removes the first match, erroring `not-found` if none held it; NOT the mailbase
+`mail rm`'s age-based prune, and neither command ever touches `state/mail/`.
+`mail outbox --json` additionally carries `data.summary`, one entry per node
+whose outbox is non-empty (omitted for a node with nothing spooled, swept or
+named), shaped `{"depth": <count>, "oldestMintedAtAgeSecs": <secs|null>,
+"tries": {"<tries>": <count>}, "lastOutcomeCounts": {"<outcome|(none)>":
+<count>}, "refused": <count>}` — additive to `rows`, no change to `OutboxEntry`
+or `link.json` on disk. See §6's `aoide/mailDeposit` for the wire method that
+actually drains this spool; one `drain_node` call attempts at most
+`DRAIN_BATCH_CAP` (50) entries, a per-call cost bound, so a deep backlog drains
+across drain ticks rather than in one.
 
 ### `state/usage.json` — **v0**
 
@@ -5642,7 +5801,7 @@ state — a reader wanting "is this session still running" still asks
 `sessions.json`, never this file.
 
 ```json
-{"v":0,"sessionId":"s1","enduringAgentId":null,"project":null,"agent":"claude","harnessSessionId":"claude-uuid-123","cwd":"/home/khoa/Aoide","title":"fix the thing","petname":"brave-otter","startedAt":"2026-08-20T10:00:00Z","endedAt":"2026-08-20T12:00:00Z","resumedFrom":null,"origin":null,"restore":null}
+{"v":0,"sessionId":"s1","enduringAgentId":null,"project":null,"agent":"claude","harnessSessionId":"claude-uuid-123","cwd":"/home/khoa/Aoide","title":"fix the thing","petname":"brave-otter","startedAt":"2026-08-20T10:00:00Z","endedAt":"2026-08-20T12:00:00Z","resumedFrom":null,"origin":null,"restore":null,"logPath":null}
 ```
 
 Every field serializes unconditionally (no `skip_serializing_if`,
@@ -5673,6 +5832,17 @@ continuously-captured snapshot is the only honest source. A populated
 both `sessions.json`'s additive-optional field and this always-present one,
 so a caller reading a populated `restore` sees the identical complete shape
 in either file.
+
+`logPath` (ruling 161) is projected verbatim off `SessionRecord.log_path` at
+the same instant as `restore`. It is `null` for every session whose record
+had none, and for every line predating the field. Its referent is one of two
+things: a conducted terminal's pty transcript under `state/sessions/`, which
+is never a journal, or a harness's own journal, which for an
+`agent:"eidolon"` session is the journal its `meta.json` names. The file may
+be gone by the time anything reads the line. `aoide resurrect` reopens an
+Eidolon line from this path (`graph/resurrect.rs`'s `journal_of`), and skips
+a line whose path is absent, not absolute or unsafe, under `state/sessions/`,
+or not a regular file, with a sentence that names the entry.
 
 ### `state/undying.json` — **v0** (durable-sessions plan)
 
@@ -5767,6 +5937,48 @@ ledger entry currently in the set, minus any id already alive in
 this file's `resurrect` and `projects.json`/`autoResume` entries
 above for the full selection contract and the daemon's boot-sweep
 consumer.
+
+### `state/resuming.json` — **v1**
+
+The resume claims: one per ledger session that a launch is reviving under a
+fresh id. `resurrect` writes the claim before the spawn, so a second launch
+of the same session, or of a session on the same journal, finds it and is
+refused. The shape, with one by-journal claim:
+
+```json
+{ "v": 1, "claims": [ {
+  "sessionId": "ledger-eid", "newId": "resurrect-4242-1792927728",
+  "at": "2026-10-25T10:00:00Z", "journal": "/abs/path/to/journal" } ] }
+```
+
+- **One claim per `sessionId`.** A new claim for a session replaces the old
+  one. A claim that is neither in flight nor live is stale, and the next
+  claim drops it.
+- **`journal`.** A by-journal launch's claim carries the candidate's journal:
+  the file it resolves to, or the path as spelled when it does not resolve.
+  An id launch's claim has no `journal` key, and a claim without one loads as
+  a claim with none. While a claim is in flight, it blocks a candidate on the
+  same journal whichever session it names, and the refusal says the journal is
+  shared.
+- **Writer and lock.** Only `resurrect` writes it, under the conducting
+  stage lock (`aoide_storage::fs::try_stage_lock`). A claim is written before
+  the spawn. A failed spawn removes its own claim, while the claim still names
+  its `newId`. A successful spawn keeps it. No spawn runs under the lock. A
+  dry run reads the file and writes nothing.
+- **Mode.** `0600`, written with `aoide_storage::fs::atomic_write_private`. It
+  holds no secret.
+- **Reading.** A missing file is no claims. A file that cannot be read or
+  parsed, has another `v`, or holds a claim whose `at` is not an ISO UTC time
+  is an error, and the candidate it would have decided is refused.
+- **In flight.** A claim is in flight while its `newId` names a session in
+  `sessions.json` that is not `done`, or while `newId` names no session and
+  the claim's `at` is under 60 seconds old. The bound is conduct's
+  `RESUME_CLAIM_BOUND_SECS`: a spawn's registration budget is 3 seconds, and a
+  terminal can take longer than that to register its session. A claim stamped
+  more than 5 seconds ahead of the clock is stale and blocks nothing, and the
+  next claim drops it; within those 5 seconds its age reads as 0. A clock step
+  of more than 5 seconds backward, or more than 60 seconds forward, during a
+  launch's registration can let a second launch through.
 
 ### `.aoide/project.json` — **v0** (command-defrag lane U1, 2026-08-27;
 consumed by `resurrect`'s bare mode at U2, same lane)
@@ -5900,6 +6112,64 @@ a consumer filtering the outcome by disposition never silently drops a row
 that fell through `resolve_candidate`/`resurrect_one`'s own flag-mode
 shapes.
 
+**Text and data.** Each line resurrect writes for a person (its `message`,
+each `changed` line, each `reason`, its stderr line) is stripped whole once
+formatted (`strip_unsafe`), whatever it names: a ledger or claim id, an
+agent, an origin, a project, a manifest's host, dir or root, a far node's
+session id or error, a launch's refusal or a stage file's read error. A plan
+line is one exception: it keeps its bytes where it is stored and
+compared, and is spelled where it is shown (`visible_held`), as each line of
+a dry run's `message` is. Every other field of `data` carries its value as
+its source holds it (the ledger, `state/resuming.json`, `sessions.json`, the
+manifest or the far node's answer), `liveSessionId`, `claimedBy`, `host`,
+`dir` and `manifestRoot` included, so a consumer can name it back; a
+consumer spells it at display. The other exception is a held call's answer,
+the hold's own lines (`hold_whole`), which name the project as its caller
+typed it.
+
+**`resurrect --dry-run`.** The flag lists the rows the same invocation would
+act on, in the order a launch acts on them, and launches, holds, types and
+sends nothing. Flag mode (`--project` with `--all`, `--id`, or neither) lists
+what `select_candidates` resolves; bare mode lists one row per manifest spec,
+each decided by the helpers its launch uses. `data` carries `candidates` and
+`dryRun: true`. A flag-mode row has `sessionId`, `agent`, `project`, `cwd`,
+`endedAt`, `restoreText`, `pickedByBare`, `disposition`, and `reason` on a
+skip. A bare-mode row has `host`, `dir`, `agent`, `command` and `disposition`,
+plus `cwd` (a local spec's resolved directory, once it resolves),
+`resumedFrom` and `restoreText` (when a ledger line enriches the spec), `argv`
+(a clean spawn), `text` (a summon), and `reason` (a skip or a failure); `data`
+also names `manifestRoot`. `disposition` takes the launch's own words:
+`revived-from-ledger`, `clean-spawned`, `summoned-remote` (the local pre-wire
+check passed; nothing is sent), `skipped` and `failed`. A row the launch would
+skip (no resume argv) lists as `skipped`, with its `reason`, as the launch's own
+`skipped[]` reports it: the listing is every row the launch acts on, each with
+the disposition it reaches. `pickedByBare` is true on exactly the rows the bare
+`--project` form would revive: the newest ledger line of each undying id that is
+not alive now. A flag-mode `message` is the plan `plan_lines` words, one line
+per row; a bare-mode `message` is a header line, `manifest at ...`, then one
+line per spec. Each message line is spelled as the pending view spells a held
+plan line (`visible_held`); `data` stays raw, but each `reason` is text (Text
+and data, above). A dry run is never held or sent,
+on any door. From an unattested caller on a door that cannot approve, it gets
+what the call would give that caller, minus the launch: in bare mode the bare
+call's refusal; with `--id` or `--all` and no `--project`, the usage error the
+call gives; with `--project`, the `dry-run-not-held` refusal, since that call
+would hold and show the caller nothing. The handler audits a dry run with
+status `dry-run` (a refusal the same call would give is audited the same
+way), beside the line the door writes for every call: `ok` for a listing,
+`usage` for a usage error. A usage error or a stage-file miss gets no handler
+line, only the door's. The handler writes three things, and no others: its
+audit line (none for a usage error or a stage-file miss); on a host that still
+holds the legacy file, the one-time `carry.json` rename an undying read runs;
+and, on a host that still holds the legacy stage files, the one-time
+conducting-stage migration a stage read runs. Two writes come with any call,
+dry or real, outside the handler: the door's audit line, and the start-up
+migration both core binaries run, `aoide_storage::fs::migrate_root_once`. It
+locks `state/` owner-only when it exists and renames old peer state files.
+When the legacy `~/Aoide` root is not `$AOIDE_ROOT`, it moves that root's state
+unless `AOIDE_STATE_DIR` is set, and its log unless `AOIDE_AUDIT_LOG` is set and
+not empty.
+
 **Remote summon (U4, command-defrag lane U).** A spec whose `host` names a
 DIFFERENT box than this one is summoned through the existing node door, not
 skipped: `spec.host` resolves against `state/nodes.json`
@@ -5951,12 +6221,12 @@ never touched here.
 **Manifest-revived sessions are marked undying (orchestrator design
 ruling, U2) — LOCAL revivals only.** A remote summon (U4,
 above) never reaches this: the resurrected id lives on the node, not here.
-Both the LOCAL enrichment path and the LOCAL clean-spawn
-path pass the same `--undying` flag `resurrect_one`/`clean_spawn_from_spec`
-hand to their own internal `spawn` invocation — the identical
-mark-after-registration mechanic `aoide spawn --undying` runs (above), not
-a re-implementation, and gated the same way (marked only once the new
-session actually registers). Rationale: the manifest spec IS the durable
+Both the LOCAL enrichment path (`resurrect_one`) and the LOCAL clean-spawn
+path (`clean_spawn_from_spec`) mark their new id once the spawn returns
+`Status::Ok`, whether or not the session has registered by then, in
+`mark_manifest_revival_undying`. Neither spawn passes `--undying`: the
+`aoide spawn --undying` mark waits for registration, and this one does not.
+Rationale: the manifest spec IS the durable
 declaration of what should exist — marking its revived session undying
 means a LATER bare `resurrect --project <name>` (or the daemon's boot
 sweep) finds it in the undying set without needing to re-walk or
@@ -5965,9 +6235,9 @@ converge on the SAME durable set instead of tracking two independent
 notions of "what this project wants running." This is deliberately
 DIFFERENT from flag-mode's own transfer rule immediately above (which only
 ever marks a NEW id when the OLD ledger id it replaces was already
-undying) — a manifest-mode revival marks unconditionally, because there is
-no ordinary-revive case to protect against here: every manifest-mode spawn
-already came from an explicit, operator-authored declaration.
+undying) — a manifest-mode revival marks on `Status::Ok` alone, because
+there is no ordinary-revive case to protect against here: every manifest-mode
+spawn already came from an explicit, operator-authored declaration.
 
 **The picker's node writer (U3, command-defrag lane U; fixed
 the batch-poisoning defect below, same phase; relocated to `aoide session
@@ -6491,43 +6761,40 @@ successful empty inventory or a local-file fallback. This is the CLI-only
 operator read surface, with the same socket access boundary as `pending`;
 it changes no grant, custody, or secret availability state.
 
-Promoted out of "living in the crate only" (the promotion criterion this
-section states below) because P-V4c makes it explicit: the unix-socket
-JSON-lines wire is a FIRST-CLASS API, not merely `secrets exec`'s private
-implementation detail. A service (verba voluntia, an aoide-side Melete
-model) is meant to speak this wire DIRECTLY — connect the socket, write a
-request line, read a reply line — with no LLM and no `aoide` binary in the
-loop at all; `secrets exec`/`secrets put` are convenience wrappers over the
-same two ops for a human or an agent at a terminal, not the only door onto
-them. The canonical implementation (and the one place a wire CHANGE lands
-first) is still `crates/secrets/src/broker.rs`'s module doc — this section
-restates it for a consumer who never reads this repo's Rust. **The A2A door
-and its client are the first real machine consumers of this wire**
-(`aoide_secrets::client::resolve_bounded`, exported from this crate as a
-library function rather than copied into either caller, per the cross-crate
-"no copying" discipline `pkgs/aoide/crates/AGENTS.md` holds): the door
-resolves its own inbound `Authorization: Bearer` expectation as consumer
-`a2a-door` (§6's security posture), and its outbound node client resolves a
-per-node bearer to present as consumer `a2a-client` (§7's `Node.bearerSecret`)
-— both self-asserted, both subject to the "consumer is self-asserted" honesty
-note below, both using `resolve_bounded`'s bounded, `wait:false` shape so
-neither can be wedged parked on a misconfigured `requireTotp` secret the way
-a human at a terminal might tolerate. **The CONNECT itself is bounded too
-(rider task, alongside #75/#81/#82)** — every client-side op in
-`aoide_secrets::client` (`resolve`/`resolve_bounded`/`put`/`pending`/
-`approve`/`dismiss`) connects through a hand-rolled 5-second overall bound
-(`client::connect_bounded`, over `libc`, since `std`'s `UnixStream` has no
-`connect_timeout`), not only the reads `resolve_bounded`'s own
-`set_read_timeout` already bounded — a machine consumer hitting a broker
-with a saturated accept backlog (plausible when many callers legitimately
-hold a parked connection for up to `park::park_timeout()`, default 300s)
-now fails fast instead of hanging on the connect syscall itself. The
-mechanism is a BOUNDED RETRY of the `connect(2)` syscall on `EAGAIN` (what
-Linux actually returns for a saturated `AF_UNIX` backlog — immediately,
-never `EINPROGRESS`, so there is no fd event to wait on), plus `poll()` on
-`EINPROGRESS` (a genuine half-open connection) — not a single poll loop;
-an earlier version of this function handled only the `EINPROGRESS` case
-and made the saturated-backlog scenario worse, caught and fixed on review.
+Promoted out of "living in the crate only" (the promotion criterion this section
+states below) because P-V4c makes it explicit: the unix-socket JSON-lines wire
+is a FIRST-CLASS API, not merely `secrets exec`'s private implementation detail.
+A service (verba voluntia, an aoide-side Melete model) is meant to speak this
+wire DIRECTLY — connect the socket, write a request line, read a reply line —
+with no LLM and no `aoide` binary in the loop at all; `secrets exec`/`secrets
+put` are convenience wrappers over the same two ops for a human or an agent at a
+terminal, not the only door onto them. The canonical implementation (and the one
+place a wire CHANGE lands first) is still `crates/secrets/src/broker.rs`'s
+module doc — this section restates it for a consumer who never reads this repo's
+Rust. **The A2A door and its client are the first real machine consumers of this
+wire** (`aoide_secrets::client::resolve_bounded`, exported from this crate as a
+library function rather than copied into either caller, per the cross-crate "no
+copying" discipline `pkgs/aoide/crates/AGENTS.md` holds): the door resolves its
+own inbound `Authorization: Bearer` expectation as consumer `a2a-door` (§6's
+security posture), and its outbound node client resolves a per-node bearer to
+present as consumer `a2a-client` (§7's `Node.bearerSecret`) — both
+self-asserted, both subject to the "consumer is self-asserted" honesty note
+below, both using `resolve_bounded`'s bounded, `wait:false` shape so neither can
+be wedged parked on a misconfigured `requireTotp` secret the way a human at a
+terminal might tolerate. **The CONNECT itself is bounded too (rider task,
+alongside #75/#81/#82)** — every client-side op in `aoide_secrets::client`
+(`resolve`/`resolve_bounded`/`put`/`pending`/ `approve`/`dismiss`) connects
+through a hand-rolled 5-second overall bound
+(`aoide_protocol::local_socket::connect_bounded`, over `libc`, since `std`'s
+`UnixStream` has no `connect_timeout`), not only the reads `resolve_bounded`'s
+own `set_read_timeout` already bounded — a machine consumer hitting a broker
+with a saturated accept backlog (plausible when many callers legitimately hold a
+parked connection for up to `park::park_timeout()`, default 300s) now fails fast
+instead of hanging on the connect syscall itself. The mechanism is a BOUNDED
+RETRY of the `connect(2)` syscall on `EAGAIN` (what Linux actually returns for a
+saturated `AF_UNIX` backlog — immediately, never `EINPROGRESS`, so there is no
+fd event to wait on), plus `poll()` on `EINPROGRESS` (a genuine half-open
+connection) — not a single poll loop.
 
 **Transport**: connect `$AOIDE_SECRETS_SOCKET` (else the canonical deployed
 path `/run/aoide-secrets/secrets.sock`, P-V4d — corrected from an earlier
@@ -7019,7 +7286,7 @@ below for the separate, orthogonal fact it DOES add.
 
 **Peer identity (`SO_PEERCRED`, task #73).** Every accepted connection's
 kernel-truth `uid`/`gid`/`pid` is read once, at connection start, via
-`SO_PEERCRED` (`crates/secrets/src/peercred.rs`) — the connecting
+`SO_PEERCRED` (`crates/protocol/src/peercred.rs`) — the connecting
 process's REAL uid, verified by the kernel, independent of anything the
 wire request itself claims. A read failure is an UNIDENTIFIED connection
 (`None`), never a panic, never a fabricated uid; every decision keyed on it
@@ -9617,7 +9884,7 @@ own signature and nonce (`wire_auth::answer_string`). Anything else (no
 signature, two of them, another key's, another request's) is
 `unauthenticated`: the client records the attempt, parks nothing, settles
 nothing and backs off the link. Only a verified `accepted` or `duplicate`
-retires a receipt, a `charter` letter or a `transit` container. For a letter the
+retires a `charter` letter or a `transit` container. For a letter the
 sender dialled live, a verified `accepted` or `duplicate` is final: it delivers
 the letter, nothing is kept, and no receipt is awaited (MAIL.md §Transit).
 A verified refusal of any word is final for such a letter too: the letter comes
@@ -9664,12 +9931,12 @@ container addressed to a node that is not this one is not this receiver's to
 open at all: it is a HOP, answered
 `{"status":"accepted","transit":{"next":…,"mesh":…,"held":…}}` after the
 container is filed as a `transit` entry and spooled toward `next` — no reader
-rung, nothing filed as correspondence, and NO ack, because the letter is not
-here.
+rung, nothing filed as correspondence, and no receipt minted, because the
+letter is not here.
 
 A container that passes all of it is handed to the SAME
 `aoide_storage::mail::deposit` an envelope is, so filing, the box dedup and
-the pending-receipt rule have one implementation. `aoide/mailPoll`'s answer
+the older-build receipt rule have one implementation. `aoide/mailPoll`'s answer
 becomes two lists, `containers` and `envelopes`: a sealed entry hands over
 its container and NO plaintext, and only an entry spooled before the
 destination published a binding appears in `envelopes`.
@@ -9740,18 +10007,27 @@ line. Every door without it answers unsigned. One before `0.0.26` refuses the
 new request `-32007`; a `0.0.26` door without the header answers `200` with
 an ordinary body. A client that checks answers treats the two alike:
 
-- **New client to a door without the header: held, never lost.** Every mail
-  answer is `unauthenticated` (`no answer signature … upgrade aoide on
-  <node>`). Letters, receipts, charter letters and transit containers stay
-  spooled and live: nothing is parked or retired, the link backs off, and the
-  drain asks again. A poll files and clears nothing, so the far side keeps
-  what it holds and the record of what this box filed survives to the next
-  poll. A binding exchange learns nothing. `aoide mail outbox` reads
-  `retrying` with the `unauthenticated:` reason, and `aoide mail poll <node>`
-  reports the node unreachable with the same reason. When the far end's own
-  word is `config-invalid`, which a door in that state never signs, the reason
-  says its config is invalid (`fix the config on <node>`), not that it needs
-  an upgrade.
+- **New client to a door without the header: an unsigned answer retires
+  nothing.** Every mail answer is `unauthenticated` (`no answer signature …
+  upgrade aoide on <node>`). Charter letters and transit containers stay spooled
+  and live: nothing is parked or retired, the link backs off, and the drain asks
+  again. The drain never dials a letter: `dialable_entries` skips it. Its send
+  dials it again after an unsigned answer (`deliver_now`). A second unsigned
+  answer returns it with the `unauthenticated:` word, and `handle_mail_send`
+  keeps it on disk as `returned` under its session, and the letter is dropped
+  when that session ends: at its roster exit, or else by the drain tick's
+  `session-gone` pass, which waits while the roster or the list of letter-bound
+  sessions cannot be read; sent outside a session, it comes back `returned` and
+  nothing is written. The send writes no link state. Only `aoide mail outbox
+  retry <msgid>` and `aoide mail outbox retry --refused` dial a returned letter
+  again (`resend_returned_letter`). A receipt is never dialled: the drain tick
+  drops it. A poll files and clears nothing, so the far side keeps what it holds
+  and the record of what this box filed survives to the next poll. A binding
+  exchange learns nothing. `aoide mail outbox` reads `retrying` with the
+  `unauthenticated:` reason, and `aoide mail poll <node>` reports the node
+  unreachable with the same reason. When the far end's own word is
+  `config-invalid`, which a door in that state never signs, the reason says its
+  config is invalid (`fix the config on <node>`), not that it needs an upgrade.
 - **Old client to a door with the header: works.** The header is one more
   response line, and an older client never reads it.
 - **A `refused` key crosses the versions as `filed` does.** An older hub reads
@@ -9915,7 +10191,7 @@ The rest of this section describes the plaintext arm, unchanged:
 The method rides the same A2A JSON-RPC/HTTP door (§6), with no new transport,
 server or port. It is capability-gated on `message`, not on `spawn`. A
 registered node's own outbox drain (`state/outbox/`, §4) POSTs this to deposit
-one signed letter or receipt into the target's mailbase:
+one signed letter or charter into the target's mailbase:
 
 ```json
 { "jsonrpc": "2.0", "id": 1, "method": "aoide/mailDeposit",
@@ -9981,11 +10257,9 @@ successful deposit answers:
 ```
 
 `"duplicate"` replaces `"accepted"` when `msgid` was already in
-the box — the far end's earlier attempt evidently landed even if ITS
-own ack never arrived, so a duplicate whose original filing was a
-**letter** re-sends the ack (never a duplicate **receipt** — that would
-ack an ack, and the `letter`/`receipt` vocabulary has no third shape to
-stop that ping-ponging forever). A rejected envelope answers instead:
+the box — the far end's earlier attempt evidently landed. A duplicate of a
+filed **letter** is answered `"duplicate"` and nothing more: no receipt is sent
+back (ruling 131). A rejected envelope answers instead:
 
 ```json
 { "result": { "status": "refused", "reason": "bad-msgid",
@@ -10018,7 +10292,7 @@ the container path answers `{"status": "accepted", "msgid": "<hex>",
 the charter's own detail in `data`, and never as the status itself,
 because a sender's classifier reads an unrecognised status as a
 REFUSAL and would park a charter that had already landed. An applied
-charter files nothing and acks nothing; its container is recorded in
+charter files nothing and owes nothing back; its container is recorded in
 `state/mail/containers.jsonl` once it is in force, so a re-offer is
 answered `"duplicate"`.
 
@@ -10031,17 +10305,13 @@ per-command audit, so this is the only place a flood becomes visible, and
 volume must show whether every one of those deposits landed accepted,
 refused, or malformed.
 
-A filed **letter** mints an ack (a `receipt`) addressed back to the
-origin, spools it into that origin's own `state/outbox/`, and best-effort
-drains that node once, synchronously, reusing the SAME drain
-`aoide-server`'s own periodic sweep uses (`aoide_conduct::mail_bridge::
-drain_node` — one drain implementation, never a second dial built at the
-door). A filed **receipt** instead retires the LOCAL outbox entry it
-confirms (§4's `retire_by_ack`, spec item 7) — a forged or stale ack
-simply matches nothing and retires nothing; every `state/outbox/` call
-here runs strictly AFTER `mail::deposit` has already released its own
-lock, never nested inside it (`mail`'s and `outbox`'s stage locks are the
-identical non-reentrant primitive).
+A filed **letter** mints nothing and spools nothing: the filing is its own
+answer (ruling 131). A filed **receipt** (from an older build) instead retires
+only the LOCAL own `letter` it confirms (§4's `retire_by_ack`): a forged or
+stale receipt matches no such letter and retires nothing; every
+`state/outbox/` call here runs strictly AFTER `mail::deposit` has already
+released its own lock, never nested inside it (`mail`'s and `outbox`'s stage
+locks are the identical non-reentrant primitive).
 
 ### `aoide/mailPoll` (P-M3, `docs/architecture/MAIL.md`)
 
@@ -10133,10 +10403,11 @@ each of the caller's own entries it names takes a `tries` stamp and a
 "already handed over" bookmark — which is exactly why a re-poll before the ack
 hands the same envelopes over again (unless it deferred them), and why a held
 `letter` leaves the spool only when the poller names its msgid in `filed`, when
-an older poller's receipt retires it (`outbox::retire_by_ack`), when its session
-ends, or through `aoide mail outbox rm <msgid>` (a `letter` filed by the poller
-mints a receipt exactly as a deposit would; an ack is an envelope, so the
-poller's own next drain carries it back). A held `letter` the poller names in
+an older build's receipt from its destination retires it
+(`outbox::retire_by_ack`), when its session ends, or through
+`aoide mail outbox rm <msgid>` (a `letter` filed by the poller mints nothing,
+since ruling 131: the filing is its own answer). A held `letter`
+the poller names in
 `filed` ends the sender's copy on its word alone, as a relay's verified
 `accepted` does (MAIL.md, §Transit). For a relayed letter the poller is
 the hop it was spooled toward, not the destination. The
@@ -10992,3 +11263,4 @@ bump either — they move independently.
   `env!("CARGO_PKG_VERSION")` off the workspace version above) — the doc
   example a few sections up in this file tracks it and must be bumped in
   the same commit as any release bump.
+

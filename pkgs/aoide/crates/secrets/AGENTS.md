@@ -188,7 +188,7 @@
 - **`SO_PEERCRED` (task #73) gives kernel-truth CALLER identity — it does
   NOT authenticate the wire's `consumer` field, which stays self-asserted
   exactly as the ruling above states.** `handle_conn` reads `SO_PEERCRED`
-  (`peercred::peer_cred`, hand-rolled over `libc::getsockopt` since `std`'s
+  (`aoide_protocol::peercred::peer_cred`, hand-rolled over `libc::getsockopt` since `std`'s
   own accessor is unstable) ONCE per connection, at connection start, and
   threads the same value into every op that connection sends — never
   re-read per line. A read failure is an UNIDENTIFIED connection (`None`),
@@ -214,7 +214,7 @@
   process is claiming); don't wire `SO_PEERCRED`'s uid into
   `automation.consumers`/policy `consumers[]` matching as if it were an
   authenticated consumer name — it isn't one. **And it is a Linux/Android
-  capability, deliberately not a portable one**: `peercred::peer_cred` is
+  capability, deliberately not a portable one**: `aoide_protocol::peercred::peer_cred` is
   `#[cfg]`-gated to those hosts and returns the SAME `None` (unidentified ⇒
   refuse) everywhere else. Don't add a second mechanism there —
   `getpeereid(3)` carries no pid, so it cannot feed the ancestry-based origin
@@ -306,7 +306,7 @@
   calls, again for `watch`'s log-tail (`File`/`stat`), socket calls
   (`client::pending`/`approve`/`dismiss`, reused, never duplicated), and
   `SIGINT` handling (`libc::signal`), and again at task #73 for
-  `peercred::peer_cred`'s `getsockopt(2)` call — the boundary moves as new
+  `aoide_protocol::peercred::peer_cred`'s `getsockopt(2)` call — the boundary moves as new
   I/O concerns earn their own named module, it does not disappear. `peercred`
   itself never writes anything or touches the secrets home at all — it is
   a pure READ of one already-open connection's kernel-stamped identity,
@@ -1039,8 +1039,9 @@
   supports" stance, restated above) — this function must never resolve a
   name to compiled-in text the crate doesn't actually own the shape of.
 - **Every `client.rs` socket op bounds its CONNECT, not only its reads
-  (rider task).** `client::connect_bounded` is the ONE place this crate
-  opens a connection to the broker's socket — `resolve`/`resolve_bounded`/
+  (rider task).** `aoide_protocol::local_socket::connect_bounded` is the ONE
+  place this crate opens a connection to the broker's socket —
+  `resolve`/`resolve_bounded`/
   `put`/`pending`/`approve`/`dismiss` all route through it (a fixed 5s
   bound, no env override) instead of a bare `UnixStream::connect`, since
   `std`'s `UnixStream` has no `connect_timeout` and a saturated accept
@@ -1049,8 +1050,8 @@
   otherwise block the connect syscall itself, past any read-side bound a
   caller thought it had. Hand-rolled via `libc`, over TWO genuinely
   different failure shapes — this is load-bearing, not incidental (a
-  review-bounce fix, this commit, proved it with a raw-libc probe on this
-  kernel): `EINPROGRESS` (a real half-open connection — waited out with
+  raw-libc probe on this kernel proved it): `EINPROGRESS` (a real half-open
+  connection — waited out with
   `poll(POLLOUT)` then `SO_ERROR`, the same pattern `std` itself uses
   internally for `TcpStream::connect_timeout`) and `EAGAIN` (a SATURATED
   `AF_UNIX` listen backlog — Linux returns this IMMEDIATELY, never
@@ -1069,8 +1070,9 @@
   module connects through `connect_bounded`, never a bare
   `UnixStream::connect` — that would silently reopen this exact gap for
   just that one op.
-- **`client::unix_sockaddr` is the ONE address builder, and every number in
-  it comes off the target's own struct (socket correctness fix).** The cap is
+- **`aoide_protocol::local_socket`'s `unix_sockaddr` is the ONE address
+  builder, and every number in it comes off the target's own struct (socket
+  correctness fix).** The cap is
   `sun_path`'s own width — 108 on Linux, 104 on the BSDs, 126 on Haiku, 1023
   on AIX — so a 105..107-byte path on a 104-byte BSD struct is refused
   instead of being handed to the kernel zero-filled (a connect to a path

@@ -11,12 +11,16 @@
 //! Two differences from the Codex precedent, both because eidolon's own
 //! liveness contract differs from a try-flock:
 //!
-//!   * **Liveness is the presence socket answering `{"op":"ping"}` with
-//!     `{"ok":true}`** (eidolon's own `crates/swarm/src/socket.rs:94-117`,
-//!     `:33`'s 250ms timeout) — never a stat, never `/proc`. Aoide never
-//!     sweeps `$XDG_RUNTIME_DIR/eidolon` the way eidolon's own `scan` does
-//!     as a side effect of listing it (`presence.rs:328-353`) — reading is
-//!     not owning.
+//!   * **Liveness is the presence socket's answer to `{"op":"ping"}`**
+//!     (eidolon's own `crates/swarm/src/socket.rs:94-117`, `:33`'s 250ms
+//!     timeout) — never a stat, never `/proc`. A socket that answers
+//!     `{"ok":true}` is live; one where nothing listens is not. A socket
+//!     that accepts and stays silent is live while its meta's `pid` is a
+//!     row of the process table: a busy session can miss the 250 ms ping,
+//!     and Eidolon's own sweep pairs silence with the registration's pid.
+//!     Aoide never sweeps `$XDG_RUNTIME_DIR/eidolon` the way eidolon's own
+//!     `scan` does as a side effect of listing it (`presence.rs:328-353`) —
+//!     reading is not owning.
 //!   * **This IS an agent session** (`kind:"agent"`, not codex's
 //!     `kind:"app"`), so it is a normal dedup/staleness candidate once
 //!     enrolled, unlike a codex "app" record. `parentSessionId` IS drawn
@@ -90,6 +94,7 @@ use super::session_store::is_reserved_id;
 use aoide_protocol::agents::agent_profile;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 /// One live eidolon presence, already resolved from its `meta.json` and the
 /// process table — the pure-core input for [`reconcile_eidolon_sessions`],
@@ -154,8 +159,8 @@ pub(crate) enum ScanFailure {
     /// vanished directory is skipped, not unknown — the same race eidolon's
     /// own `GRACE_MS` exists for on the producer side).
     MetaUnavailable,
-    /// At least one presence socket answered and [`process_table`] returned
-    /// `None` — no `ps` on `PATH`.
+    /// A presence socket answered, or one is silent and held aside, and
+    /// [`process_table`] returned `None` — no `ps` on `PATH`.
     ProcessTableUnavailable,
 }
 
@@ -535,45 +540,106 @@ struct PresenceMeta {
     busy: bool,
 }
 
-/// Does the presence socket at `path` answer `{"op":"ping"}` with
-/// `{"ok":true}`, inside the SAME 250ms budget the producer's own client
-/// enforces (`socket.rs:33`)? Liveness IS this answer — never a stat, never
-/// `/proc`. Every failure (no such socket, a refused connection, a timeout,
-/// a reply that isn't exactly `{"ok":true}`) reads as NOT LIVE: eidolon's
-/// own client (`socket.rs::probe`) draws the identical binary line, with no
-/// third "can't tell" state for one directory's probe.
-fn socket_answers(path: &Path) -> bool {
-    use std::io::{Read, Write};
-    #[cfg(unix)]
-    use std::os::unix::net::UnixStream;
-    #[cfg(windows)]
-    use aoide_protocol::win_unix::UnixStream;
-    use std::time::Duration;
-    const PING_TIMEOUT: Duration = Duration::from_millis(250);
+/// The one budget a presence scan gives its probes, counted from the end of
+/// its directory listing.
+const PRESENCE_DEADLINE: Duration = Duration::from_millis(250);
 
-    let Ok(mut stream) = UnixStream::connect(path) else {
-        return false;
+/// What a presence socket did with one `{"op":"ping"}`, inside the one
+/// deadline the scan gives every probe ([`PRESENCE_DEADLINE`], counted from
+/// the end of the directory listing). Liveness is the answer, never a stat or
+/// `/proc`:
+///
+///   * [`Probe::Answered`]: a reply whose top-level object has `"ok": true`
+///     came back in time. Live.
+///   * [`Probe::NothingListens`]: no socket file, or a connect refused
+///     ([`connect_failure`]). Not live, as a released flock is not. A socket
+///     bound but not yet listening refuses a connect too, so a session in its
+///     first instant reads as nothing listening for that pass.
+///   * [`Probe::Silent`]: the socket is held, but no such reply came back by
+///     the deadline. That covers every other connect failure: fd pressure or
+///     a permission error does not end a live session's record. It covers a
+///     connect that timed out, since a full listen backlog is a socket still
+///     held, as a suspended session holds one. It also covers a write, a read
+///     or a reply past the deadline, a reply over 4096 bytes, and a reply
+///     whose `ok` is not `true`. Eidolon's own client gives each read and
+///     write 250 ms and its connect no bound (`socket.rs:38`,
+///     `socket.rs:211-218`), so a busy session can miss the ping.
+///     [`eidolon_presence_sessions_with`] holds it aside and counts it live
+///     while its pid is in the process table.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Probe {
+    Answered,
+    NothingListens,
+    Silent,
+}
+
+/// What a connect that failed says about the socket. Only a missing socket
+/// file or a refused connect means nothing listens. Any other failure (fd
+/// pressure, a permission, a path the address cannot hold) says nothing about
+/// the session, so the socket is Silent and its record is kept only while its
+/// pid is in the process table.
+fn connect_failure(e: &std::io::Error) -> Probe {
+    match e.kind() {
+        std::io::ErrorKind::NotFound | std::io::ErrorKind::ConnectionRefused => Probe::NothingListens,
+        _ => Probe::Silent,
+    }
+}
+
+/// One probe of `path`, every step bounded by `deadline`: the connect gets
+/// the time left, and the write and each read get the time left as they
+/// start. A probe with no time left is [`Probe::Silent`].
+fn presence_probe(path: &Path, deadline: Instant) -> Probe {
+    use std::io::{Read, Write};
+    const REPLY_LIMIT: usize = 4096;
+
+    let time_left = || {
+        let left = deadline.saturating_duration_since(Instant::now());
+        (!left.is_zero()).then_some(left)
     };
-    if stream.set_read_timeout(Some(PING_TIMEOUT)).is_err()
-        || stream.set_write_timeout(Some(PING_TIMEOUT)).is_err()
+    let mut stream = match aoide_protocol::local_socket::connect_bounded(
+        path,
+        deadline.saturating_duration_since(Instant::now()),
+    ) {
+        Ok(stream) => stream,
+        Err(e) => return connect_failure(&e),
+    };
+    let Some(write_wait) = time_left() else {
+        return Probe::Silent;
+    };
+    if stream.set_write_timeout(Some(write_wait)).is_err()
+        || stream.write_all(br#"{"op":"ping"}"#).is_err()
+        || stream.shutdown(std::net::Shutdown::Write).is_err()
     {
-        return false;
+        return Probe::Silent;
     }
-    if stream.write_all(br#"{"op":"ping"}"#).is_err() {
-        return false;
+    let mut reply = Vec::new();
+    let mut chunk = [0u8; 512];
+    loop {
+        let Some(read_wait) = time_left() else {
+            return Probe::Silent;
+        };
+        if stream.set_read_timeout(Some(read_wait)).is_err() {
+            return Probe::Silent;
+        }
+        match stream.read(&mut chunk) {
+            Ok(0) => break,
+            Ok(n) if reply.len() + n > REPLY_LIMIT => return Probe::Silent,
+            Ok(n) => reply.extend_from_slice(&chunk[..n]),
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
+            Err(_) => return Probe::Silent,
+        }
     }
-    if stream.shutdown(std::net::Shutdown::Write).is_err() {
-        return false;
-    }
-    let mut buf = String::new();
-    if stream.read_to_string(&mut buf).is_err() {
-        return false;
-    }
-    serde_json::from_str::<serde_json::Value>(&buf)
+    let answered = serde_json::from_slice::<serde_json::Value>(&reply)
         .ok()
         .and_then(|v| v.get("ok").and_then(serde_json::Value::as_bool))
-        == Some(true)
+        == Some(true);
+    if answered {
+        Probe::Answered
+    } else {
+        Probe::Silent
+    }
 }
+
 
 /// No subcommand, or an explicit `tui` token, on this argv is the TUI
 /// (`main.rs:313-320`); `run`/`chat`/`resume`/anything else is not. Pure —
@@ -597,15 +663,56 @@ pub(crate) fn eidolon_presence_sessions() -> PresenceScan {
     eidolon_presence_sessions_with(process_table)
 }
 
+/// Probe each directory's `sock` at once, one scoped thread each, and return
+/// every directory with its probe, in the order given. The probes share
+/// `deadline` and run together, so a silent socket delays no probe after it.
+/// One thread per directory means a same-uid process that makes many
+/// directories makes each scan start as many (ruling 29). A probe whose thread
+/// cannot start runs on the scanning thread, after the threads before it are
+/// joined, so it may find no time left and read [`Probe::Silent`].
+fn probe_presence_dirs(dirs: Vec<PathBuf>, deadline: Instant) -> Vec<(PathBuf, Probe)> {
+    std::thread::scope(|scope| {
+        let spawned: Vec<_> = dirs
+            .into_iter()
+            .map(|dir| {
+                let sock = dir.join("sock");
+                let on_this_thread = sock.clone();
+                let handle = std::thread::Builder::new()
+                    .spawn_scoped(scope, move || presence_probe(&sock, deadline));
+                (dir, handle.map_err(|_| on_this_thread))
+            })
+            .collect();
+        spawned
+            .into_iter()
+            .map(|(dir, handle)| {
+                let probe = match handle {
+                    Ok(handle) => handle.join().unwrap_or(Probe::Silent),
+                    Err(sock) => presence_probe(&sock, deadline),
+                };
+                (dir, probe)
+            })
+            .collect()
+    })
+}
+
 /// The testable core of [`eidolon_presence_sessions`]. A missing presence
 /// root is `Observed(empty)` — no eidolon session has ever registered on
 /// this box, a genuine fact, not a failed observation. An unreadable root,
 /// an unreadable/unparseable `meta.json` (short of it simply having
-/// vanished since the listing), or `process_table` coming back `None` while
-/// at least one socket answered are all `Unknown` — the identical "a failed
-/// step invalidates the whole pass" discipline `codex_app_threads_with`
-/// holds. A directory whose socket does not answer contributes nothing —
-/// positively not live, exactly like a released flock — never `Unknown`.
+/// vanished since the listing), or `process_table` coming back `None` once
+/// a socket has answered or been held aside are all `Unknown` — the
+/// identical "a failed step invalidates the whole pass" discipline
+/// `codex_app_threads_with` holds.
+///
+/// Every directory's socket is probed at once, each on its own scoped
+/// thread, and all the probes share one deadline: [`PRESENCE_DEADLINE`] after
+/// the listing ends. Only then is `meta.json` read, and only for a
+/// directory whose socket answered or was held aside. A directory where
+/// nothing listens is not live, and its meta is never read. A socket that
+/// answers is live. A silent one is held aside and is live only while its
+/// meta's `pid` is a row of the table, the rule Eidolon's own sweep applies:
+/// a busy session can miss the ping. The scan cannot tell a dead session
+/// from one whose socket a same-uid process replaced (ruling 29).
 fn eidolon_presence_sessions_with(process_table: impl Fn() -> Option<String>) -> PresenceScan {
     let root = presence_root();
     let entries = match std::fs::read_dir(&root) {
@@ -616,12 +723,22 @@ fn eidolon_presence_sessions_with(process_table: impl Fn() -> Option<String>) ->
         Err(_) => return PresenceScan::Unknown(ScanFailure::RootUnreadable),
     };
 
+    let dirs: Vec<PathBuf> = entries
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|dir| dir.is_dir())
+        .collect();
+    let deadline = Instant::now() + PRESENCE_DEADLINE;
+    let probed = probe_presence_dirs(dirs, deadline);
+
     let mut live_meta = Vec::new();
-    for entry in entries.flatten() {
-        let dir = entry.path();
-        if !dir.is_dir() {
-            continue;
-        }
+    let mut silent_meta = Vec::new();
+    for (dir, probe) in probed {
+        let target = match probe {
+            Probe::Answered => &mut live_meta,
+            Probe::Silent => &mut silent_meta,
+            Probe::NothingListens => continue,
+        };
         let raw = match std::fs::read(dir.join("meta.json")) {
             Ok(raw) => raw,
             // Gone between the listing and the read: a genuine, transient
@@ -634,13 +751,10 @@ fn eidolon_presence_sessions_with(process_table: impl Fn() -> Option<String>) ->
             Ok(meta) => meta,
             Err(_) => return PresenceScan::Unknown(ScanFailure::MetaUnavailable),
         };
-        if !socket_answers(&dir.join("sock")) {
-            continue;
-        }
-        live_meta.push(meta);
+        target.push(meta);
     }
 
-    if live_meta.is_empty() {
+    if live_meta.is_empty() && silent_meta.is_empty() {
         return PresenceScan::Observed(Vec::new());
     }
 
@@ -648,6 +762,11 @@ fn eidolon_presence_sessions_with(process_table: impl Fn() -> Option<String>) ->
         return PresenceScan::Unknown(ScanFailure::ProcessTableUnavailable);
     };
     let procs: Vec<Proc> = parse_process_table(&table);
+    live_meta.extend(
+        silent_meta
+            .into_iter()
+            .filter(|meta| procs.iter().any(|p| p.pid == meta.pid)),
+    );
 
     let sessions = live_meta
         .into_iter()
@@ -1636,14 +1755,44 @@ mod tests {
     }
 
     #[test]
-    fn socket_answers_is_false_for_a_socket_nothing_is_listening_on() {
+    fn a_socket_nothing_listens_on_probes_nothing_listens() {
         let dir = unique_stage("eidolon-socket-dead");
-        assert!(!socket_answers(&dir.join("sock")), "no listener at all");
+        assert_eq!(presence_probe(&dir.join("sock"), presence_deadline()), Probe::NothingListens, "no listener at all");
         std::fs::remove_dir_all(dir).ok();
     }
 
     #[test]
-    fn socket_answers_true_only_for_an_exact_ok_reply() {
+    fn a_missing_socket_or_a_refused_connect_is_nothing_listening() {
+        use std::io::{Error, ErrorKind};
+        let probes = aoide_test_support::finishes_within(Duration::from_secs(1), || {
+            vec![
+                connect_failure(&Error::from(ErrorKind::NotFound)),
+                connect_failure(&Error::from(ErrorKind::ConnectionRefused)),
+            ]
+        })
+        .expect("a pure mapping returns at once")
+        .1;
+        assert_eq!(probes, vec![Probe::NothingListens; 2]);
+    }
+
+    #[test]
+    fn every_other_connect_error_is_silent() {
+        use std::io::{Error, ErrorKind};
+        let probes = aoide_test_support::finishes_within(Duration::from_secs(1), || {
+            vec![
+                connect_failure(&Error::from(ErrorKind::TimedOut)),
+                connect_failure(&Error::from(ErrorKind::PermissionDenied)),
+                connect_failure(&Error::from(ErrorKind::InvalidInput)),
+                connect_failure(&Error::from_raw_os_error(libc::EMFILE)),
+            ]
+        })
+        .expect("a pure mapping returns at once")
+        .1;
+        assert_eq!(probes, vec![Probe::Silent; 4], "fd pressure, a permission and a bad path say nothing about the session");
+    }
+
+    #[test]
+    fn an_exact_ok_reply_probes_answered() {
         use std::io::{Read, Write};
         #[cfg(unix)]
         use std::os::unix::net::UnixListener;
@@ -1661,7 +1810,7 @@ mod tests {
             let _ = stream.write_all(br#"{"ok":true}"#);
             let _ = accept_path;
         });
-        assert!(socket_answers(&path));
+        assert_eq!(presence_probe(&path, presence_deadline()), Probe::Answered);
         handle.join().unwrap();
         std::fs::remove_dir_all(dir).ok();
     }
@@ -1856,5 +2005,415 @@ mod tests {
         std::env::set_var("XDG_RUNTIME_DIR", &root);
         let scan = eidolon_presence_sessions_with(|| panic!("ps must never be shelled out to"));
         assert!(matches!(scan, PresenceScan::Observed(v) if v.is_empty()));
+    }
+
+    /// The listener type this host's presence probe is tested against.
+    #[cfg(unix)]
+    type Listener = std::os::unix::net::UnixListener;
+    #[cfg(windows)]
+    type Listener = aoide_protocol::win_unix::UnixListener;
+
+    /// A presence socket that accepts a connection and never answers. The
+    /// caller keeps the listener open; nothing ever accepts on it.
+    fn silent_socket(path: &std::path::Path) -> Listener {
+        Listener::bind(path).unwrap()
+    }
+
+    /// One presence directory under `root`, its `meta.json` naming `pid`.
+    fn write_presence_meta(root: &std::path::Path, id: &str, pid: u32) -> std::path::PathBuf {
+        let dir = root.join(id);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("meta.json"),
+            serde_json::json!({
+                "id": id, "pid": pid, "log": "/tmp/eid/sessions/1.eid", "cwd": "/home/khoa",
+                "repo": null, "model": "m", "started_ms": 0, "title": "t", "busy": false
+            })
+            .to_string(),
+        )
+        .unwrap();
+        dir
+    }
+
+    #[test]
+    fn a_silent_presence_is_live_while_its_pid_is_in_the_table() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["XDG_RUNTIME_DIR"]);
+        let root = unique_stage("eidolon-presence-silent");
+        std::env::set_var("XDG_RUNTIME_DIR", &root);
+        let dir = write_presence_meta(&presence_root(), "user-silent", 4242);
+        let _held_open = silent_socket(&dir.join("sock"));
+
+        let table = "4242 4244 /home/khoa/.local/bin/eidolon\n";
+        match eidolon_presence_sessions_with(|| Some(table.to_string())) {
+            PresenceScan::Observed(sessions) => assert_eq!(
+                sessions.iter().map(|s| (s.id.as_str(), s.pid)).collect::<Vec<_>>(),
+                vec![("user-silent", 4242)],
+                "a silent socket whose pid is in the table is live, as one that answered"
+            ),
+            PresenceScan::Unknown(f) => panic!("expected Observed, got Unknown({f:?})"),
+        }
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn a_silent_presence_whose_pid_is_not_in_the_table_contributes_nothing() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["XDG_RUNTIME_DIR"]);
+        let root = unique_stage("eidolon-presence-silent-gone");
+        std::env::set_var("XDG_RUNTIME_DIR", &root);
+        let dir = write_presence_meta(&presence_root(), "user-silent", 4242);
+        let _held_open = silent_socket(&dir.join("sock"));
+
+        let table = "1 0 /sbin/init\n";
+        let scan = eidolon_presence_sessions_with(|| Some(table.to_string()));
+        assert!(
+            matches!(scan, PresenceScan::Observed(v) if v.is_empty()),
+            "a silent socket whose pid has no row in the table is not live"
+        );
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn a_silent_presence_with_no_process_table_is_unknown() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["XDG_RUNTIME_DIR"]);
+        let root = unique_stage("eidolon-presence-silent-none");
+        std::env::set_var("XDG_RUNTIME_DIR", &root);
+        let dir = write_presence_meta(&presence_root(), "user-silent", 4242);
+        let _held_open = silent_socket(&dir.join("sock"));
+
+        let scan = eidolon_presence_sessions_with(|| None);
+        assert!(
+            matches!(scan, PresenceScan::Unknown(ScanFailure::ProcessTableUnavailable)),
+            "a silent presence cannot be judged without the table: {scan:?}"
+        );
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn a_listener_that_never_replies_probes_silent_not_dead() {
+        let dir = unique_stage("eidolon-socket-silent");
+        let held = dir.join("held");
+        let _held_open = silent_socket(&held);
+        let (_took, probe) = aoide_test_support::finishes_within(Duration::from_secs(1), move || {
+            presence_probe(&held, presence_deadline())
+        })
+        .expect("a listener that never replies must not hang the probe");
+        assert_eq!(probe, Probe::Silent, "accepted, never answered");
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn a_reply_that_is_not_ok_true_probes_silent() {
+        use std::io::{Read, Write};
+        let dir = unique_stage("eidolon-socket-not-ok");
+        let wrong = dir.join("wrong");
+        let listener = Listener::bind(&wrong).unwrap();
+        let handle = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut buf = [0u8; 256];
+            let _ = stream.read(&mut buf);
+            let _ = stream.write_all(br#"{"ok":false}"#);
+        });
+        let probe = aoide_test_support::finishes_within(Duration::from_secs(1), move || {
+            presence_probe(&wrong, presence_deadline())
+        })
+        .expect("a reply must not hold the probe past its deadline")
+        .1;
+        assert_eq!(probe, Probe::Silent, "a top-level ok that is not true is silent");
+        handle.join().unwrap();
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn a_reply_with_ok_true_and_another_key_answers() {
+        use std::io::{Read, Write};
+        let dir = unique_stage("eidolon-socket-extra-key");
+        let path = dir.join("sock");
+        let listener = Listener::bind(&path).unwrap();
+        let handle = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut buf = [0u8; 256];
+            let _ = stream.read(&mut buf);
+            let _ = stream.write_all(br#"{"ok":true,"x":1}"#);
+        });
+        let probe = aoide_test_support::finishes_within(Duration::from_secs(1), move || {
+            presence_probe(&path, presence_deadline())
+        })
+        .expect("a reply must not hold the probe past its deadline")
+        .1;
+        assert_eq!(probe, Probe::Answered, "a top-level ok of true answers, whatever else the reply holds");
+        handle.join().unwrap();
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn a_silent_pid_live_session_keeps_its_record_and_petname_through_the_real_sync() {
+        let _lock = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["AOIDE_STATE_DIR", "AOIDE_STAGE_DIR", "XDG_RUNTIME_DIR"]);
+        let root = unique_stage("eidolon-silent-sync");
+        for sub in ["stage", "state", "state/mail", "state/sessions", "run"] {
+            std::fs::create_dir_all(root.join(sub)).unwrap();
+        }
+        std::env::set_var("AOIDE_STAGE_DIR", root.join("stage"));
+        std::env::set_var("AOIDE_STATE_DIR", root.join("state"));
+        std::env::set_var("XDG_RUNTIME_DIR", root.join("run"));
+
+        // This process is the presence's pid, so the real `ps` lists it.
+        let me = std::process::id();
+        let dir = write_presence_meta(&presence_root(), "user-silent", me);
+        let _held_open = silent_socket(&dir.join("sock"));
+        let record = native_enrolment("user-silent", me);
+        write_stage(
+            &sessions_path(),
+            &SessionsFile { sessions: vec![record], ..Default::default() },
+        )
+        .unwrap();
+
+        let (_changed, dropped) = sync_eidolon_sessions();
+        assert!(dropped.is_empty(), "a silent, pid-live session is not dropped: {dropped:?}");
+        let roster: Vec<SessionRecord> = load_stage::<SessionsFile>(&sessions_path()).unwrap().sessions;
+        let kept = roster
+            .iter()
+            .find(|r| r.session_id == "user-silent")
+            .expect("its record survives the real sync");
+        assert_eq!(kept.petname.as_deref(), Some("gone-otter"), "and keeps its petname");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The deadline a probe under test is given: the scan's own budget,
+    /// starting now.
+    fn presence_deadline() -> Instant {
+        Instant::now() + PRESENCE_DEADLINE
+    }
+
+    /// A presence socket that accepts one connection, reads the request to
+    /// its end, and answers `{"ok":true}`.
+    fn answering_socket(path: &std::path::Path) -> std::thread::JoinHandle<()> {
+        use std::io::{Read, Write};
+        let listener = Listener::bind(path).unwrap();
+        std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = Vec::new();
+            let _ = stream.read_to_end(&mut request);
+            let _ = stream.write_all(br#"{"ok":true}"#);
+        })
+    }
+
+    /// A listener whose connection backlog is full: one connection queued,
+    /// nothing ever accepting. `UnixListener::bind` listens with a backlog of
+    /// 128, so the listen is called again with 0.
+    #[cfg(unix)]
+    fn saturated_socket(path: &std::path::Path) -> (Listener, Vec<std::os::unix::net::UnixStream>) {
+        use std::os::unix::io::AsRawFd;
+        let listener = Listener::bind(path).unwrap();
+        // SAFETY: `listener` holds a listening socket; `listen(2)` takes no pointers.
+        assert_eq!(unsafe { libc::listen(listener.as_raw_fd(), 0) }, 0);
+        let mut queued = Vec::new();
+        loop {
+            match aoide_protocol::local_socket::connect_bounded(path, Duration::from_millis(20)) {
+                Ok(stream) => queued.push(stream),
+                Err(e) => {
+                    assert_eq!(e.kind(), std::io::ErrorKind::TimedOut, "a full backlog times out: {e}");
+                    break;
+                }
+            }
+            assert!(queued.len() < 64, "a backlog of 0 is full after one connection");
+        }
+        (listener, queued)
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_saturated_presence_socket_is_silent_and_the_scan_returns() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["XDG_RUNTIME_DIR"]);
+        let root = unique_stage("eidolon-presence-saturated");
+        std::env::set_var("XDG_RUNTIME_DIR", &root);
+        let dir = write_presence_meta(&presence_root(), "sat", 4242);
+        let (_listener, _queued) = saturated_socket(&dir.join("sock"));
+
+        let table = "4242 4244 /home/khoa/.local/bin/eidolon\n".to_string();
+        let (_took, scan) = aoide_test_support::finishes_within(Duration::from_secs(2), move || {
+            eidolon_presence_sessions_with(|| Some(table.clone()))
+        })
+        .expect("a saturated presence socket must not hang the scan");
+        match scan {
+            PresenceScan::Observed(sessions) => assert_eq!(
+                sessions.iter().map(|s| (s.id.as_str(), s.pid)).collect::<Vec<_>>(),
+                vec![("sat", 4242)],
+                "silent, with its pid in the table, is live"
+            ),
+            PresenceScan::Unknown(f) => panic!("expected Observed, got Unknown({f:?})"),
+        }
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_presence_socket_that_refuses_this_uid_is_silent_and_counts_while_its_pid_lives() {
+        use std::os::unix::fs::PermissionsExt;
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["XDG_RUNTIME_DIR"]);
+        let root = unique_stage("eidolon-presence-eacces");
+        std::env::set_var("XDG_RUNTIME_DIR", &root);
+        let refused = write_presence_meta(&presence_root(), "refused", 4242);
+        let _refusing = silent_socket(&refused.join("sock"));
+        std::fs::set_permissions(refused.join("sock"), std::fs::Permissions::from_mode(0o000)).unwrap();
+        let connect = std::os::unix::net::UnixStream::connect(refused.join("sock"));
+        assert_eq!(
+            connect.err().map(|e| e.kind()),
+            Some(std::io::ErrorKind::PermissionDenied),
+            "the mode 000 socket must refuse this uid; this test cannot run as root"
+        );
+        let answering = write_presence_meta(&presence_root(), "answering", 4343);
+        let _answering = answering_socket(&answering.join("sock"));
+
+        let table = "4242 1 /home/khoa/.local/bin/eidolon\n4343 1 /home/khoa/.local/bin/eidolon\n".to_string();
+        let (_took, scan) = aoide_test_support::finishes_within(Duration::from_secs(2), move || {
+            eidolon_presence_sessions_with(|| Some(table.clone()))
+        })
+        .expect("a socket this uid cannot connect to must not hang the scan");
+        match scan {
+            PresenceScan::Observed(sessions) => {
+                let mut ids: Vec<&str> = sessions.iter().map(|s| s.id.as_str()).collect();
+                ids.sort_unstable();
+                assert_eq!(
+                    ids,
+                    vec!["answering", "refused"],
+                    "a permission error is silent, not nothing listening: its pid keeps it live"
+                )
+            }
+            PresenceScan::Unknown(f) => panic!("expected Observed, got Unknown({f:?})"),
+        }
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn eight_silent_presence_sockets_cost_one_deadline() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["XDG_RUNTIME_DIR"]);
+        let root = unique_stage("eidolon-presence-eight");
+        std::env::set_var("XDG_RUNTIME_DIR", &root);
+        let mut held = Vec::new();
+        let mut table = String::new();
+        for n in 0..8u32 {
+            let pid = 5000 + n;
+            let dir = write_presence_meta(&presence_root(), &format!("s{n}"), pid);
+            held.push(silent_socket(&dir.join("sock")));
+            table.push_str(&format!("{pid} 1 /home/khoa/.local/bin/eidolon\n"));
+        }
+        let (_took, scan) = aoide_test_support::finishes_within(Duration::from_secs(1), move || {
+            eidolon_presence_sessions_with(|| Some(table.clone()))
+        })
+        .expect("eight silent sockets must cost one deadline, not eight");
+        match scan {
+            PresenceScan::Observed(sessions) => {
+                assert_eq!(sessions.len(), 8, "silent, pids in the table: all live")
+            }
+            PresenceScan::Unknown(f) => panic!("expected Observed, got Unknown({f:?})"),
+        }
+        drop(held);
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn a_presence_peer_that_drips_bytes_is_cut_at_the_deadline() {
+        use std::io::Write;
+        let dir = unique_stage("eidolon-socket-drip");
+        let path = dir.join("drip");
+        let listener = Listener::bind(&path).unwrap();
+        std::thread::spawn(move || {
+            let Ok((mut stream, _)) = listener.accept() else { return };
+            for _ in 0..100 {
+                if stream.write_all(b"x").is_err() {
+                    return;
+                }
+                std::thread::sleep(Duration::from_millis(50));
+            }
+        });
+        let (_took, probe) = aoide_test_support::finishes_within(Duration::from_secs(1), move || {
+            presence_probe(&path, presence_deadline())
+        })
+        .expect("a peer that keeps sending must not hold the probe past its deadline");
+        assert_eq!(probe, Probe::Silent, "bytes keep coming, but no reply is complete by the deadline");
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn a_broken_meta_where_nothing_listens_is_skipped() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["XDG_RUNTIME_DIR"]);
+        let root = unique_stage("eidolon-presence-broken");
+        std::env::set_var("XDG_RUNTIME_DIR", &root);
+        let broken = presence_root().join("broken");
+        std::fs::create_dir_all(&broken).unwrap();
+        std::fs::write(broken.join("meta.json"), "{ not json").unwrap();
+        let live = write_presence_meta(&presence_root(), "ans", 4242);
+        let _answering = answering_socket(&live.join("sock"));
+
+        let table = "4242 1 /home/khoa/.local/bin/eidolon\n".to_string();
+        let scan = aoide_test_support::finishes_within(Duration::from_secs(2), move || {
+            eidolon_presence_sessions_with(|| Some(table.clone()))
+        })
+        .expect("a directory with a broken meta must not hang the scan")
+        .1;
+        match scan {
+            PresenceScan::Observed(sessions) => assert_eq!(
+                sessions.iter().map(|s| s.id.as_str()).collect::<Vec<_>>(),
+                vec!["ans"],
+                "a directory where nothing listens is skipped before its meta is read"
+            ),
+            PresenceScan::Unknown(f) => panic!("expected Observed, got Unknown({f:?})"),
+        }
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn a_broken_meta_where_a_socket_answers_is_unknown() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["XDG_RUNTIME_DIR"]);
+        let root = unique_stage("eidolon-presence-broken-live");
+        std::env::set_var("XDG_RUNTIME_DIR", &root);
+        let dir = presence_root().join("bad");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("meta.json"), "{ not json").unwrap();
+        let _answering = answering_socket(&dir.join("sock"));
+
+        let scan = aoide_test_support::finishes_within(Duration::from_secs(2), || {
+            eidolon_presence_sessions_with(|| Some("4242 1 /x\n".to_string()))
+        })
+        .expect("a live socket with a broken meta must not hang the scan")
+        .1;
+        assert!(
+            matches!(scan, PresenceScan::Unknown(ScanFailure::MetaUnavailable)),
+            "a live socket whose meta cannot be read is Unknown: {scan:?}"
+        );
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    /// A silent socket ahead of one that answers: the answer still comes, since
+    /// the probes run together and the silence delays nothing after it.
+    #[test]
+    fn a_silent_socket_does_not_starve_the_probe_after_it() {
+        let root = unique_stage("eidolon-probe-order");
+        let silent_dir = root.join("silent");
+        let answering_dir = root.join("answering");
+        std::fs::create_dir_all(&silent_dir).unwrap();
+        std::fs::create_dir_all(&answering_dir).unwrap();
+        let _held_open = silent_socket(&silent_dir.join("sock"));
+        let _answering = answering_socket(&answering_dir.join("sock"));
+
+        let (_took, probed) = aoide_test_support::finishes_within(Duration::from_secs(2), move || {
+            probe_presence_dirs(vec![silent_dir, answering_dir], presence_deadline())
+        })
+        .expect("two probes must not hang");
+        assert_eq!(
+            probed.iter().map(|(_, probe)| *probe).collect::<Vec<_>>(),
+            vec![Probe::Silent, Probe::Answered],
+            "each directory keeps its place in the order given"
+        );
+        std::fs::remove_dir_all(root).ok();
     }
 }

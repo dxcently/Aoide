@@ -26,6 +26,9 @@ other crate in this workspace sits above.
   `Command` declares `one_of` and `brief`, and `doors` (which doors may call
   it; `CLI_DOORS` = `[cli, daemon]` when absent). `Flag` declares `doors` too
   (empty = the command's doors). `Command::opens(door)` is the predicate.
+  `Command` also carries the marks `approves` and `launches`, which the
+  desktop app's floor reads through `schema --json`; `Command::check` never
+  reads them.
   `Command::check` enforces the declarations (the door gate first, then the
   argument rules with defaults applied) and `Command::invoke` is
   check-then-handler, the entry every `dispatch()` uses. A door the command
@@ -69,6 +72,10 @@ other crate in this workspace sits above.
   `aoide-conduct`'s graph views (re-exported as `graph::clean_line`), and
   `aoide-server`'s A2A door.
 - `invocation` — `Invocation`, the parsed call handed to a dispatcher.
+- `local_socket` — `connect_bounded`, a unix connect that cannot hang: a full
+  listen backlog, which makes a bare `UnixStream::connect` wait forever, times
+  out instead. The socket is close-on-exec, as `UnixStream::connect` makes it.
+  On Windows it is `win_unix`'s `connect_timeout`.
 - `output` — `Outcome` + exit codes, the generic envelope every command
   returns; also the taught-error shape (`Outcome::refuse`, `Kind`, `Fix`,
   `io_cause`/`serde_cause`) and the text render of `why`/`fix` and of an
@@ -91,7 +98,10 @@ other crate in this workspace sits above.
   value); `append_audit` structurally forbids `untrusted_data` on that one
   class, stripping it (with an `eprintln!`, never a panic — an audit call must
   never take its caller down) rather than trusting every call site to never set
-  it. `append_audit` escapes every string field first (DEL, C1, `Cf` and the
+  it. `EventClass::State` is the stage-file state cue `aoide-server`'s watcher
+  writes: name-only, `kind` `changed`, `payload.files` the changed file's base
+  name. It is a cue to re-read, never a record of an operation.
+  `append_audit` escapes every string field first (DEL, C1, `Cf` and the
   invisible set become `\u{hex}` text, and a literal backslash followed by `\`,
   `u` or a spelled character is doubled: `untrusted::escape_for_log`, once per
   value), then clamps the escaped `AuditRecord.message` to 512 bytes on a UTF-8
@@ -222,8 +232,10 @@ other crate in this workspace sits above.
 - `agents` — `agent_profile`, the per-harness knowledge table (hook
   vocabulary, model ceilings, transcript layout, the hook-settings and
   skills-directory locations, the argv that launches a harness fresh and,
-  where verified, the argv that resumes a prior session of it by its own
-  id — P-D7 — and, where a harness offers one, the argv that delivers a
+  where verified, the argv that resumes a prior session of it — P-D7 — as a
+  `ResumeArgs`: `ById` takes the harness's own session id, `ByLog` takes the
+  journal path (eidolon's `tui --session`), and no caller passes one where the
+  other is meant — and, where a harness offers one, the argv that delivers a
   message to a live session WITHOUT the pty composer at all —
   `native_send`, P-EIDOLON — plus the two launch-time facts a first turn
   needs: `readiness`, WHICH signal says a just-started process of this
@@ -246,7 +258,7 @@ other crate in this workspace sits above.
   config path only so `hooks install`'s Declarative refusal has something
   concrete to cite, its transcript is a single small swarm presence file
   (`meta.json`) rather than an append-only per-session log, so
-  `permission_keys`, `skills_dir`, `resume_args`, and the transcript's
+  `permission_keys`, `skills_dir`, and the transcript's
   `say`/`tool`/`context_tokens` are named-absent rather than filled — and
   it is the one profile so far with `native_send: Some(...)`, since a
   message to it never needs the pty composer a keystroke path would
@@ -315,6 +327,19 @@ other crate in this workspace sits above.
   entry points through this seam, never `inquire` directly ("wrap, don't
   scatter"; the DAG-leaf invariant below still holds, since `inquire` is
   a third-party crate, not an `aoide-*` one).
+- `peercred` — the kernel-truth identity of a connected peer: `peer_cred`
+  (`SO_PEERCRED` on Linux/Android, the peer's token user on native Windows,
+  `None` elsewhere), the `PeerCred` it returns, the `PeerUser` a gate compares
+  (a uid on Unix, a SID on Windows, never one derived from the other), and
+  `own_user`, this process's side of the comparison. The one copy every
+  identity gate in the workspace reads through.
+- `shellbridge` — the socket framework every bridge socket runs: `run_on`
+  binds and listens, `serve` accepts behind the cross-uid floor
+  (`cross_uid_gate`), and each connection offers a line to the socket's
+  `front` hook first, then to its `Verb` table by `cmd`, then drops it
+  audited as `unparseable`. The verbs and the core commands are the caller's;
+  this module holds only the loop, so a socket owner that links only this
+  crate and `aoide-storage` serves one too.
 - `model`, `policy` — model context ceilings, and the daemon's
   `Gate`/`Subscription` policy types.
 

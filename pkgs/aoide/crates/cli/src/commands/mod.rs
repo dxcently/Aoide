@@ -71,6 +71,7 @@ const LAYOUT: Layout = Layout {
                 ("config", "Show or set the runtime config"),
                 ("usage", ""),
                 ("soundcheck", ""),
+                ("job", "Local jobs on systemd user timers"),
             ],
         ),
     ],
@@ -160,6 +161,7 @@ pub fn all() -> Registry {
     aoide_client::context::register(&mut r); // explicit shared persona/memory retrieval
     aoide_conduct::commands::graph::register_mail_ring(&mut r); // the local doorbell (MAIL.md "Delivery and the doorbell", P-M5a-2)
     aoide_client::charter::register(&mut r); // mesh charter init/sign/accept/reroot — one operator's machines, signed and carried (P-CHARTER, appended newest)
+    aoide_conduct::commands::job::register(&mut r); // job add/remove/list/runs — local jobs on systemd user timers (app-plan-v21 §7.2, appended newest)
 
     r.arrange(LAYOUT);
     r

@@ -650,9 +650,10 @@ blank one is refused too.
   and `reap_inner` collect the ids they leave the roster with, and
   `drop_ended_sessions` drops their letters once the roster write has returned,
   never under the roster lock. The daemon tick runs `sweep_session_letters`
-  before its mail drain: it drops own letters with no session (`pre-131`) and
-  those whose session is off the roster or `done` (`session-gone`), and it
-  skips the session pass when the roster cannot be read.
+  before its mail drain: it drops every receipt, whatever its session, and own
+  letters with no session (`pre-131`), and those whose session is off the roster
+  or `done` (`session-gone`); it skips the session pass when the roster cannot
+  be read.
 
 - `graph/window.rs` — the session window record (`session window attach`,
   `session window closed`, `session window roster`, the untracked-terminal
@@ -910,9 +911,10 @@ blank one is refused too.
   non-`eidolon` record already claims left entirely alone) but differs in
   two ways eidolon's own contract forces: this IS an agent session
   (`kind:"agent"`, not `"app"`), so `parentSessionId` is resolved here — the
-  first conducted ancestor (`conductable == Some(true)`, not `done`) up an
-  injected `/proc` ancestry walk (production: `aoide_storage::attest::
-  pid_ancestry`) — and `state` is written by this SAME function on every
+  nearest conducted wrap (`conductable == Some(true)`, not `done`) at or
+  above the presence pid, up an injected `/proc` ancestry walk (production:
+  `aoide_storage::attest::pid_ancestry`) — and `state` is written by this
+  SAME function on every
   reconcile rather than deferred to a separate capture pass: a TUI owner's
   `busy` (`meta.json`) maps to `working`/`idle`, a non-TUI owner's `busy` is
   eidolon's own producer-side defect (never set outside the TUI) so such a
@@ -954,11 +956,24 @@ blank one is refused too.
   Discovery is read-only over `$XDG_RUNTIME_DIR/eidolon/<id>/{meta.json,
   sock}` — the identical root eidolon's own `Presence::root()` derives, read
   and probed here, never swept: a stale directory is the PRODUCER's own to
-  clean up. Liveness is the presence socket answering `{"op":"ping"}` with
-  `{"ok":true}` inside the same 250ms budget eidolon's own client enforces
-  — never a stat, never `/proc` — so a directory whose socket does not
-  answer simply contributes nothing to that pass's observed set (not a
-  scan failure). A `meta.json` that cannot be read or parsed for any other
+  clean up. Liveness is the presence socket's answer to `{"op":"ping"}`,
+  never a stat, never `/proc`. Every directory's socket is probed at once,
+  each on its own thread, and the probes share one 250ms deadline counted
+  from the end of the listing, the connect included. Eidolon's own client has
+  no bound on its connect, so a presence that holds its socket without
+  answering would otherwise hang the pass. A socket whose reply has a
+  top-level `"ok": true` is live. A directory where nothing listens (no
+  socket file, or a connect refused) contributes nothing to that pass's
+  observed set (not a scan failure), its `meta.json` is never read, and it
+  never makes the scan read the process table. A socket that stays silent,
+  whose connect times out on a full listen backlog, or whose connect fails
+  any other way (fd pressure, a permission), is held aside: it is live while
+  its `meta.json`'s `pid` is a row of the process table, the rule Eidolon's
+  own sweep applies, since a busy session can miss the ping.
+  Residual: if another process reuses the pid of a session whose socket is
+  silent, that session stays live until that process exits, so the roster
+  shows it and the resume gate skips its journal. A `meta.json` that cannot
+  be read or parsed for any other
   reason invalidates the WHOLE pass (`PresenceScan::Unknown`), the same
   "any single indeterminate step voids the observation" discipline
   `codex_app.rs` holds; `reconcile_eidolon_sessions` changes nothing on
@@ -999,14 +1014,19 @@ blank one is refused too.
   with no roots for a host uses `add` instead, so a host with nothing to
   replace keeps its existing roots rather than being wiped); `removehost`
   runs `project remove <name> --host <host>` and requires exactly one host.
-  Two sockets, one loop (`serve(listener, &'static Socket)`). A `Socket` names
-  its core arms (`core`), its verb table and the audit log its drops land in.
-  `run_core` (called by aoided's run loop after its own locks and socket) seeds the
-  stage files and serves `CORE` on `aoide/shellbridge.sock`. `run_on(path, socket)`
-  serves a binary's own socket; `strillix shellbridge --run` passes its `SOCKET`
-  (`core: false`), so no core arm runs in the desktop process. A line that
-  no arm or table claims goes to `drop_unparsed(log, …)`, which audits it to that
-  socket's log and drops it, except that a line naming `sessiontrace` is answered.
+  The socket loop is `aoide_protocol::shellbridge` (`serve`, `run_on`, `Socket`,
+  `Verb`, `Flow`, `drop_unparsed`): the accept, the cross-uid floor, the line
+  routing and the drop. A `Socket` names its verb table, the audit log its drops
+  land in, and an optional `front` hook. This crate owns `CORE` and its `front`,
+  `core_front`, which runs the core arms. `seed_core_stage` (called by aoided's
+  run loop after its own locks, before the watcher's baseline) seeds the stage
+  files; `run_core` serves `CORE` on `aoide/shellbridge.sock`. A desktop binary
+  serves its own socket with `aoide_protocol::shellbridge::run_on`; `strillix
+  shellbridge --run` passes its `SOCKET` (`front: None`), so no core arm runs in
+  the desktop process. A line that no hook or table claims is audited to that
+  socket's log and dropped, and answers nothing. Only the core socket
+  answers a malformed `sessiontrace` with a `bad-request` refusal; the desktop
+  socket drops it like any line no verb serves.
   The desktop's wire, replies and audit lines are in
   `pkgs/aoide/crates/strillix/README.md`.
 - `commands` — this crate's CLI commands, registered from one `register()`
@@ -1025,27 +1045,39 @@ blank one is refused too.
   `graph/trace.rs::session_trace`, the read surface over a harness's own TRACE:
   the whole run, record by record, where every other session command reads the
   roster or acts on a session. Human form is one line per record,
-  `#<id>  <hh:mm:ss local>  <kind>  <summary>` — an assistant message shows
-  its thinking (dimmed, cut to 80) then its text then each `→ tool(name)`,
-  a tool result shows its first line prefixed `!` when it errored, a settled
-  turn shows its stop reason and input/output tokens; `--json` passes the
-  raw lines through unchanged, `--follow` re-reads every 500ms until Ctrl-C
-  (CLI-only), `--tail N` shows the last N (default 50). **Read-only, and so
-  outside every other discipline in this file:** no stage write, no stage
-  lock, no `daemon_dispatch` — unlike the L4 session-WRITE family above,
-  there is nothing to route. `<id>` resolves through
+  `#<id>  <hh:mm:ss local>  <kind>  <summary>` — an assistant message shows its
+  thinking (dimmed, cut to 80) then its text then each `→ tool(name)`, a tool
+  result shows its first line prefixed `!` when it errored, a settled turn shows
+  its stop reason and input/output tokens; `--json` carries `data.lines`, the
+  journal's own JSON lines (raw unsafe characters removed, JSON escapes kept, so
+  a decoded line holds untrusted strings; a consumer shows `data.steps`),
+  `--follow` re-reads every 500ms until Ctrl-C (CLI-only), `--tail N` shows the
+  last N (default 50). The dim follows CONTRACTS's color rule (a tty only, never
+  for `NO_COLOR`, `TERM=dumb` or `--json`, and only at the CLI door); the door's
+  `--color` does not reach it, since the trace builds its text before the door
+  renders. **Read-only, and so outside every other discipline in this file:** no
+  stage write, no stage lock, no `daemon_dispatch` — unlike the L4 session-WRITE
+  family above, there is nothing to route. `<id>` resolves through
   `aoide_storage::addr::resolve`, the SAME resolver `send --to` and bare
-  `session`'s filter use (a `node/<rest>` target is a taught refusal: a
-  trace is a file on the node that wrote it, and the hub preference is
-  `send`'s routing rule, not a reader's); the trace is reached through the
-  harness CAPABILITY `TranscriptSpec::trace` and its path through
-  `TranscriptSpec::locate`, never by naming a harness by string. A session
-  whose harness keeps no trace, whose presence names none, or whose agent
-  has no registered profile is a taught error naming which — never an empty
-  listing; a trace that EXISTS and holds no records yet is an honest `0
-  record(s)`.
+  `session`'s filter use (a `node/<rest>` target is a taught refusal: a trace is
+  a file on the node that wrote it, and the hub preference is `send`'s routing
+  rule, not a reader's); the trace is reached through the harness CAPABILITY
+  `TranscriptSpec::trace` and its path through `TranscriptSpec::locate`, never
+  by naming a harness by string. A session whose harness keeps no trace, whose
+  presence names none, or whose agent has no registered profile is a taught
+  error naming which — never an empty listing; a trace that EXISTS and holds no
+  records yet is an honest `0 record(s)`. A session that has left the roster is
+  named by its ledger line when its `sessionId` is exactly the target: the
+  line's agent, cwd and `logPath` stand in for the roster row, the message says
+  the session ended and when, and `--follow` prints its window and returns. A
+  `done` record prints its window the same way, and `--follow` returns for it
+  too. A `logPath` is the hint unless it lies in `session_logs_dir()`. Nothing
+  else is matched against the ledger. Every text the trace prints or puts in its
+  data is stripped of the characters no terminal may be handed
+  (`aoide_protocol::untrusted::strip_unsafe`), under the trace's own clips,
+  except `data.lines` (above).
 - **The step projection (Phase B, `graph/trace.rs`) — the SAME window, as
-  steps.** `data.steps` (beside the untouched `data.lines`) is one object per
+  steps.** `data.steps` (beside `data.lines`) is one object per
   emitted content block, projected by `steps_of`/`steps_of_lines`: one step per
   non-empty block of an `AssistantMessage`/`UserMessage` in the record's own
   order, one for a `ToolResult`'s own output, one for a settled turn or any
@@ -1074,8 +1106,9 @@ blank one is refused too.
   `no-answer`/`bad-request`). The gate refuses what it cannot answer honestly:
   a blank/non-id-shaped `sessionId`, a non-numeric or `0` `lines`, an unknown
   `clip` (refused, never widened); `lines` is clamped to `TRACE_LINES_MAX` from
-  above, and a line NAMING this verb that fails that gate is answered with the
-  refusal rather than dropped silently, because its caller is parked on a reply.
+  above, and on the core socket, a line NAMING this verb that fails that gate is
+  answered with the refusal rather than dropped silently, because its caller is
+  parked on a reply.
   `run_core_bounded` holds the wall clock: a 10 s deadline (longer than the
   producer pull's own 5 s, so it never fires on a legitimate slow export), the
   child killed and reaped on expiry, both pipes read by SLOT-COUNTED reader
@@ -1115,22 +1148,56 @@ blank one is refused too.
   selection is an honest `Outcome::ok` no-op naming the undying set as
   empty, never a silent success. Every surviving candidate then resolves
   through TWO arms
-  (`resolve_candidate`, P-C6): the harness arm, unchanged, filters to
-  harnesses with a verified `AgentProfile.resume_args`
-  (`aoide_protocol::agents`); a candidate the harness arm finds nothing for
-  falls to the TERMINAL arm — a `restore` snapshot present (P-C5) means it
+  (`resolve_candidate`, P-C6): the harness arm resolves a harness with a
+  verified `AgentProfile.resume_args` (`aoide_protocol::agents`) — `ById` by
+  the harness's own session id, `ByLog` (eidolon) by the journal its ledger
+  line's `logPath` names, through `journal_of`; a candidate the harness arm
+  finds nothing for falls to the TERMINAL arm — a `restore` snapshot present
+  (P-C5) means it
   is a conducted shell, not a harness, so it resolves `[<login shell>, "-l"]`
   (`login_shell`, the same `$SHELL` → passwd → `/bin/sh` order
   `modules/dendrites/kitty.nix`'s own wrapper uses) rather than a
   `--resume <id>` no shell could ever honor. A candidate neither arm
   resolves is skipped with a taught message naming it, never a guessed
-  invocation. Every resolved candidate spawns via the windowed path
+  invocation. A `ByLog` line whose `logPath` is absent, not absolute or
+  unsafe, inside `session_logs_dir()`, a symbolic link, or not a regular file
+  is skipped with a sentence that names the entry and the cause, and never
+  falls to the terminal arm. The regular-file check proves a regular file at
+  that path, by its own name, and not that the file is an Eidolon journal.
+  Every resolved candidate spawns via the windowed path
   (`graph/spawn.rs`, P-D7) with its resolved argv and `--cwd` set to the
   ledger entry's own cwd.
   A resurrected session is ALWAYS a fresh `sessionId` — ids are never
   recycled — and gets stamped `resumedFrom` (`session_store.rs::
   stamp_resumed_from`) naming the ledger entry it continues; `build_graph`
   projects that as an additive `resumed` edge beside `spawned`/`anchors`.
+  The undying mark moves onto the new id in the same step, except for a
+  `ByLog` revival: its mark stays on the ledger id, because the journal is
+  the session and the terminal is only its window.
+  **One engine per session:** a candidate is never launched while its
+  session is live, or while a launch of it is in flight. The claim step
+  runs before each spawn. For a `ByLog` candidate it reads the presence scan
+  outside any lock, and a scan that cannot finish skips the candidate. Then,
+  under the stage lock, it reads `sessions.json` and `state/resuming.json`
+  and runs the block (`block_verdict`), which reads no file: the journals are
+  resolved once before it. The candidate is live when a session
+  that is not `done` holds its id, names it as `resumedFrom`, or sits on its
+  journal, and the refusal names that session as `liveSessionId`. It is in
+  flight when its claim's new id has a session that is not `done`, or none
+  yet while the claim is under 60 seconds old, and the refusal names the claim
+  as `claimedBy`. A by-journal launch's claim names its journal and blocks a
+  candidate on that journal whichever session it names; that refusal says the
+  journal is shared. A free candidate's claim is written before its spawn. A
+  failed spawn drops it, and a successful spawn keeps it, so the claim goes
+  stale once its session is `done`, or once the bound passes with no session
+  registered under its id. A claim stamped more than 5 seconds ahead of the
+  clock is stale too, and the claim step drops it. A clock step of more than 5
+  seconds backward, or more than 60 seconds forward, during a launch's
+  registration can let a second launch through. The dry run runs the same block
+  on the same reads and writes nothing. Eidolon's own journal lock is not
+  built:
+  `SessionLog::open` takes none, so a second engine on a live journal stays
+  possible until that lands.
   Never a hard `Outcome::error` over a per-candidate spawn failure (a
   headless host's taught "no `$AOIDE_TERMINAL`" error, for one) — every
   outcome folds into `resurrected`/`skipped`/`failed` and the command
@@ -1202,10 +1269,56 @@ blank one is refused too.
   boot sweep finds the revived session in the undying set without
   re-walking the manifest — unconditional, unlike flag-mode's own TRANSFER
   a few paragraphs up, which only ever moves a PRE-existing mark. Every
-  outcome (both modes) is audited exactly once (`audit_resurrect`),
+  revival decision (both modes) gets one handler line (`audit_resurrect`),
   including an empty selection — the boot-sweep postmortem's own finding
   that an early return must never silently skip the audit line a full run
-  gets.
+  gets. A usage error or a stage-file miss gets none, and the door's line
+  comes with every call.
+
+  **Text and data:** each line resurrect writes for a person (its message,
+  each changed line, each reason, its stderr line) is stripped whole once
+  formatted (`strip_unsafe`), whatever it names: a ledger or claim id, an
+  agent, an origin, a project, a manifest's host, dir or root, a far node's
+  session id or error, a launch's refusal or a stage file's read error. A
+  plan line is one exception: it keeps its bytes where it is stored and
+  compared, and is spelled where it is shown (`visible_held`), as each line
+  of a dry run's message is. Every other field of the data carries its value
+  as its source holds it (the ledger, `state/resuming.json`,
+  `sessions.json`, the manifest or the far node's answer), `liveSessionId`,
+  `claimedBy`, `host`, `dir` and `manifestRoot` included, so a consumer can
+  name it back; a consumer spells it at display. The other exception is a
+  held call's answer, the hold's own lines (`hold_whole`), which name the
+  project as its caller typed it.
+
+  **Dry run (`--dry-run`):** the flag takes the selection the launch would
+  take and lists the rows the launch acts on, launching, holding and typing
+  nothing. Flag mode lists what `select_candidates` returns, with
+  `pickedByBare` true on exactly the rows the bare `--project P` form revives
+  (`undying_selection`). Bare mode lists one row per manifest spec, decided by
+  the helpers the launch uses (`enrichment`, `clean_argv`, `summon_check`,
+  `resolve_candidate`). A row the launch would skip lists as `skipped`, as the
+  launch's own `skipped[]` reports it. A remote spec is never sent: its row
+  carries only the local pre-wire verdict. The message spells each line as the
+  pending view spells a held plan (`visible_held`); the data stays raw, but
+  each reason is text (above). From an
+  unattested caller on a door that cannot approve, a dry run gets what the call
+  would give that caller, minus the launch: in bare mode the launch's refusal;
+  with `--id` or `--all` and no `--project`, the usage error the call gives;
+  with `--project`, the `dry-run-not-held` refusal, since the flag-mode launch
+  would hold and show that caller nothing. A dry run holds on no door. Its
+  handler writes three things, and no others: the audit line (status
+  `dry-run`, at the points the real call audits; none for a usage error or a
+  stage miss); on a host that still holds the legacy file, the one-time
+  `carry.json` rename an undying read runs
+  (`aoide_storage::undying::load_undying`); and, on a host that still holds the
+  legacy stage files, the one-time conducting-stage migration a stage read runs
+  (`aoide_storage::fs::conducting_stage_dir`). Two writes come with any call,
+  dry or real, outside the handler: the door's audit line, and the start-up
+  migration both core binaries run (`aoide_storage::fs::migrate_root_once`).
+  It locks `state/` owner-only when it exists and renames old peer state
+  files. When the legacy `~/Aoide` root is not `$AOIDE_ROOT`, it moves that
+  root's state unless `AOIDE_STATE_DIR` is set, and its log unless
+  `AOIDE_AUDIT_LOG` is set and not empty.
 - **Terminal restore capture (P-C5, durable-sessions plan) — gated on the
   WRAPPED ARGV, never the agent label (task #100).**
   `session_conduct`'s `is_shell` (everything below this bullet: the ~1 Hz
@@ -1327,10 +1440,9 @@ blank one is refused too.
   — a fresh `ping` round trip, never cached, never a file; that channel is
   only as trustworthy as the daemon socket's same-uid exclusivity, which has
   the open hole (`AOIDED.md` "Socket") — P-ID3's job to floor, stated
-  honestly in `CONTRACTS.md` rather than oversold here); `peer_cred` reads
-  `SO_PEERCRED` off an accepted `UnixStream` (a local
-  reimplementation of `aoide_secrets::peercred`'s own shape — no new
-  cross-crate edge for one struct+fn). **That mechanism is Linux/Android
+  honestly in `CONTRACTS.md` rather than oversold here); `peer_cred` (in
+  `aoide_protocol::peercred`, the one copy every identity gate shares) reads
+  `SO_PEERCRED` off an accepted `UnixStream`. **That mechanism is Linux/Android
   only, and deliberately NOT ported**: any other host gets the same
   UNIDENTIFIED `None` an unreadable creds read gives — a named refusal,
   never a pid-less `getpeereid` substitute, which could not fill the
@@ -1400,16 +1512,13 @@ blank one is refused too.
   `SessionRecord::set_parent_session` drops it whenever the edge moves. The
   residuals are listed in `CONTRACTS.md`.
 - **The remaining two sockets get a peercred floor (LANE IDENTITY P-ID3).**
-  `identity::peer_cred`/`PeerCred` widened `pub(crate)` (was `pub(in
-  crate::graph)`) so `shellbridge.rs` — a sibling module of `graph`, not a
-  descendant — reuses the SAME primitive rather than a second `SO_PEERCRED`
-  read. `shellbridge::serve`'s accept loop (and `aoide-server`'s own
-  `accept_loop`, over `aoide_secrets::peercred` — already `pub`, already a
-  dependency, so no widening needed there) now refuses any connection whose
-  peer uid doesn't match the process's own euid, fail-closed on an
-  unidentified peer exactly like the secrets broker's `admin_gate`
-  precedent (`shellbridge::cross_uid_gate`/`daemon::cross_uid_gate`, pure
-  and unit-tested without a real different-uid connection). **This is a
+  The identity primitive is `aoide_protocol::peercred`, shared by this crate's
+  `graph` and by `aoide-secrets`. The bridge's accept loop,
+  `aoide_protocol::shellbridge::serve`, and `aoide-server`'s own `accept_loop`
+  both refuse any connection whose peer uid doesn't match the process's own
+  euid, fail-closed on an unidentified peer exactly like the secrets broker's
+  `admin_gate` precedent (`aoide_protocol::shellbridge::cross_uid_gate`/`daemon::cross_uid_gate`,
+  pure and unit-tested without a real different-uid connection). **This is a
   CROSS-uid floor only** — under OQ1-A every legitimate connector on both
   sockets (the QML notifications/bar widgets, `strx notifications push`, `session
   permit`'s own raise, the CLI's `daemon_dispatch` proxy) already shares
@@ -1627,9 +1736,10 @@ blank one is refused too.
   ordinary unreachable-node outcome) skip that node without stopping the
   sweep. `settle_deposit(envelope, outcome)` is P-M3's third: the one
   place an envelope's deposit OUTCOME turns into spool side effects (the
-  ack a filed letter owes its origin, the `retire_by_ack` a filed receipt
-  performs), reached by `aoide-server::a2a::mail_deposit` from here so that
-  the door and `mail_wire::poll_node`'s own hand-over loop cannot drift on
+  `retire_by_ack` a filed receipt performs, which retires only an own letter;
+  a filed letter leaves nothing
+  behind, ruling 131), reached by `aoide-server::a2a::mail_deposit` from here so
+  that the door and `mail_wire::poll_node`'s own hand-over loop cannot drift on
   what receiving a letter means.
 
 The tick's session sweep and the roster-exit letter drop (ruling 131) are not
@@ -1638,6 +1748,22 @@ here. `graph::sweep_session_letters` and `graph::drop_ended_sessions` live in
 sweep, then `drain_all`. The reaper pass, a hook death and `session end` each
 call `drop_ended_sessions` after their roster write returns, never under the
 roster lock. `mail_bridge` stays passthroughs only.
+
+- **Local jobs (`aoide job`)**: `graph/job.rs` implements `job add --name=<name>
+  --on=<calendar> [--cwd=<dir>] -- <argv0> [<arg>...]`, `job remove
+  --name=<name>`, `job list [--json]` and `job runs [--name=<name>] [--json]`,
+  registered by `commands/job.rs`. A job is two unit files,
+  `aoide-job-<name>.timer` and `.service`, under
+  `$XDG_CONFIG_HOME/systemd/user/` (`~/.config/systemd/user/` when unset), and
+  one record, `state/stage/jobs.json` (`CONTRACTS.md` §4 has its shape).
+  `jobs_path()` names the record for the server's stage roster. A run's output
+  lands in the user journal; `runs` reads each recorded job's own unit from
+  there, the workflow door's JSON line, and never writes. Each `systemctl`,
+  `journalctl` and `systemd-analyze` call answers within a 10 s bound, plus up
+  to 2 s while its pipes drain, through `shellbridge::run_bin_bounded`, and a
+  call that gives no answer is never read as a no. `add` and `remove` probe the
+  user manager before they take the stage lock; under the lock they run only the
+  unit-changing calls (`daemon-reload`, `enable --now` and `disable --now`).
 
 ## What it consumes
 
@@ -1655,6 +1781,11 @@ daemon_dispatch`, P-D6; `mail_bridge`'s functions call
 — the ONE other edge
 this crate carries specifically so `aoide-server` never has to; see
 `client`'s own README for why that edge stays).
+
+The `job` seam resolves `systemctl`, `journalctl` and `systemd-analyze` on PATH
+with `pty.rs`'s `resolve_program` (never copied) and runs each through
+`shellbridge::run_bin_bounded` (`graph/job.rs`). They are the user manager's own
+tools, run as programs and never linked.
 
 ## How it composes
 

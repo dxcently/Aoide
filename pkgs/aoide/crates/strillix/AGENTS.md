@@ -227,8 +227,8 @@
   can't be derived the same way — keep it small.
 - **`shellbridge` is strillix's process; its socket loop is conduct's.** The command
   (`src/commands/shellbridge.rs`) and the desktop verbs (`src/bridge/`) live here.
-  The loop (`aoide-conduct`'s `shellbridge.rs`, see that crate's charter-smudge
-  note) serves this crate's own socket through `run_on(path, &SOCKET)`, with
+  The loop (`aoide-protocol`'s `shellbridge` module, the framework every bridge
+  socket runs) serves this crate's own socket through `run_on(path, &SOCKET)`, with
   `SOCKET` = the desktop verbs and no core arm. Core verbs are aoided's on its own
   socket; this crate does not serve them.
   `notifications` is registration only; its files stay in `aoide-conduct`. Don't
@@ -461,7 +461,7 @@
   `crate::hypr::NO_COMPOSITOR`, the adapter's own sentence, one authority
   for the text), never dropped: a well-formed click is parked on a reply, so
   even a malformed line that NAMES this verb is ANSWERED with a `bad-request`
-  refusal — the same rule `sessiontrace` holds, one rule for every parked
+  refusal — the rule the core socket's `sessiontrace` holds, one rule for every parked
   caller — while a malformed line that names some OTHER verb is dropped with
   none. The wire takes a
   NEGATIVE workspace id (`as_i64`), matching `SessionRecord.workspace` and

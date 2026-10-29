@@ -101,8 +101,8 @@ pub struct Follower { /* moved verbatim from secrets::watch */ }
 ```
 
 `class` is the existing `EventClass` kebab vocabulary
-(`protocol/src/audit.rs:73` — `audit`/`gate`/`rice`/`content`/
-`notification`/`secret`); `kind` is producer-specific; `payload` is
+(`protocol/src/audit.rs`, `EventClass` — `audit`/`gate`/`content`/
+`notification`/`secret`/`state`); `kind` is producer-specific; `payload` is
 name-only data. `EventClass::Secret`'s no-`untrusted_data` ban and
 `Notification`'s data-never-code rule carry over verbatim: a forwarded
 title rides inside `payload` as an opaque string field, never anywhere a
@@ -165,20 +165,50 @@ lossless record reaches for the audit log, never this feed.
 
 A tick-driven stat sweep over the broker-owned file roster — the stage files
 (`state/stage/sessions.json`, `hooks.json`, `projects.json`, `graph.json`,
-`pending.json`, `notifications.json`; paths from `aoide_storage::stage`,
-`storage/src/stage.rs:17-29`). The daemon records `(mtime, len)` after each
-of its own writes; a tick that finds a file changed with no daemon write in
-between emits `{"class":"audit","kind":"hand-edit","payload":{"file":"sessions.json"}}`
-and re-baselines. Detection and narration only — the daemon never reverts a
-hand edit.
+`pending.json`, `notifications.json`, `jobs.json`; the first four paths from
+`aoide_storage::stage`, `storage/src/stage.rs:17-29`, the last three from
+`aoide-conduct`). A tick that finds a file whose `(mtime, len)` moved since the
+last observation emits
+`{"class":"audit","kind":"hand-edit","payload":{"file":"sessions.json"}}` and
+re-baselines, unless an aoided write folded the move first (below). Detection
+and narration only — the daemon never reverts a hand edit.
+
+aoided knows its own writes at the rename. `run_loop` registers the watcher with
+storage's write seam (`fs::watch_writes`) after the seed. Every atomic stage
+write this process makes after the watcher registers, on any thread or from any
+crate, runs its rename inside the watcher: the watcher observes the file, runs
+the rename, and folds the file's new state, all under one lock that a sweep also
+takes. So no sweep sees one of aoided's writes between its rename and its fold,
+and a dispatch needs no re-baseline after it writes. A dispatched command runs
+three steps on its connection thread: the dispatch, the seal of a fresh `session
+start`, and the reply.
+
+A change `aoided` did not make keeps its `hand-edit` line, and so does a foreign
+write that one of `aoided`'s own writes then replaces. The watcher sees a change
+as a move in a file's length or mtime, so it misses a write that keeps both: a
+same-uid writer can set the mtime back. It sees only what happens while it is
+registered. A write made while `aoided` is down, or at start before the watcher
+registers, is part of its first baseline and raises no line: the start-up
+migration, and the seed of an absent or corrupt `sessions.json` or `hooks.json`,
+which keeps no copy of the file it replaces. One race remains: a foreign write
+that lands between the watcher's check and its fold, around the rename of
+`aoided`'s own write, is folded, with one `state` line and no `hand-edit` line.
+
+Every change the watcher finds raises a `class:"state"` line for its file, and
+so does a write of aoided's own that moves the file's stat. Both are coalesced
+to one line per file per second (CONTRACTS.md's "The `state` cue on aoided's
+events feed"). The hand-edit line is unchanged; the state line sits beside it.
 
 ### The loop and the unit
 
 `aoide_server::daemon` grows `serve(config) -> io::Result<!>`-shaped
 `run_loop`: lock `state/` owner-only, refusing to start when it cannot;
-take both locks and bind the socket (next section); spawn the accept
-thread; then tick (~1s): poll the secrets Follower, run the hand-edit
-sweep, run the periodic jobs L4 adds. Thread model mirrors the secrets
+take both locks and bind the socket (next section); seed `sessions.json`
+and `hooks.json` when absent or corrupt; take the hand-edit watcher's
+baseline; spawn the accept thread; start the core shellbridge; append the
+`started` line to the events feed; then tick (~1s): poll the secrets
+Follower, run the hand-edit sweep, run the periodic jobs L4 adds. Thread
+model mirrors the secrets
 broker (`broker.rs:315`): thread-per-connection via fallible
 `thread::Builder::spawn` (drop one connection, never unwind the accept
 loop), 250ms backoff on accept error. The `aoided` binary
@@ -448,9 +478,16 @@ the "a new harness is a table entry, not a scatter of conditionals" charter:
 ```rust
 /// argv that launches this harness fresh (claude: &["claude"]).
 pub launch: &'static [&'static str],
-/// argv that resumes a prior harness session by ITS OWN id
-/// (claude: ["claude", "--resume", <id>]). None = harness cannot resume.
-pub resume_args: Option<fn(harness_session_id: &str) -> Vec<String>>,
+/// How this harness resumes a prior session: by ITS OWN id (claude:
+/// ["claude", "--resume", <id>]), or by the journal path its ledger line
+/// names (eidolon: ["eidolon", "tui", "--session", <journal>]). None =
+/// harness cannot resume.
+pub resume_args: Option<ResumeArgs>,
+
+pub enum ResumeArgs {
+    ById(fn(harness_session_id: &str) -> Vec<String>),
+    ByLog(fn(log: &str) -> Vec<String>),
+}
 ```
 
 ### Capturing the harness's own session id
@@ -472,7 +509,7 @@ line per session at the moment it leaves the roster (clean `session end`
 and reap both write it, which after L4 is one code path):
 
 ```json
-{"v":0,"sessionId":"…","agent":"claude","harnessSessionId":"…","cwd":"/home/khoa/Aoide","title":"…","petname":"…","startedAt":"…","endedAt":"…","resumedFrom":null}
+{"v":0,"sessionId":"…","enduringAgentId":null,"project":null,"agent":"claude","harnessSessionId":"…","cwd":"/home/khoa/Aoide","title":"…","petname":"…","startedAt":"…","endedAt":"…","resumedFrom":null,"origin":null,"restore":null,"logPath":null}
 ```
 
 Append-only, never truncated, never a lookup key for live state —
@@ -493,15 +530,20 @@ the append-only ledger). `--all` and `--id` are unchanged escapes: both
 widen or narrow past the undying set regardless of the mark. An empty
 bare-mode selection is an honest `Outcome::ok` no-op naming the undying set
 as empty for the project, never a silent success. Every surviving candidate
-then resolves through TWO arms (`resolve_candidate`, P-C6): the harness arm,
-unchanged, filters to harnesses with a verified `resume_args`; a candidate
+then resolves through TWO arms (`resolve_candidate`, P-C6): the harness arm
+resolves a harness with a verified `resume_args` (`ById` by the harness's own
+session id, `ByLog` by the journal its ledger line's `logPath` names); a
+candidate
 the harness arm finds nothing for falls to the TERMINAL arm — a `restore`
 snapshot present (P-C5) marks it a conducted shell, not a harness, so it
 resolves `[<login shell>, "-l"]` (the same `$SHELL` → passwd → `/bin/sh`
 order `modules/dendrites/kitty.nix`'s own wrapper uses to pick a shell for a
 brand-new terminal) rather than a `--resume <id>` no shell could ever honor.
 A candidate neither arm resolves is skipped with a taught message naming it,
-never a guessed invocation. Every resolved candidate spawns via the
+never a guessed invocation. A `ByLog` line whose `logPath` is absent, not
+absolute or unsafe, under `state/sessions/`, or not a regular file is skipped
+with a sentence that names the entry and the cause; it never falls to the
+terminal arm. Every resolved candidate spawns via the
 windowed path with its resolved argv. Rules:
 
 - The revived session is a NEW `sessionId` — ids are never recycled. The
@@ -510,6 +552,8 @@ windowed path with its resolved argv. Rules:
   edge beside `spawned`/`anchors` (`CONTRACTS.md §4`, graph.json — additive edge
   kind). If the old id was undying, the mark transfers onto the new id in
   the same step (one `save_undying` call, never left on the now-dead old id).
+  A `ByLog` revival keeps the mark on the ledger id instead: the journal is
+  the session, and the terminal is only its window.
 - **Post-spawn restore delivery (P-C6).** Once a terminal candidate's spawn
   actually registers, its `restore` snapshot decides what — if anything —
   lands in the new pty, through `session_send` in-process, never a direct
@@ -750,3 +794,4 @@ Exactly one:
   and the daemon trigger already covers the headless case correctly.
   Whoever flips the flag on a desktop host builds the
   graphical-session unit then, with this paragraph as the design.
+

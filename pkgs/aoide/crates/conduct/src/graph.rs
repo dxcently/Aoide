@@ -42,15 +42,10 @@ mod eidolon;
 // SESSION-FIND: the query core and the handler of `aoide session find`.
 mod find;
 pub use self::find::session_find;
-// LANE IDENTITY P-ID3: `pub(crate)`, not private — `shellbridge.rs` (a
-// SIBLING of this module, not a descendant) reuses `peer_cred`/`PeerCred`
-// for its own cross-uid accept floor rather than hand-rolling a second
-// `SO_PEERCRED` read in this same crate. Still not `pub` at the top block
-// below: this stays an internal kernel-truth primitive, never crossing the
-// `aoide-conduct` -> `aoide` crate boundary root's shim re-exports onward.
 pub(crate) mod identity;
 mod model;
 mod node_list;
+mod job;
 mod pending;
 // The PTY capability the conducted session runs on — the terminal a child
 // agent is spawned onto, plus the real console, the resize source and the
@@ -304,6 +299,7 @@ pub use self::who::{glyph, session_roster};
 // (`node_list.rs`'s module doc) — `node status` (aoide-client) keeps the
 // deep per-node view.
 pub use self::node_list::node_list;
+pub use self::job::{job_add, job_list, job_remove, job_runs, jobs_path};
 pub use self::window::{
     pid_ancestry, session_show, session_window_attach, session_window_closed, session_window_roster,
     windowless_by_lineage, TermWindow,

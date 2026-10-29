@@ -426,7 +426,7 @@ value" apart from every other denial.
 
 Every `handle_conn`-served connection reads its own kernel-truth caller
 identity ONCE, at connection start, via `SO_PEERCRED`
-(`peercred::peer_cred` — hand-rolled over `libc::getsockopt`, since `std`'s
+(`aoide_protocol::peercred::peer_cred` — hand-rolled over `libc::getsockopt`, since `std`'s
 own `UnixStream::peer_cred` accessor is unstable) — the connecting
 process's real `uid`/`gid`/`pid`, verified by the kernel, independent of
 anything the wire request itself claims. A read failure (a non-`AF_UNIX`
@@ -439,7 +439,7 @@ peer-credential API at all, and the BSD alternative (`getpeereid(3)`) reports
 euid/egid with **no pid** — it cannot fill `PeerCred.pid`, the field the
 sealed-session origin gate walks as the kernel's own ancestry fact
 (`aoide_storage::attest`'s `attested_session`). Swapping the syscall would
-therefore weaken that gate rather than port it, so `peercred::peer_cred` is
+therefore weaken that gate rather than port it, so `aoide_protocol::peercred::peer_cred` is
 `#[cfg]`-gated to Linux/Android and answers the SAME `None` (unidentified) on
 every other host: there, the fail-closed paths below are what runs —
 `dismiss` cannot match an absent peer uid, and `admin` refuses outright.
@@ -2016,8 +2016,9 @@ one function rather than each hand-rolling the diagnosis.
 
 **Every client call bounds the CONNECT itself, not only reads (rider
 task).** `std::os::unix::net::UnixStream` has no `connect_timeout` (unlike
-`TcpStream`) — `client::connect_bounded` hand-rolls it on `libc` (already
-a dependency, zero new deps). Every one of `resolve`/`resolve_bounded`/
+`TcpStream`) — `connect_bounded` in `aoide_protocol::local_socket` hand-rolls
+it on `libc` (already a dependency, zero new deps). Every one of
+`resolve`/`resolve_bounded`/
 `put`/`pending`/`approve`/`dismiss` routes through it with a fixed 5s
 overall bound, with the identical `io::Result<UnixStream>` shape
 `UnixStream::connect` always returned, so `describe_connect_error` needed
@@ -2049,8 +2050,9 @@ No env override, unlike `AOIDE_SECRETS_BACKEND_TIMEOUT`/
 `AOIDE_SECRETS_PARK_TIMEOUT` — a fixed defensive bound, not a tuned
 operational one, until real evidence says otherwise.
 
-**The address it connects to is built by `client::unix_sockaddr`, from this
-target's own struct (socket correctness fix).** The cap is `sun_path`'s own
+**The address it connects to is built by `unix_sockaddr` in
+`aoide_protocol::local_socket`, from this target's own struct (socket
+correctness fix).** The cap is `sun_path`'s own
 width — 108 on Linux, 104 on the BSDs, 126 on Haiku, 1023 on AIX — because a
 hardcoded 108 would let a 105..107-byte path onto a 104-byte BSD struct and
 hand the kernel a zero-filled name: a connect to a path nobody named. The

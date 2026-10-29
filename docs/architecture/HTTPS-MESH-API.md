@@ -108,12 +108,12 @@ when there is not. **There is no version signal on the wire**, so a relay
 that cannot carry a container refuses it rather than announcing that it is
 old: the letter comes back to its sender, which keeps it for as long as the
 session that sent it lasts (ruling 131). `aoide mail outbox retry` resends it
-once the relay is brought up to date (`docs/architecture/MAIL.md` §Transit). **Transit therefore deploys
-before the declaration that uses it**: `relays`, `[status]` and `[gates]` are
-declared only once every box of the mesh runs this version — a relay that
-predates it refuses a routed container outright, and a destination that
-predates it refuses a two-entry hop chain, so the declaration comes last and
-`aoide mail route` (plus the drift report) is the dry run.
+once the relay is brought up to date (`docs/architecture/MAIL.md` §Transit).
+**Transit therefore deploys before the declaration that uses it**: `relays`,
+`[status]` and `[gates]` are declared only once every box of the mesh runs this
+version — a relay that predates it refuses a routed container outright, and a
+destination that predates it refuses a two-entry hop chain, so the declaration
+comes last and `aoide mail route` (plus the drift report) is the dry run.
 
 ### Degenerate topologies
 
@@ -623,7 +623,8 @@ destination. Steps, in order:
 8. Check membership: the origin in the mesh; for a post, the origin a member node of
    the board at that epoch.
 9. File the letter.
-10. Send the receipt and ring the doorbell.
+10. Ring the doorbell. The answer is `accepted`; no receipt is sent (ruling
+    131).
 
 This branch never runs the hop spool step, because a destination that misfiled would
 otherwise relay content addressed elsewhere. A mismatch refuses
@@ -632,9 +633,9 @@ and never re-spooled.
 
 **Outer signature and dedup are decided before anything is opened.** The outer
 signature needs no plaintext and no recipient private key. An unverified origin is
-refused. A previously admitted duplicate returns `duplicate` without opening. For a
-filed letter, the destination recovers receipt delivery from the durable filed
-record under the existing pending-receipt rule. Dedup never records a malformed or
+refused. A previously admitted duplicate returns `duplicate` without opening. A
+duplicate of a filed letter is answered from the durable filed record, and no
+receipt is sent back (ruling 131). Dedup never records a malformed or
 unverified container.
 
 The dedup lookup key is the authenticated `(origin.key, to.node, msgid)` tuple. A
@@ -1053,7 +1054,7 @@ prev_n    = sha256(frame("aoide/mail-hop-entry",
   `origin.node`, and it cannot forge the origin's signature. A relay that dropped the
   origin's entry is refused **`broken-chain`** — the origin is not erasable from the
   record of who handed the letter to whom.
-- A hop can still drop the tail, which drops the letter. No destination-signed ack
+- A hop can still drop the tail, which drops the letter. No verified `accepted`
   then reaches the origin, and the outbox reports the letter as undelivered.
 - The destination verifies the full chain. Per-hop zone checks at each door are
   unchanged.
@@ -1065,7 +1066,7 @@ security, and protection once an endpoint is compromised.
 
 | Adversary | Capability | Outcome |
 |---|---|---|
-| On-path observer or TLS-terminating front (for example Cloudflare) | Sees ciphertext, outer metadata and request signatures. Can drop, delay, reorder, replay. | No plaintext and no signing key. A replayed request nonce is refused. An admitted duplicate letter takes the receipt-recovery path without being opened. |
+| On-path observer or TLS-terminating front (for example Cloudflare) | Sees ciphertext, outer metadata and request signatures. Can drop, delay, reorder, replay. | No plaintext and no signing key. A replayed request nonce is refused. An admitted duplicate letter is answered `duplicate` without being opened. |
 | Anyone who finds a tunnel hostname | Can send arbitrary HTTPS | Access refuses the request at the edge. Behind Access, an unsigned or unknown-key request is refused before any handler runs. |
 | Unpermitted relay | Holds containers only | Cannot read, mutate, re-seal, re-sign, or forge a receipt. |
 | Authorized relay or hub (transit, `message`) | Verifies, spools, appends a chained hop signature, drops or delays | Routing authority is not edit authority. It cannot open, alter, forge, or cut and re-append the chain. |
@@ -1314,7 +1315,6 @@ not control access, and a session listing is not transcript access.
 |---|---|
 | `mail/deposit` | Deposit one sealed container and get back `accepted`, `duplicate` or `refused(reason)`. Also carries receipts, charters, wraps and board posts; there is no second ack method. |
 | `mail/poll` | Returns the caller's own spooled containers. The caller's identity must BE the node being polled. This is the only inbound path for a `poll` node. |
-| `mail/ack` | Semantic grouping for the receipt flow. One receipt per acked `msgid` while pending. A later redelivery after the first delivery may re-spool one (MAIL.md's actual rule). |
 | `state` | Authorized snapshot of hosts, projects, sessions, terminals, agents and relationships |
 | `events` | WSS subscription to permitted changes after a cursor; a bounded, recoverable stream |
 | `presence` | Expiring host connection and heartbeat state, distinct from process state |
@@ -1364,7 +1364,7 @@ acted.
 
 - Keep the queued, filed and fetched states distinct, and keep idempotency
   identifiers stable. A retry after a lost response must not duplicate work or
-  receipts.
+  filings.
 - The sealed container is fixed at mint time, so a retry is byte-identical and the
   `msgid` stays stable.
 - WSS is a transport stream, not durable storage. Recovery comes from cursors and
@@ -1515,8 +1515,7 @@ scheduler (`aoide mail poll`).
   - A crash between base and seen re-accepts exactly once.
   - A same-`msgid` collision with different immutable bytes, within the same origin
     and destination, is refused.
-  - A filed duplicate recovers a lost receipt without duplicating a receipt that is
-    already pending.
+  - A filed duplicate is answered `duplicate` and sends no receipt.
 - **Bindings:**
   - A binding signed by any key but the one it names is refused.
   - A new age binding is accepted without re-pairing.
@@ -1530,7 +1529,7 @@ scheduler (`aoide mail poll`).
   - An expired or unknown binding always parks and is reported.
   - `key-retired` reaches the origin's retry loop.
 - **Crash and recovery:** a torn tail is truncated, a resend is byte-identical, and no
-  receipt is duplicated. Already-filed letters survive loss of the age key.
+  letter is filed twice. Already-filed letters survive loss of the age key.
 - **Downgrade:** mixed suite components or an older accepted-suite entry is refused
   with a taught error and an audit line.
 
@@ -1573,14 +1572,15 @@ scheduler (`aoide mail poll`).
 
 - **Ciphertext at the relay:** a wire capture of the HTTPS hop, and the relay's spool,
   log and audit, contain no letter bytes, subject, body or mailbox names.
-- **Outbound only:** during a full send, poll and ack round trip, no home node holds a
-  listening socket on a routable address.
+- **Outbound only:** during a full send and poll round trip, no home node
+  holds a listening socket on a routable address.
 - **Signed requests everywhere:** through the tunnel, an unsigned request, an
   unknown-key request, a request naming a mesh the caller is not in, and a replayed
   nonce are all refused. The observed loopback source grants nothing.
-- **Receipts:** one per acked `msgid` while pending. A later redelivery after delivery
-  may re-spool one. No receipt chain.
-- **Windows and Linux, no SSH:** send, poll, fetch and ack work end to end with the
+- **Receipts:** a letter this node files sends no receipt (ruling 131). A
+  receipt from an older build is filed or answered like a deposit. No receipt
+  chain.
+- **Windows and Linux, no SSH:** send, poll and fetch work end to end with the
   relay node, with a `poll` node on each OS that has no SSH account or binary.
 - **Downgrade:** a plaintext request is refused with the taught word
   `sealed-required` and an audit line.
@@ -1601,7 +1601,15 @@ scheduler (`aoide mail poll`).
 - **Retry over another route:** the same immutable container over a different route
   dedups rather than colliding (the comparison excludes `mesh` and `transit`).
 - **No preclaim:** a different origin cannot preclaim a `msgid` at a relay.
-- **No forged receipt:** a hub cannot make an origin stop retrying.
+- **No forged receipt:** a receipt the letter's destination did not sign
+  retires nothing. A hub cannot sign one as the destination, but its own
+  verified `accepted` still ends the origin's copy, so a hub that accepts a
+  letter and then drops it loses it without a word: the trade ruling 131
+  makes (MAIL.md, Transit, "A relay's verified `accepted` is the sender's
+  delivery"). Proved by `an_ack_signed_by_the_wrong_node_retires_nothing`
+  (storage `outbox.rs`) and by
+  `an_unverified_or_tampered_receipt_retires_no_spooled_letter` (client
+  `commands.rs`).
 
 **P-BOARD tests** are MAIL.md P-BOARD's, plus: a relay holding a board log holds
 ciphertext and membership records only, and its audit names no mailbox. A takeover

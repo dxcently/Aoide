@@ -18,9 +18,12 @@
 //! and exited again). `--all` and `--id` are unchanged escapes: both widen
 //! or narrow past the undying set regardless of the mark. Each candidate is
 //! filtered through its harness's `AgentProfile.resume_args`
-//! (`aoide_protocol::agents`): `None` (an unregistered agent, or a harness
-//! whose resume argv has never been verified) skips that candidate with a
-//! taught message naming the harness, never a guessed invocation.
+//! (`aoide_protocol::agents`). `ById` resumes by the harness's own session
+//! id. `ByLog` (eidolon) resumes by the journal its ledger line's `logPath`
+//! names, and skips a line whose `logPath` names no journal ([`journal_of`]).
+//! `None` (an unregistered agent, or a harness whose resume argv has never
+//! been verified) skips that candidate with a taught message naming the
+//! harness, never a guessed invocation.
 //!
 //! A resurrected session is ALWAYS a fresh `sessionId` — ids are never
 //! recycled — spawned via the windowed path ([`super::spawn::session_spawn`]
@@ -31,7 +34,11 @@
 //! `resumed` edge beside `spawned`/`anchors` (CONTRACTS.md §4). If the old id
 //! was undying (`state/undying.json`, durable-sessions plan P-C3), the mark
 //! transfers onto the new id in the same step — never left on the now-dead
-//! old id, which would double-resurrect on the next sweep.
+//! old id, which would double-resurrect on the next sweep. A by-journal
+//! revival (`ByLog`) is the exception: its mark stays on the ledger id, and
+//! the new id gets none. The journal is the session and the terminal is only
+//! its window, so the next sweep must reopen that same journal, which the
+//! ledger id names.
 //!
 //! Never a hard `Outcome::error` over a per-candidate spawn failure (a
 //! headless host has no `$AOIDE_TERMINAL`/display — `session_spawn`'s own
@@ -50,7 +57,19 @@
 //! a `restore` snapshot (P-C5) is a conducted shell, not a harness, so it
 //! reopens as `[<login shell>, "-l"]` — the exact argv `kitty.nix`'s own
 //! wrapper execs — rather than a `--resume <id>` nobody could ever verify. A
-//! candidate with neither hits the pre-existing taught skip.
+//! candidate with neither hits the pre-existing taught skip. A `ByLog`
+//! harness never reaches the terminal arm: a line whose journal cannot be
+//! resumed is skipped with its own reason, `restore` or not.
+//!
+//! **One engine per session.** A candidate is never launched while its
+//! session is live, or while a launch of it is in flight. [`claim_resume`]
+//! runs the block ([`block_verdict`]) under the stage lock and, when the
+//! candidate is free, writes its claim (`state/resuming.json`, see
+//! `aoide_storage::resuming`) before the spawn. A claim is in flight while
+//! its new id has a session that is not `done`, or while it has none and is
+//! younger than [`RESUME_CLAIM_BOUND_SECS`]. A launch that fails drops its
+//! own claim. A dry run runs the same block on the same reads and writes
+//! nothing.
 //!
 //! **Post-spawn delivery into a resurrected terminal (decision 8):** once a
 //! terminal candidate's spawn actually registers — and its harness is READY to
@@ -155,14 +174,38 @@
 //! when the OLD ledger id it replaces was already undying): there is no
 //! ordinary-revive case to protect here, every manifest-mode spawn already
 //! came from an explicit, operator-authored declaration.
+//!
+//! **Dry run (`--dry-run`).** The flag takes the selection the launch would
+//! take and answers with its rows instead of launching them: flag mode through
+//! [`dry_run_listing`], bare mode through [`dry_run_manifest`]. Each row's
+//! verdict comes from the helper its launch uses (`enrichment`, `clean_argv`,
+//! `summon_check`, `resolve_candidate`), so the listing and the launch agree.
+//! From an unattested caller on a door that cannot approve, a dry run gets what
+//! the call would give that caller, minus the launch: in bare mode the bare
+//! call's refusal; with `--id` or `--all` and no `--project`, the usage error
+//! the call gives; with `--project`, the `dry-run-not-held` refusal, since that
+//! call would hold and show the caller nothing. Nothing is held, spawned or
+//! sent on any door. The handler writes three things and no others: the audit
+//! line (status `dry-run`, at the points the real call audits); the one-time
+//! `carry.json` rename an undying read performs
+//! (`aoide_storage::undying::load_undying`), on a host that still holds the
+//! legacy file; and the one-time conducting-stage migration a stage read
+//! performs (`aoide_storage::fs::conducting_stage_dir`), on a host that still
+//! holds the legacy stage files. Two writes come with any call, dry or real,
+//! outside the handler: the door's audit line, and the start-up migration both
+//! core binaries run (`aoide_storage::fs::migrate_root_once`). It locks
+//! `state/` owner-only when it exists and renames old peer state files. When
+//! the legacy `~/Aoide` root is not `$AOIDE_ROOT`, it moves that root's state
+//! unless `AOIDE_STATE_DIR` is set, and its log unless `AOIDE_AUDIT_LOG` is set
+//! and not empty.
 
-use super::common::{is_unsafe, require_flag, stage_error};
+use super::common::{is_unsafe, require_flag, stage_error, strip_unsafe};
 use super::conduct::{program_is_a_shell, program_is_an_interactive_shell, runs_a_privilege_program};
 use super::model::{load_stage, projects_path, sessions_path, ProjectsFile, SessionsFile};
 use super::send::{deliver_local_with, real_attested_sender, PendingSpawn};
 use super::session_store::{stamp_origin, stamp_resumed_from};
 use super::spawn::{hold_whole, launch_session, shell_join, Ready};
-use aoide_protocol::agents::agent_profile;
+use aoide_protocol::agents::{agent_profile, ResumeArgs};
 use aoide_protocol::output::{Fix, Kind, Outcome, Status};
 use aoide_protocol::{Door, Invocation};
 use aoide_storage::attest::is_node_origin;
@@ -180,32 +223,355 @@ fn mint_resurrected_id() -> String {
 }
 
 /// One selected, resumable ledger candidate, resolved down to what
-/// [`resurrect_one`] needs — the harness profile lookup and `harnessSessionId`
-/// fallback already done, so the spawn/skip decision below never re-derives
-/// them.
+/// [`resurrect_one`] needs — the harness profile lookup, `harnessSessionId`
+/// fallback and journal check already done, so the spawn/skip decision below
+/// never re-derives them.
 struct Candidate {
     entry: aoide_storage::ledger::LedgerEntry,
-    resume_argv: Option<Vec<String>>,
+    /// The argv the revival runs, or the taught line that skips it.
+    resume_argv: Result<Vec<String>, String>,
+    /// A by-journal revival: the undying mark stays on the ledger id.
+    by_log: bool,
 }
 
 fn resolve_candidate(entry: aoide_storage::ledger::LedgerEntry) -> Candidate {
-    let harness_argv = agent_profile(&entry.agent).and_then(|p| p.resume_args).map(|f| {
-        let harness_id = entry.harness_session_id.as_deref().unwrap_or(&entry.session_id);
-        f(harness_id)
-    });
-    if harness_argv.is_some() {
-        return Candidate { entry, resume_argv: harness_argv };
+    match agent_profile(&entry.agent).and_then(|p| p.resume_args) {
+        Some(ResumeArgs::ById(f)) => {
+            let harness_id = entry.harness_session_id.as_deref().unwrap_or(&entry.session_id);
+            let resume_argv = Ok(f(harness_id));
+            Candidate { entry, resume_argv, by_log: false }
+        }
+        // No terminal arm after a journal: a journal line that cannot name a
+        // journal is skipped, never reopened as a shell.
+        Some(ResumeArgs::ByLog(f)) => {
+            let resume_argv = journal_of(&entry).map(|log| f(&log));
+            Candidate { entry, resume_argv, by_log: true }
+        }
+        // Harness arm found nothing — try the TERMINAL arm (P-C6, durable-
+        // sessions plan). `agent == "shell"` is never a harness — it has no
+        // session id to `--resume` and no profile row (`agents.rs`'s own module
+        // doc refuses a guessed `SHELL_PROFILE` for exactly this reason) — what
+        // it carries instead is a `restore` snapshot (P-C5). `Some(restore)` is
+        // the whole test for "is this even a terminal candidate"; a `restore`
+        // -less entry (predating P-C5, or a harness this box has never
+        // verified) takes the pre-existing taught skip.
+        None => {
+            let resume_argv = if entry.restore.is_some() {
+                Ok(vec![login_shell(), "-l".to_string()])
+            } else {
+                Err(unresumed_reason(&entry.agent))
+            };
+            Candidate { entry, resume_argv, by_log: false }
+        }
     }
-    // Harness arm found nothing — try the TERMINAL arm (P-C6, durable-
-    // sessions plan). `agent == "shell"` is never a harness — it has no
-    // session id to `--resume` and no profile row (`agents.rs`'s own module
-    // doc refuses a guessed `SHELL_PROFILE` for exactly this reason) — what
-    // it carries instead is a `restore` snapshot (P-C5). `Some(restore)` is
-    // the whole test for "is this even a terminal candidate"; a `restore`
-    // -less entry (predating P-C5, or a harness this box has never
-    // verified) falls through to the pre-existing taught skip below.
-    let resume_argv = entry.restore.is_some().then(|| vec![login_shell(), "-l".to_string()]);
-    Candidate { entry, resume_argv }
+}
+
+/// The journal a by-journal revival reopens: its ledger line's `logPath`, when
+/// that is an absolute, plain path to a regular file outside the session logs
+/// dir. Anything else is the candidate's skip reason. The path itself stays out
+/// of the reason: it is ledger data.
+fn journal_of(entry: &aoide_storage::ledger::LedgerEntry) -> Result<String, String> {
+    let who = format!("session {} ({})", strip_unsafe(&entry.session_id), strip_unsafe(&entry.agent));
+    let skip = |why: &str| Err(format!("{who} {why} — skipped rather than guessed"));
+    let Some(log) = entry.log_path.as_deref() else {
+        return skip("has no logPath, so its journal is unknown");
+    };
+    if !Path::new(log).is_absolute() || log.chars().any(is_unsafe) {
+        return skip("has a logPath that is not an absolute, plain path");
+    }
+    if aoide_storage::fs::inside_session_logs(log) {
+        return skip("has a logPath inside the session logs dir, which holds terminal transcripts, not journals");
+    }
+    if std::fs::symlink_metadata(log).is_ok_and(|m| m.file_type().is_symlink()) {
+        return skip("has a logPath that is a symbolic link");
+    }
+    if !Path::new(log).is_file() {
+        return skip("has a logPath that names no regular file");
+    }
+    Ok(log.to_string())
+}
+
+/// How long a claim is in flight with no record to show for its new id. A
+/// spawn's registration budget is 3 s (`spawn::REGISTRATION_BUDGET`), and a
+/// terminal can take longer than that to register its session, so a claim
+/// younger than this with nothing registered is still a launch in progress.
+const RESUME_CLAIM_BOUND_SECS: i64 = 60;
+
+/// Why the block refuses a candidate: the live session that holds it, or the
+/// launch that claims it and how old that claim is. `by_journal` is set when
+/// the claim is another session's, on the candidate's journal.
+#[derive(Debug, PartialEq, Eq)]
+enum Blocked {
+    Live { live_id: String },
+    InFlight { new_id: String, age_secs: i64, by_journal: bool },
+}
+
+/// A candidate the claim step or a dry run refuses: the taught line for its
+/// row, and the id that line names, as the row key (`liveSessionId` or
+/// `claimedBy`).
+#[derive(Debug, PartialEq, Eq)]
+struct Refusal {
+    reason: String,
+    named: Option<(&'static str, String)>,
+}
+
+/// A journal path as the block compares it: spelled as the ledger, presence or
+/// roster names it, and resolved once to the file it names, when it resolves.
+/// The block compares these and never reads the filesystem; [`Journal::of`] is
+/// the one place a path is resolved.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Journal {
+    spelled: String,
+    resolved: Option<String>,
+}
+
+impl Journal {
+    fn of(path: &str) -> Journal {
+        Journal {
+            spelled: path.to_string(),
+            resolved: std::fs::canonicalize(path).ok().map(|p| p.to_string_lossy().into_owned()),
+        }
+    }
+
+    /// Whether two journals name one file: equal as spelled, or both resolved to
+    /// the same file, so a symlink to a journal is that journal.
+    fn names_the_file_of(&self, other: &Journal) -> bool {
+        self.spelled == other.spelled
+            || matches!((&self.resolved, &other.resolved), (Some(a), Some(b)) if a == b)
+    }
+
+    /// Whether a claim's stored journal names this journal: as spelled, or as
+    /// the file it resolves to.
+    fn is_named_by(&self, stored: &str) -> bool {
+        self.spelled == stored || self.resolved.as_deref() == Some(stored)
+    }
+}
+
+/// How far ahead of the clock a claim may be stamped and still count. Past this
+/// the stamp is a clock step or a hand edit, and the claim blocks nothing.
+const CLAIM_CLOCK_SKEW_SECS: i64 = 5;
+
+/// A claim's verdict against the roster: its new id and its age while it is in
+/// flight, which is while its new id has a session that is not `done`, or has
+/// none yet and the claim is younger than [`RESUME_CLAIM_BOUND_SECS`], and the
+/// claim is not stamped more than [`CLAIM_CLOCK_SKEW_SECS`] ahead of `now`.
+/// Within that skew its age is 0. Anything else is stale and blocks nothing.
+fn claim_in_flight(
+    claim: &aoide_storage::resuming::Claim,
+    sessions: &[aoide_storage::records::SessionRecord],
+    now: i64,
+) -> Option<(String, i64)> {
+    let raw_age = now - aoide_storage::time::parse_iso_utc(&claim.at).unwrap_or(now);
+    if raw_age < -CLAIM_CLOCK_SKEW_SECS {
+        return None;
+    }
+    let age_secs = raw_age.max(0);
+    let open = sessions.iter().any(|s| s.session_id == claim.new_id && s.state != "done");
+    let seen = sessions.iter().any(|s| s.session_id == claim.new_id);
+    (open || (!seen && age_secs < RESUME_CLAIM_BOUND_SECS)).then(|| (claim.new_id.clone(), age_secs))
+}
+
+/// The block decision for a candidate, from the roster, the claims, the open
+/// journals and the clock. `journal` is the candidate's own journal, for a
+/// by-journal candidate only, and `roster_journals` lines up with `sessions`. A
+/// live session is named before a launch in flight, so a running session reads as
+/// running. A claim blocks when it names the candidate's session or its
+/// journal. It compares what [`Journal`] holds and does no I/O.
+fn block_verdict(
+    entry: &aoide_storage::ledger::LedgerEntry,
+    journal: Option<&Journal>,
+    sessions: &[aoide_storage::records::SessionRecord],
+    roster_journals: &[Option<Journal>],
+    claims: &[aoide_storage::resuming::Claim],
+    presence: &[(String, Journal)],
+    now: i64,
+) -> Option<Blocked> {
+    let on_journal = |log: &Journal| journal.is_some_and(|j| j.names_the_file_of(log));
+    let live = sessions.iter().zip(roster_journals).find(|(s, log)| {
+        s.state != "done"
+            && (s.session_id == entry.session_id
+                || s.resumed_from.as_deref() == Some(entry.session_id.as_str())
+                || log.as_ref().is_some_and(|l| on_journal(l)))
+    });
+    if let Some((s, _)) = live {
+        return Some(Blocked::Live { live_id: s.session_id.clone() });
+    }
+    if let Some((id, _)) = presence.iter().find(|(_, log)| on_journal(log)) {
+        return Some(Blocked::Live { live_id: id.clone() });
+    }
+    claims
+        .iter()
+        .filter(|c| {
+            c.session_id == entry.session_id
+                || journal.is_some_and(|j| c.journal.as_deref().is_some_and(|stored| j.is_named_by(stored)))
+        })
+        .find_map(|c| {
+            claim_in_flight(c, sessions, now).map(|(new_id, age_secs)| Blocked::InFlight {
+                new_id,
+                age_secs,
+                by_journal: c.session_id != entry.session_id,
+            })
+        })
+}
+
+/// The candidate's own journal, read once for the block, for a by-journal
+/// candidate only.
+fn candidate_journal(entry: &aoide_storage::ledger::LedgerEntry, by_log: bool) -> Option<Journal> {
+    entry.log_path.as_deref().filter(|_| by_log).map(Journal::of)
+}
+
+/// Each roster record's `logPath`, read once for the block, lined up with
+/// `sessions`.
+fn roster_journals(sessions: &[aoide_storage::records::SessionRecord]) -> Vec<Option<Journal>> {
+    sessions.iter().map(|s| s.log_path.as_deref().map(Journal::of)).collect()
+}
+
+/// The open journals a by-journal candidate is checked against, read from the
+/// presence scan outside any lock, each one resolved once. A scan that cannot
+/// finish refuses the candidate, since Aoide cannot then tell whether the journal
+/// is open. A candidate that is not by-journal reads nothing.
+fn presence_journals(
+    entry: &aoide_storage::ledger::LedgerEntry,
+    by_log: bool,
+) -> Result<Vec<(String, Journal)>, Refusal> {
+    if !by_log {
+        return Ok(Vec::new());
+    }
+    match super::eidolon::eidolon_presence_sessions() {
+        super::eidolon::PresenceScan::Observed(live) => {
+            Ok(live.into_iter().map(|s| (s.id, Journal::of(&s.log))).collect())
+        }
+        super::eidolon::PresenceScan::Unknown(why) => Err(refused(
+            entry,
+            format!(
+                "cannot be checked: the presence scan is incomplete ({why:?}), so Aoide cannot tell whether its journal is open — skipped rather than guessed"
+            ),
+        )),
+    }
+}
+
+/// The roster and the claims, read under the stage lock by the claim step and
+/// without it by a dry run. An unreadable file is an error the candidate refuses
+/// on.
+fn read_roster_and_claims() -> Result<(Vec<aoide_storage::records::SessionRecord>, Vec<aoide_storage::resuming::Claim>), String> {
+    let roster: SessionsFile = load_stage(&sessions_path())?;
+    Ok((roster.sessions, aoide_storage::resuming::load_claims()?))
+}
+
+/// The refusal for a candidate: `session <id> (<agent>)`, then why it is skipped.
+fn refused(entry: &aoide_storage::ledger::LedgerEntry, why: String) -> Refusal {
+    Refusal { reason: format!("session {} ({}) {why}", strip_unsafe(&entry.session_id), strip_unsafe(&entry.agent)), named: None }
+}
+
+/// The refusal for a blocked candidate, naming the live session or the claim.
+fn blocked_refusal(entry: &aoide_storage::ledger::LedgerEntry, blocked: Blocked) -> Refusal {
+    match blocked {
+        Blocked::Live { live_id } => {
+            let shown = strip_unsafe(&live_id);
+            Refusal {
+                named: Some(("liveSessionId", live_id.clone())),
+                ..refused(entry, format!("is live as {shown}, so it is not resumed again — skipped"))
+            }
+        }
+        Blocked::InFlight { new_id, age_secs, by_journal } => {
+            let shown = strip_unsafe(&new_id);
+            let held = if by_journal { "shares its journal with" } else { "has" };
+            Refusal {
+                named: Some(("claimedBy", new_id.clone())),
+                ..refused(
+                    entry,
+                    format!("{held} a launch in flight as {shown} (claimed {age_secs}s ago), so it is not resumed again — skipped"),
+                )
+            }
+        }
+    }
+}
+
+/// What a dry run shows for a candidate: its skip reason, or the verdict of the
+/// block it would meet at launch. Takes no lock and writes nothing.
+fn dry_verdict(c: &Candidate) -> Result<(), Refusal> {
+    match &c.resume_argv {
+        Err(reason) => Err(Refusal { reason: reason.clone(), named: None }),
+        Ok(_) => dry_gate(&c.entry, c.by_log),
+    }
+}
+
+fn dry_gate(entry: &aoide_storage::ledger::LedgerEntry, by_log: bool) -> Result<(), Refusal> {
+    let presence = presence_journals(entry, by_log)?;
+    let candidate = candidate_journal(entry, by_log);
+    let (sessions, claims) = read_roster_and_claims().map_err(|e| {
+        refused(entry, format!("cannot be checked: {e} — skipped rather than launched unchecked"))
+    })?;
+    let roster = roster_journals(&sessions);
+    let now = super::conduct::unix_ts() as i64;
+    block_verdict(entry, candidate.as_ref(), &sessions, &roster, &claims, &presence, now)
+        .map_or(Ok(()), |b| Err(blocked_refusal(entry, b)))
+}
+
+/// The claim step, run before a launch: under the stage lock, the block and, when
+/// the candidate is free, its claim written in place of any stale one. No spawn
+/// runs under the lock.
+fn claim_resume(
+    entry: &aoide_storage::ledger::LedgerEntry,
+    by_log: bool,
+    new_id: &str,
+) -> Result<(), Refusal> {
+    let presence = presence_journals(entry, by_log)?;
+    let candidate = candidate_journal(entry, by_log);
+    let now = super::conduct::unix_ts() as i64;
+    let claimed = aoide_storage::fs::try_stage_lock(|| -> Result<(), Refusal> {
+        let (sessions, mut claims) = read_roster_and_claims().map_err(|e| {
+            refused(entry, format!("cannot be checked: {e} — skipped rather than launched unchecked"))
+        })?;
+        let roster = roster_journals(&sessions);
+        if let Some(blocked) = block_verdict(entry, candidate.as_ref(), &sessions, &roster, &claims, &presence, now) {
+            return Err(blocked_refusal(entry, blocked));
+        }
+        claims.retain(|c| claim_in_flight(c, &sessions, now).is_some());
+        aoide_storage::resuming::set_claim(
+            &mut claims,
+            aoide_storage::resuming::Claim {
+                session_id: entry.session_id.clone(),
+                new_id: new_id.to_string(),
+                at: aoide_storage::time::iso_utc_from_epoch(now),
+                journal: candidate.as_ref().map(|j| j.resolved.clone().unwrap_or_else(|| j.spelled.clone())),
+            },
+        );
+        aoide_storage::resuming::save_claims(&claims).map_err(|e| {
+            refused(entry, format!("cannot be claimed: {e} — skipped rather than launched unclaimed"))
+        })
+    });
+    claimed.unwrap_or_else(|e| {
+        Err(refused(
+            entry,
+            format!("cannot be claimed: the stage lock could not be taken ({e}) — skipped rather than launched unclaimed"),
+        ))
+    })
+}
+
+/// A failed launch drops its own claim under the stage lock, and only while the
+/// claim still names its new id. If the file cannot be rewritten the claim stays,
+/// and it is stale once [`RESUME_CLAIM_BOUND_SECS`] passes with nothing
+/// registered under its id.
+fn release_resume_claim(session_id: &str, new_id: &str) {
+    let _ = aoide_storage::fs::try_stage_lock(|| {
+        let Ok(mut claims) = aoide_storage::resuming::load_claims() else {
+            return;
+        };
+        if aoide_storage::resuming::remove_claim(&mut claims, session_id, new_id) {
+            let _ = aoide_storage::resuming::save_claims(&claims);
+        }
+    });
+}
+
+/// The `skipped` row a refused candidate leaves. Its named id is the key the
+/// refusal names: `liveSessionId` or `claimedBy`.
+fn refusal_row(entry: &aoide_storage::ledger::LedgerEntry, refusal: Refusal) -> serde_json::Value {
+    let mut row = json!({ "sessionId": entry.session_id, "agent": entry.agent, "reason": strip_unsafe(&refusal.reason) });
+    if let Some((key, id)) = refusal.named {
+        row[key] = json!(id);
+    }
+    row
 }
 
 /// The login shell a resurrected terminal candidate re-opens with `-l` —
@@ -490,6 +856,13 @@ fn origin_to_carry(ledger_origin: Option<&str>) -> OriginCarry<'_> {
     }
 }
 
+/// The reason a candidate whose harness has no verified resume argv is skipped,
+/// read by the launch and by a dry run alike: a taught line, never a guessed
+/// invocation.
+fn unresumed_reason(agent: &str) -> String {
+    format!("harness `{}` has no verified resume argv — skipped rather than typing a guessed invocation", strip_unsafe(agent))
+}
+
 /// Spawn one candidate via the windowed path and fold the outcome into
 /// `resurrected`/`skipped`/`failed`. Never returns an error — every failure
 /// mode is data, per the module doc.
@@ -501,18 +874,22 @@ fn resurrect_one(
     failed: &mut Vec<serde_json::Value>,
     changed: &mut Vec<String>,
 ) {
-    let Some(argv) = c.resume_argv else {
-        skipped.push(json!({
-            "sessionId": c.entry.session_id,
-            "agent": c.entry.agent,
-            "reason": format!(
-                "harness `{}` has no verified resume argv — skipped rather than typing a guessed invocation",
-                c.entry.agent
-            ),
-        }));
-        return;
+    let argv = match c.resume_argv {
+        Ok(argv) => argv,
+        Err(reason) => {
+            skipped.push(json!({
+                "sessionId": c.entry.session_id,
+                "agent": c.entry.agent,
+                "reason": strip_unsafe(&reason),
+            }));
+            return;
+        }
     };
     let new_id = mint_resurrected_id();
+    if let Err(refusal) = claim_resume(&c.entry, c.by_log, &new_id) {
+        skipped.push(refusal_row(&c.entry, refusal));
+        return;
+    }
     let mut flags = BTreeMap::new();
     flags.insert("agent".to_string(), c.entry.agent.clone());
     flags.insert("id".to_string(), new_id.clone());
@@ -534,10 +911,11 @@ fn resurrect_one(
     let launch_at = super::session_store::now_iso_utc();
     let out = launch_session(&spawn_inv, None);
     if out.status != aoide_protocol::output::Status::Ok {
+        release_resume_claim(&c.entry.session_id, &new_id);
         failed.push(json!({
             "sessionId": c.entry.session_id,
             "agent": c.entry.agent,
-            "reason": out.message,
+            "reason": strip_unsafe(&out.message),
         }));
         return;
     }
@@ -573,8 +951,11 @@ fn resurrect_one(
     match origin_to_carry(c.entry.origin.as_deref()) {
         OriginCarry::Carry(origin) => stamp_origin(&new_id, origin),
         OriginCarry::RefusedNode(origin) => eprintln!(
-            "aoide resurrect: reviving `{}` as LOCAL-class — its ledger origin `{origin}` cannot be trusted from an unsealed ledger and is not carried forward (P-ID1's sealed credential closes this)",
-            c.entry.session_id
+            "{}",
+            strip_unsafe(&format!(
+                "aoide resurrect: reviving `{}` as LOCAL-class — its ledger origin `{}` cannot be trusted from an unsealed ledger and is not carried forward (P-ID1's sealed credential closes this)",
+                c.entry.session_id, origin
+            ))
         ),
         OriginCarry::Nothing => {}
     }
@@ -585,7 +966,9 @@ fn resurrect_one(
     // sweep once P-C4 selects off the undying set. A no-op when the old id
     // was never undying at all (this resurrect did not originate from the
     // undying set), so an ordinary `--all`/`--id` revive never starts
-    // marking sessions undying that nobody marked.
+    // marking sessions undying that nobody marked. A by-journal revival
+    // (`ByLog`) moves nothing: its mark stays on the ledger id, the module
+    // doc says why.
     //
     // Both mutations land in ONE in-memory vector before the SINGLE
     // `save_undying` write below — mark the new id BEFORE dropping the old
@@ -595,7 +978,7 @@ fn resurrect_one(
     // idempotent: re-running this on an already-transferred pair finds the
     // old id no longer undying and writes nothing.
     let mut undying = aoide_storage::undying::load_undying();
-    if aoide_storage::undying::is_undying(&undying, &c.entry.session_id) {
+    if !c.by_log && aoide_storage::undying::is_undying(&undying, &c.entry.session_id) {
         aoide_storage::undying::set_undying(&mut undying, &new_id, true);
         aoide_storage::undying::set_undying(&mut undying, &c.entry.session_id, false);
         let _ = aoide_storage::undying::save_undying(&undying);
@@ -618,26 +1001,26 @@ fn resurrect_one(
         |inv| send_restore(inv, &new_id),
     );
     if let Restore::Refused(why) = &restore {
-        changed.push(format!("session {new_id}: restore refused — {why}"));
+        changed.push(strip_unsafe(&format!("session {new_id}: restore refused — {why}")));
     }
 
-    changed.push(format!(
+    changed.push(strip_unsafe(&format!(
         "session {new_id}: resurrected from {} ({}){}",
         c.entry.session_id,
         c.entry.agent,
         if registered { "" } else { " (not yet registered)" }
-    ));
+    )));
     if let Restore::Typed { .. } = restore {
-        changed.push(format!("session {new_id}: restore {}", restore.label()));
+        changed.push(strip_unsafe(&format!("session {new_id}: restore {}", restore.label())));
     }
     if restore == Restore::NotReady {
-        changed.push(format!(
+        changed.push(strip_unsafe(&format!(
             "session {new_id}: restore not injected — `{}` was not ready",
             c.entry.agent
-        ));
+        )));
     }
     if restore == Restore::Held {
-        changed.push(format!("session {new_id}: restore held pending approval"));
+        changed.push(strip_unsafe(&format!("session {new_id}: restore held pending approval")));
     }
     resurrected.push(json!({
         "sessionId": new_id,
@@ -648,9 +1031,10 @@ fn resurrect_one(
     }));
 }
 
-/// Bare-mode selection (no `--all`/`--id`, decision 6 of the durable-sessions
-/// plan): `anchored` narrowed to the project's WHOLE undying set, not just
-/// its single most recent entry. Three steps, in order:
+/// The bare form's picks (no `--all`/`--id`, decision 6 of the durable-sessions
+/// plan): the project's WHOLE undying set, not just its single most recent
+/// entry, as positions in `anchored`, keyed by `sessionId` so they come out in
+/// the order the bare launch revives them. Three steps, in order:
 ///
 /// 1. keep only entries whose `sessionId` is in `state/undying.json`
 ///    (`aoide_storage::undying::is_undying`);
@@ -662,9 +1046,7 @@ fn resurrect_one(
 /// 3. dedup by `sessionId`, keeping the entry with the latest `endedAt` — a
 ///    undying id that was resurrected and exited again appears twice in the
 ///    append-only ledger.
-fn undying_selection(
-    anchored: Vec<aoide_storage::ledger::LedgerEntry>,
-) -> Vec<aoide_storage::ledger::LedgerEntry> {
+fn undying_picks(anchored: &[aoide_storage::ledger::LedgerEntry]) -> BTreeMap<String, usize> {
     let undying = aoide_storage::undying::load_undying();
     let sessions: SessionsFile = load_stage(&sessions_path()).unwrap_or_default();
     let live: std::collections::HashSet<&str> = sessions
@@ -674,8 +1056,8 @@ fn undying_selection(
         .map(|s| s.session_id.as_str())
         .collect();
 
-    let mut newest: BTreeMap<String, aoide_storage::ledger::LedgerEntry> = BTreeMap::new();
-    for e in anchored {
+    let mut newest: BTreeMap<String, usize> = BTreeMap::new();
+    for (i, e) in anchored.iter().enumerate() {
         if !aoide_storage::undying::is_undying(&undying, &e.session_id) {
             continue;
         }
@@ -684,14 +1066,20 @@ fn undying_selection(
         }
         let ended = aoide_storage::time::parse_iso_utc(&e.ended_at).unwrap_or(0);
         let keep = match newest.get(&e.session_id) {
-            Some(existing) => ended > aoide_storage::time::parse_iso_utc(&existing.ended_at).unwrap_or(0),
+            Some(&j) => ended > aoide_storage::time::parse_iso_utc(&anchored[j].ended_at).unwrap_or(0),
             None => true,
         };
         if keep {
-            newest.insert(e.session_id.clone(), e);
+            newest.insert(e.session_id.clone(), i);
         }
     }
-    newest.into_values().collect()
+    newest
+}
+
+/// The bare form's launch: the entries [`undying_picks`] names.
+fn undying_selection(anchored: Vec<aoide_storage::ledger::LedgerEntry>) -> Vec<aoide_storage::ledger::LedgerEntry> {
+    let picks = undying_picks(&anchored);
+    picks.values().map(|&i| anchored[i].clone()).collect()
 }
 
 /// One audit line per `resurrect` invocation, carrying the decision's own
@@ -706,6 +1094,9 @@ fn undying_selection(
 /// that where `resurrect` has actually made — or attempted — a revival
 /// decision.
 fn audit_resurrect(inv: &Invocation, status: &str, message: &str) {
+    // A dry run audits under its own status whatever it decided, so the log
+    // tells a listing from a launch.
+    let status = if inv.flag_present("dry-run") { "dry-run" } else { status };
     let log = aoide_protocol::audit_log_path(inv);
     let _ = aoide_protocol::append_audit(
         &log,
@@ -743,8 +1134,14 @@ fn caller_is_attested(
 /// A door that cannot approve launches only as an attested caller, the way
 /// `spawn` does ([`session_resurrect_with`]): an MCP server under a sealed
 /// session revives (its restore bytes are still held, see [`send_restore`]), and
-/// every other caller has the whole command held in `pending.json` for a human
-/// to approve, with nothing launched.
+/// every other caller has a `--project` call held whole in `pending.json`
+/// for a human to approve, with nothing launched. Bare mode is refused there,
+/// and `--id` or `--all` without `--project` is a usage error. `--dry-run`
+/// lists the same selection instead, and launches, holds and sends nothing
+/// ([`dry_run_listing`], [`dry_run_manifest`]). From a caller that cannot
+/// approve, a dry run gets what the call gives without the launch: bare mode
+/// its refusal, `--id` or `--all` without `--project` the usage error, and
+/// `--project` the `dry-run-not-held` refusal.
 pub fn session_resurrect(inv: &Invocation) -> Outcome {
     session_resurrect_with(inv, real_attested_sender)
 }
@@ -753,9 +1150,12 @@ pub fn session_resurrect(inv: &Invocation) -> Outcome {
 /// door's decision is testable without a live daemon.
 ///
 /// An unattested caller on a door that cannot approve gets `--project …` held
-/// whole. Bare mode is refused there instead of held: it reads the working
-/// directory's manifest and launches the manifest's own commands, which an
-/// approver replaying from another directory would neither see in the held
+/// whole, and its dry run is refused instead, since the call would hold it and
+/// show that caller nothing. With `--id` or `--all` and no `--project`, a dry
+/// run gets the usage error the call gives, since that call holds nothing.
+/// Bare mode is refused there instead of held, dry or not: it reads the
+/// working directory's manifest and launches the manifest's own commands, which
+/// an approver replaying from another directory would neither see in the held
 /// line nor find in the same place.
 fn session_resurrect_with(
     inv: &Invocation,
@@ -763,6 +1163,7 @@ fn session_resurrect_with(
 ) -> Outcome {
     let cmd = "resurrect";
     let flag_mode = inv.flags.contains_key("project") || inv.flags.contains_key("id") || inv.flag_present("all");
+    let dry = inv.flag_present("dry-run");
     if !inv.door.can_approve() && !caller_is_attested(inv, resolve_caller) {
         if !flag_mode {
             let out = Outcome::refuse(
@@ -774,6 +1175,20 @@ fn session_resurrect_with(
                 Fix::Run("aoide resurrect --project <name>".to_string()),
             )
             .with_fields(json!({ "reason": "bare-resurrect-not-held" }));
+            audit_resurrect(inv, "refused", &out.message);
+            return out;
+        }
+        if dry && inv.flags.contains_key("project") {
+            let out = Outcome::refuse(
+                cmd,
+                Kind::Refused,
+                "resurrect dry run not shown: this door cannot approve, and the call \
+                 would wait for a person",
+                "a dry run shows what its caller gets without an approval, and from this \
+                 door the call holds and shows that caller nothing",
+                Fix::Run("aoide resurrect --project <name>".to_string()),
+            )
+            .with_fields(json!({ "reason": "dry-run-not-held" }));
             audit_resurrect(inv, "refused", &out.message);
             return out;
         }
@@ -790,7 +1205,11 @@ fn session_resurrect_with(
     if !flag_mode {
         let cwd = std::env::current_dir().unwrap_or_else(|_| Path::new(".").to_path_buf());
         if let Some((root, manifest)) = aoide_storage::manifest::walk_up(&cwd) {
-            return resurrect_from_manifest(inv, &root, &manifest);
+            return if dry {
+                dry_run_manifest(inv, &root, &manifest)
+            } else {
+                resurrect_from_manifest(inv, &root, &manifest)
+            };
         }
     }
 
@@ -813,10 +1232,10 @@ fn session_resurrect_with(
                 .unwrap_or_else(|_| "?".to_string());
             return Outcome::usage(
                 cmd,
-                format!(
+                strip_unsafe(&format!(
                     "no .aoide/project.json above `{cwd}` and no --project/--all/--id given — \
                      run inside a project with a manifest, or pass --project <name>"
-                ),
+                )),
             );
         }
     };
@@ -825,6 +1244,9 @@ fn session_resurrect_with(
         Ok(selection) => selection,
         Err(o) => return o,
     };
+    if dry {
+        return dry_run_listing(inv, &selection);
+    }
     launch_selection(inv, &selection)
 }
 
@@ -833,6 +1255,9 @@ fn session_resurrect_with(
 pub(in crate::graph) struct Selection {
     name: String,
     selected: Vec<aoide_storage::ledger::LedgerEntry>,
+    /// `picked[i]` is whether the bare `--project` form revives `selected[i]`;
+    /// only a dry run reads it.
+    picked: Vec<bool>,
 }
 
 /// Resolve `--project <name>` with `--id` or `--all` (or the undying set) to its
@@ -841,10 +1266,10 @@ fn select_candidates(inv: &Invocation, name: &str) -> Result<Selection, Outcome>
     let cmd = "resurrect";
     let projects: ProjectsFile = match load_stage(&projects_path()) {
         Ok(f) => f,
-        Err(e) => return Err(stage_error(cmd, e)),
+        Err(e) => return Err(stage_error(cmd, strip_unsafe(&e))),
     };
     let Some(target_idx) = projects.projects.iter().position(|p| p.name == name) else {
-        let out = Outcome::error(cmd, format!("no project named `{name}` — register it first with `project add`"))
+        let out = Outcome::error(cmd, strip_unsafe(&format!("no project named `{name}` — register it first with `project add`")))
             .with_data(json!({ "reason": "unknown-project", "project": name }));
         audit_resurrect(inv, "error", &out.message);
         return Err(out);
@@ -852,20 +1277,25 @@ fn select_candidates(inv: &Invocation, name: &str) -> Result<Selection, Outcome>
 
     let ledger = match aoide_storage::ledger::read_ledger() {
         Ok(v) => v,
-        Err(e) => return Err(stage_error(cmd, e.to_string())),
+        Err(e) => return Err(stage_error(cmd, strip_unsafe(&e.to_string()))),
     };
     let anchored: Vec<aoide_storage::ledger::LedgerEntry> = ledger
         .into_iter()
         .filter(|e| e.project.as_ref().map_or_else(|| super::model::anchor_for(&e.cwd, &projects.projects) == Some(target_idx), |p| p == &projects.projects[target_idx].name))
         .collect();
 
-    let selected: Vec<aoide_storage::ledger::LedgerEntry> = if let Some(id) = inv.flags.get("id") {
-        match anchored.into_iter().find(|e| &e.session_id == id) {
-            Some(e) => vec![e],
+    // The bare form's picks by position in `anchored`. On an `--all` or `--id`
+    // call only a dry run reads the undying set here. A real call reads it per
+    // revival in `resurrect_one`, and rewrites it there when a mark moves.
+    let picks = if inv.flag_present("dry-run") { undying_picks(&anchored) } else { BTreeMap::new() };
+    let picked_at = |i: usize| picks.values().any(|&j| j == i);
+    let (selected, picked): (Vec<aoide_storage::ledger::LedgerEntry>, Vec<bool>) = if let Some(id) = inv.flags.get("id") {
+        match anchored.iter().rposition(|e| &e.session_id == id) {
+            Some(i) => (vec![anchored[i].clone()], vec![picked_at(i)]),
             None => {
                 let out = Outcome::error(
                     cmd,
-                    format!("no ledger entry `{id}` anchored to project `{name}`"),
+                    strip_unsafe(&format!("no ledger entry `{id}` anchored to project `{name}`")),
                 )
                 .with_data(json!({ "reason": "unknown-ledger-id", "project": name, "id": id }));
                 audit_resurrect(inv, "error", &out.message);
@@ -873,17 +1303,22 @@ fn select_candidates(inv: &Invocation, name: &str) -> Result<Selection, Outcome>
             }
         }
     } else if inv.flag_present("all") {
-        let mut v = anchored;
-        v.sort_by(|a, b| {
-            let ea = aoide_storage::time::parse_iso_utc(&a.ended_at).unwrap_or(0);
-            let eb = aoide_storage::time::parse_iso_utc(&b.ended_at).unwrap_or(0);
+        let mut order: Vec<usize> = (0..anchored.len()).collect();
+        order.sort_by(|&a, &b| {
+            let ea = aoide_storage::time::parse_iso_utc(&anchored[a].ended_at).unwrap_or(0);
+            let eb = aoide_storage::time::parse_iso_utc(&anchored[b].ended_at).unwrap_or(0);
             eb.cmp(&ea)
         });
-        v
+        (
+            order.iter().map(|&i| anchored[i].clone()).collect(),
+            order.iter().map(|&i| picked_at(i)).collect(),
+        )
     } else {
-        undying_selection(anchored)
+        let selected = undying_selection(anchored);
+        let picked = vec![true; selected.len()];
+        (selected, picked)
     };
-    Ok(Selection { name: name.to_string(), selected })
+    Ok(Selection { name: name.to_string(), selected, picked })
 }
 
 /// What a held resurrect would do, one line per candidate, in the words the
@@ -945,7 +1380,7 @@ pub(in crate::graph) fn approved_selection(launch: &Invocation, shown: &[String]
         let out = Outcome::refuse(
             "resurrect",
             Kind::Refused,
-            format!("held resurrect of `{name}` not launched: its candidates changed since it was shown"),
+            strip_unsafe(&format!("held resurrect of `{name}` not launched: its candidates changed since it was shown")),
             "what it would revive, and what each restore would type, is decided at approval, and it differs from the plan the entry was held with",
             Fix::None("deny this entry and hold the resurrect again to see the current plan"),
         )
@@ -963,11 +1398,11 @@ pub(in crate::graph) fn launch_selection(inv: &Invocation, selection: &Selection
     let name = selection.name.as_str();
     if selection.selected.is_empty() {
         let bare = inv.flags.get("id").is_none() && !inv.flag_present("all");
-        let msg = if bare {
+        let msg = strip_unsafe(&if bare {
             format!("undying set is empty for project `{name}` — nothing to resurrect")
         } else {
             format!("no resumable session found for project `{name}`")
-        };
+        });
         audit_resurrect(inv, "ok", &msg);
         return Outcome::ok(cmd, msg)
             .with_data(json!({ "project": name, "resurrected": [], "skipped": [], "failed": [] }));
@@ -983,12 +1418,12 @@ pub(in crate::graph) fn launch_selection(inv: &Invocation, selection: &Selection
 
     let out = Outcome::ok(
         cmd,
-        format!(
+        strip_unsafe(&format!(
             "project `{name}`: resurrected {}, skipped {}, failed {}",
             resurrected.len(),
             skipped.len(),
             failed.len(),
-        ),
+        )),
     )
     .changed(changed)
     .with_data(json!({
@@ -1000,6 +1435,66 @@ pub(in crate::graph) fn launch_selection(inv: &Invocation, selection: &Selection
     }));
     audit_resurrect(inv, "ok", &out.message);
     out
+}
+
+/// A flag-mode dry run: one row per candidate the launch would act on, in the
+/// order it acts on them, each with the disposition `resurrect_one` would reach
+/// (a candidate with no resume argv is skipped there too). The message is the
+/// plan `approved_selection` compares, each line spelled as the pending view
+/// spells a held plan line (`visible_held`); the data and the stored plan stay
+/// raw. Nothing is spawned, sent or held.
+fn dry_run_listing(inv: &Invocation, selection: &Selection) -> Outcome {
+    let name = selection.name.as_str();
+    let candidates: Vec<serde_json::Value> = selection
+        .selected
+        .iter()
+        .zip(&selection.picked)
+        .map(|(e, &picked)| {
+            let mut row = json!({
+                "sessionId": e.session_id,
+                "agent": e.agent,
+                "project": name,
+                "cwd": e.cwd,
+                "endedAt": e.ended_at,
+                "restoreText": restore_text(e.restore.as_ref()),
+                "pickedByBare": picked,
+                "disposition": "revived-from-ledger",
+            });
+            if let Err(refusal) = dry_verdict(&resolve_candidate(e.clone())) {
+                row["disposition"] = json!("skipped");
+                row["reason"] = json!(strip_unsafe(&refusal.reason));
+                if let Some((key, id)) = refusal.named {
+                    row[key] = json!(id);
+                }
+            }
+            row
+        })
+        .collect();
+    let message = plan_lines(selection)
+        .iter()
+        .map(|l| super::visible_held(l))
+        .collect::<Vec<_>>()
+        .join("\n");
+    audit_resurrect(inv, "dry-run", &message);
+    Outcome::ok("resurrect", message).with_data(json!({
+        "project": name,
+        "dryRun": true,
+        "candidates": candidates,
+    }))
+}
+
+/// The enriching ledger entry for a manifest spec: the newest entry whose cwd
+/// and agent match the spec's resolved dir and agent, the module doc's
+/// enrichment rule. `None` is the clean-spawn case.
+fn enrichment<'a>(
+    ledger: &'a [aoide_storage::ledger::LedgerEntry],
+    dir: &str,
+    agent: &str,
+) -> Option<&'a aoide_storage::ledger::LedgerEntry> {
+    ledger
+        .iter()
+        .filter(|e| e.cwd == dir && e.agent == agent)
+        .max_by_key(|e| aoide_storage::time::parse_iso_utc(&e.ended_at).unwrap_or(0))
 }
 
 /// Mark a manifest-revived session's OWN new id undying (orchestrator
@@ -1044,7 +1539,7 @@ fn resurrect_from_manifest(
     let this_host = aoide_storage::display::local_host_name();
     let ledger = match aoide_storage::ledger::read_ledger() {
         Ok(v) => v,
-        Err(e) => return stage_error(cmd, e.to_string()),
+        Err(e) => return stage_error(cmd, strip_unsafe(&e.to_string())),
     };
 
     let mut resurrected: Vec<serde_json::Value> = Vec::new();
@@ -1063,7 +1558,7 @@ fn resurrect_from_manifest(
             Err(e) => {
                 failed.push(json!({
                     "host": spec.host, "dir": spec.dir, "agent": spec.agent,
-                    "disposition": "failed", "reason": e,
+                    "disposition": "failed", "reason": strip_unsafe(&e),
                 }));
                 continue;
             }
@@ -1074,10 +1569,7 @@ fn resurrect_from_manifest(
         // whose cwd/agent match this spec — host is implicit, a spec whose
         // host didn't match this one already skipped above, and the ledger
         // itself is host-local state that is never synced.
-        let matched = ledger
-            .iter()
-            .filter(|e| e.cwd == dir_str && e.agent == spec.agent)
-            .max_by_key(|e| aoide_storage::time::parse_iso_utc(&e.ended_at).unwrap_or(0));
+        let matched = enrichment(&ledger, &dir_str, &spec.agent);
 
         match matched {
             Some(entry) => {
@@ -1120,13 +1612,13 @@ fn resurrect_from_manifest(
 
     let out = Outcome::ok(
         cmd,
-        format!(
+        strip_unsafe(&format!(
             "manifest at `{}`: resurrected {}, skipped {}, failed {}",
             root.display(),
             resurrected.len(),
             skipped.len(),
             failed.len(),
-        ),
+        )),
     )
     .changed(changed)
     .with_data(json!({
@@ -1198,45 +1690,15 @@ fn summon_remote(
     failed: &mut Vec<serde_json::Value>,
     changed: &mut Vec<String>,
 ) {
-    let nodes = aoide_storage::node_store::load_nodes();
-    let node = match nodes.iter().find(|p| p.name == spec.host) {
-        Some(p) if p.verified => p.clone(),
-        Some(_) => {
+    let (node, text) = match summon_check(spec) {
+        Ok(checked) => checked,
+        Err(reason) => {
             failed.push(json!({
                 "host": spec.host, "dir": spec.dir, "agent": spec.agent,
-                "disposition": "failed",
-                "reason": format!(
-                    "node `{}` is registered but not paired — summoning requires a signed \
-                     request from a VERIFIED node; pair first with `aoide pair \
-                     <url> --name {}`",
-                    spec.host, spec.host
-                ),
+                "disposition": "failed", "reason": strip_unsafe(&reason),
             }));
             return;
         }
-        None => {
-            failed.push(json!({
-                "host": spec.host, "dir": spec.dir, "agent": spec.agent,
-                "disposition": "failed",
-                "reason": format!(
-                    "host `{}` is not a registered node — `aoide node add {} <url>` (then pair it) first",
-                    spec.host, spec.host
-                ),
-            }));
-            return;
-        }
-    };
-
-    let Some(text) = summon_text(spec) else {
-        failed.push(json!({
-            "host": spec.host, "dir": spec.dir, "agent": spec.agent,
-            "disposition": "failed",
-            "reason": format!(
-                "no `command` given and no registered default launch for agent `{}` — add a `command` to the spec",
-                spec.agent
-            ),
-        }));
-        return;
     };
 
     match aoide_client::commands::spawn_on_node(&node, &text) {
@@ -1247,10 +1709,10 @@ fn summon_remote(
                 .and_then(serde_json::Value::as_str)
                 .unwrap_or("")
                 .to_string();
-            changed.push(format!(
+            changed.push(strip_unsafe(&format!(
                 "session {session_id}: summoned on node `{}` (manifest spec, agent {})",
                 spec.host, spec.agent
-            ));
+            )));
             resurrected.push(json!({
                 "sessionId": session_id,
                 "host": spec.host,
@@ -1263,10 +1725,43 @@ fn summon_remote(
             failed.push(json!({
                 "host": spec.host, "dir": spec.dir, "agent": spec.agent,
                 "disposition": "failed",
-                "reason": format!("summoning on node `{}`: {e}", spec.host),
+                "reason": strip_unsafe(&format!("summoning on node `{}`: {e}", spec.host)),
             }));
         }
     }
+}
+
+/// The local pre-wire verdict on a remote spec, the refusals `summon_remote`
+/// gives before the wire is touched: the node to summon on and the text to
+/// send, or the reason the spec cannot be sent.
+fn summon_check(
+    spec: &aoide_storage::manifest::SessionSpec,
+) -> Result<(aoide_storage::node_store::Node, String), String> {
+    let nodes = aoide_storage::node_store::load_nodes();
+    let node = match nodes.iter().find(|p| p.name == spec.host) {
+        Some(p) if p.verified => p.clone(),
+        Some(_) => {
+            return Err(format!(
+                "node `{}` is registered but not paired — summoning requires a signed \
+                 request from a VERIFIED node; pair first with `aoide pair \
+                 <url> --name {}`",
+                spec.host, spec.host
+            ))
+        }
+        None => {
+            return Err(format!(
+                "host `{}` is not a registered node — `aoide node add {} <url>` (then pair it) first",
+                spec.host, spec.host
+            ))
+        }
+    };
+    let text = summon_text(spec).ok_or_else(|| {
+        format!(
+            "no `command` given and no registered default launch for agent `{}` — add a `command` to the spec",
+            strip_unsafe(&spec.agent)
+        )
+    })?;
+    Ok((node, text))
 }
 
 /// The text a remote summon injects as the node's newly spawned session's
@@ -1294,6 +1789,28 @@ fn summon_text(spec: &aoide_storage::manifest::SessionSpec) -> Option<String> {
     Some(profile.launch.join(" "))
 }
 
+/// The argv a clean spawn of a manifest spec launches: its `command` split on
+/// whitespace, else the agent's registered default launch. A spec with neither,
+/// or whose `command` splits to nothing, is refused with the reason.
+fn clean_argv(spec: &aoide_storage::manifest::SessionSpec) -> Result<Vec<String>, String> {
+    let argv: Vec<String> = match &spec.command {
+        Some(command) => command.split_whitespace().map(str::to_string).collect(),
+        None => match agent_profile(&spec.agent) {
+            Some(p) if !p.launch.is_empty() => p.launch.iter().map(|s| s.to_string()).collect(),
+            _ => {
+                return Err(format!(
+                    "no `command` given and no registered default launch for agent `{}` — add a `command` to the spec",
+                    strip_unsafe(&spec.agent)
+                ))
+            }
+        },
+    };
+    if argv.is_empty() {
+        return Err("spec's `command` is empty after whitespace-splitting".to_string());
+    }
+    Ok(argv)
+}
+
 /// A manifest spec with no enriching ledger match: clean-spawn it windowed
 /// — the spec's own `command` when given (whitespace-split into argv; no
 /// shell-quote awareness, the same naive tokenizing `spawn.rs`'s own
@@ -1310,30 +1827,16 @@ fn clean_spawn_from_spec(
     failed: &mut Vec<serde_json::Value>,
     changed: &mut Vec<String>,
 ) {
-    let argv: Vec<String> = match &spec.command {
-        Some(command) => command.split_whitespace().map(str::to_string).collect(),
-        None => match agent_profile(&spec.agent) {
-            Some(p) if !p.launch.is_empty() => p.launch.iter().map(|s| s.to_string()).collect(),
-            _ => {
-                failed.push(json!({
-                    "host": spec.host, "dir": spec.dir, "agent": spec.agent,
-                    "disposition": "failed",
-                    "reason": format!(
-                        "no `command` given and no registered default launch for agent `{}` — add a `command` to the spec",
-                        spec.agent
-                    ),
-                }));
-                return;
-            }
-        },
+    let argv = match clean_argv(spec) {
+        Ok(argv) => argv,
+        Err(reason) => {
+            failed.push(json!({
+                "host": spec.host, "dir": spec.dir, "agent": spec.agent,
+                "disposition": "failed", "reason": strip_unsafe(&reason),
+            }));
+            return;
+        }
     };
-    if argv.is_empty() {
-        failed.push(json!({
-            "host": spec.host, "dir": spec.dir, "agent": spec.agent,
-            "disposition": "failed", "reason": "spec's `command` is empty after whitespace-splitting",
-        }));
-        return;
-    }
 
     let mut flags = BTreeMap::new();
     flags.insert("agent".to_string(), spec.agent.clone());
@@ -1343,7 +1846,7 @@ fn clean_spawn_from_spec(
     if out.status != Status::Ok {
         failed.push(json!({
             "host": spec.host, "dir": spec.dir, "agent": spec.agent,
-            "disposition": "failed", "reason": out.message,
+            "disposition": "failed", "reason": strip_unsafe(&out.message),
         }));
         return;
     }
@@ -1360,17 +1863,113 @@ fn clean_spawn_from_spec(
         .and_then(|d| d.get("registered"))
         .and_then(serde_json::Value::as_bool)
         .unwrap_or(false);
-    changed.push(format!(
+    changed.push(strip_unsafe(&format!(
         "session {session_id}: clean-spawned from manifest spec ({}){}",
         spec.agent,
         if registered { "" } else { " (not yet registered)" }
-    ));
+    )));
     resurrected.push(json!({
         "sessionId": session_id,
         "agent": spec.agent,
         "registered": registered,
         "disposition": "clean-spawned",
     }));
+}
+
+/// One manifest spec's dry-run row and its plan line. Each verdict comes from
+/// the helper the launch uses for that spec: `summon_check` for a non-local
+/// host; `resolve_spec_dir`, `enrichment`, `resolve_candidate` and `clean_argv`
+/// for a local one. Nothing is spawned or sent.
+fn plan_spec(
+    root: &Path,
+    spec: &aoide_storage::manifest::SessionSpec,
+    this_host: &str,
+    ledger: &[aoide_storage::ledger::LedgerEntry],
+) -> (serde_json::Value, String) {
+    let label = if spec.host == this_host {
+        format!("{} ({})", spec.dir, spec.agent)
+    } else {
+        format!("{} {} ({})", spec.host, spec.dir, spec.agent)
+    };
+    let mut row = json!({ "host": spec.host, "dir": spec.dir, "agent": spec.agent, "command": spec.command });
+    if spec.host != this_host {
+        return match summon_check(spec) {
+            Ok((_, text)) => {
+                row["disposition"] = json!("summoned-remote");
+                row["text"] = json!(text);
+                (row, format!("{label}: summon `{text}`"))
+            }
+            Err(reason) => not_launched(row, &label, "failed", reason),
+        };
+    }
+    let dir = match aoide_storage::manifest::resolve_spec_dir(root, &spec.dir) {
+        Ok(dir) => dir,
+        Err(reason) => return not_launched(row, &label, "failed", reason),
+    };
+    let dir_str = dir.to_string_lossy().into_owned();
+    row["cwd"] = json!(dir_str);
+    if let Some(entry) = enrichment(ledger, &dir_str, &spec.agent) {
+        row["resumedFrom"] = json!(entry.session_id);
+        if let Err(refusal) = dry_verdict(&resolve_candidate(entry.clone())) {
+            if let Some((key, id)) = refusal.named {
+                row[key] = json!(id);
+            }
+            return not_launched(row, &label, "skipped", refusal.reason);
+        }
+        let restore = restore_text(entry.restore.as_ref());
+        row["restoreText"] = json!(restore);
+        row["disposition"] = json!("revived-from-ledger");
+        return (row, format!("{label}: revive {}, {restore}", entry.session_id));
+    }
+    match clean_argv(spec) {
+        Ok(argv) => {
+            row["disposition"] = json!("clean-spawned");
+            row["argv"] = json!(argv);
+            (row, format!("{label}: clean spawn `{}`", shell_join(&argv)))
+        }
+        Err(reason) => not_launched(row, &label, "failed", reason),
+    }
+}
+
+/// A dry-run row the launch would fail or skip, with its reason and plan line.
+fn not_launched(
+    mut row: serde_json::Value,
+    label: &str,
+    disposition: &str,
+    reason: String,
+) -> (serde_json::Value, String) {
+    row["disposition"] = json!(disposition);
+    row["reason"] = json!(strip_unsafe(&reason));
+    (row, format!("{label}: {disposition}, {reason}"))
+}
+
+/// `resurrect` with no flag, as a dry run: one row per manifest spec, each
+/// decided as `resurrect_from_manifest` decides it (see [`plan_spec`]). The
+/// header and each line are spelled as [`dry_run_listing`]'s are. Nothing is
+/// spawned, sent or held.
+fn dry_run_manifest(inv: &Invocation, root: &Path, manifest: &aoide_storage::manifest::Manifest) -> Outcome {
+    let cmd = "resurrect";
+    let this_host = aoide_storage::display::local_host_name();
+    let ledger = match aoide_storage::ledger::read_ledger() {
+        Ok(v) => v,
+        Err(e) => return stage_error(cmd, strip_unsafe(&e.to_string())),
+    };
+    let (candidates, lines): (Vec<serde_json::Value>, Vec<String>) = manifest
+        .sessions
+        .iter()
+        .map(|spec| plan_spec(root, spec, &this_host, &ledger))
+        .unzip();
+    let message = std::iter::once(format!("manifest at `{}`", root.display()))
+        .chain(lines)
+        .map(|l| super::visible_held(&l))
+        .collect::<Vec<_>>()
+        .join("\n");
+    audit_resurrect(inv, "dry-run", &message);
+    Outcome::ok(cmd, message).with_data(json!({
+        "manifestRoot": root.to_string_lossy(),
+        "dryRun": true,
+        "candidates": candidates,
+    }))
 }
 
 #[cfg(test)]
@@ -1453,6 +2052,7 @@ mod tests {
             resumed_from: None,
             origin: None,
             restore: None,
+            log_path: None,
         }
     }
 
@@ -1466,7 +2066,25 @@ mod tests {
         ended_at: &str,
         restore: Option<RestoreSnapshot>,
     ) -> aoide_storage::ledger::LedgerEntry {
-        aoide_storage::ledger::LedgerEntry { restore, ..ledger_entry(session_id, agent, cwd, ended_at) }
+        aoide_storage::ledger::LedgerEntry {
+            restore,
+            log_path: None,
+            ..ledger_entry(session_id, agent, cwd, ended_at)
+        }
+    }
+
+    /// `ledger_entry` carrying a `logPath`, built through its JSON line so the
+    /// fixture has the shape `ledger_session_exit` writes.
+    fn ledger_entry_with_log(
+        session_id: &str,
+        agent: &str,
+        cwd: &str,
+        log_path: Option<&str>,
+    ) -> aoide_storage::ledger::LedgerEntry {
+        let mut line =
+            serde_json::to_value(ledger_entry(session_id, agent, cwd, "2026-08-20T01:00:00Z")).unwrap();
+        line["logPath"] = log_path.map_or(serde_json::Value::Null, |p| json!(p));
+        serde_json::from_value(line).unwrap()
     }
 
     /// Common env scaffolding every test below needs: an isolated stage +
@@ -1546,7 +2164,11 @@ mod tests {
     fn resolve_candidate_restore_less_shell_entry_still_hits_the_taught_skip() {
         let entry = ledger_entry_with_restore("ledger-no-restore", "shell", "/home/khoa/Aoide", "2026-08-20T01:00:00Z", None);
         let candidate = resolve_candidate(entry);
-        assert!(candidate.resume_argv.is_none(), "a restore-less shell entry must still be skipped");
+        assert_eq!(
+            candidate.resume_argv.unwrap_err(),
+            "harness `shell` has no verified resume argv — skipped rather than typing a guessed invocation",
+            "a restore-less shell entry must still be skipped with the taught line"
+        );
     }
 
     /// R1: a busy session's recorded argv is TYPED and never submitted. The
@@ -2033,6 +2655,7 @@ mod tests {
     fn resolve_candidate_preserves_the_ledger_entrys_origin() {
         let entry = aoide_storage::ledger::LedgerEntry {
             origin: Some("node:yomi-strix".to_string()),
+            log_path: None,
             ..ledger_entry("ledger-node-origin", "claude", "/home/khoa/Aoide", "2026-08-20T01:00:00Z")
         };
         let candidate = resolve_candidate(entry);
@@ -2092,6 +2715,7 @@ mod tests {
 
         let entry = aoide_storage::ledger::LedgerEntry {
             origin: Some("node:yomi-strix".to_string()),
+            log_path: None,
             ..ledger_entry("ledger-node-origin", "claude", &proj_path, "2026-08-20T01:00:00Z")
         };
         set_ledger(&[entry]);
@@ -2190,6 +2814,15 @@ mod tests {
         // append-only ledger still holds the line), so it is what re-drives
         // the same candidate a second time here — the point of THIS test is
         // `resurrect_one`'s transfer idempotency, not bare-mode selection.
+        // The first revival has ended by now: its claim is stale, so the
+        // re-drive may launch. While that session is open, it is refused.
+        let mut roster = SessionsFile::default();
+        roster.sessions.push(aoide_storage::records::SessionRecord {
+            session_id: first_new_id.clone(),
+            state: "done".into(),
+            ..Default::default()
+        });
+        write_stage(&sessions_path(), &roster).unwrap();
         let second = session_resurrect(&flag_invocation(
             &["resurrect"],
             &[("project", "proj"), ("id", "ledger-idem")],
@@ -3186,13 +3819,32 @@ mod tests {
         marker
     }
 
+    /// `wait_for` waits this long for a positive control's terminal, and
+    /// `no_marker_within_the_launch_wait` watches this long for a dry run's. A
+    /// launch that starts later is not caught.
+    #[cfg(unix)]
+    const LAUNCH_WAIT: std::time::Duration = std::time::Duration::from_millis(5000);
+
     #[cfg(unix)]
     fn wait_for(path: &std::path::Path) -> bool {
-        let deadline = std::time::Instant::now() + std::time::Duration::from_millis(5000);
+        let deadline = std::time::Instant::now() + LAUNCH_WAIT;
         while std::time::Instant::now() < deadline && !path.exists() {
             std::thread::sleep(std::time::Duration::from_millis(50));
         }
         path.exists()
+    }
+
+    /// The negative side of `wait_for`: no terminal may open within
+    /// `LAUNCH_WAIT`. It fails the moment the marker appears, so a launch in
+    /// that time is what it catches.
+    #[cfg(unix)]
+    fn no_marker_within_the_launch_wait(marker: &std::path::Path) {
+        let deadline = std::time::Instant::now() + LAUNCH_WAIT;
+        while std::time::Instant::now() < deadline {
+            assert!(!marker.exists(), "a dry run opened a terminal");
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        assert!(!marker.exists(), "a dry run opened a terminal");
     }
 
     #[cfg(unix)]
@@ -3463,6 +4115,1851 @@ mod tests {
         assert_eq!(approve.status, aoide_protocol::output::Status::Error, "{}", approve.message);
         let raw: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(crate::graph::send::pending_path()).unwrap()).unwrap();
         assert_eq!(raw["pending"].as_array().unwrap().len(), 1, "the entry was not taken");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The `candidates` rows a dry run lists.
+    fn candidates(out: &Outcome) -> Vec<serde_json::Value> {
+        out.data.as_ref().unwrap()["candidates"].as_array().unwrap().clone()
+    }
+
+    fn session_ids(rows: &[serde_json::Value]) -> Vec<&str> {
+        rows.iter().map(|r| r["sessionId"].as_str().unwrap()).collect()
+    }
+
+    /// Every regular file under `dir` with its bytes, keyed by path. The audit
+    /// log is left out: a call is allowed to append to it, nothing else.
+    fn snapshot(dir: &std::path::Path) -> std::collections::BTreeMap<std::path::PathBuf, Vec<u8>> {
+        fn walk(root: &std::path::Path, dir: &std::path::Path, out: &mut std::collections::BTreeMap<std::path::PathBuf, Vec<u8>>) {
+            for entry in std::fs::read_dir(dir).unwrap() {
+                let entry = entry.unwrap();
+                let path = entry.path();
+                let kind = entry.file_type().unwrap();
+                if kind.is_dir() {
+                    walk(root, &path, out);
+                } else if kind.is_file() && path != root.join("log") {
+                    out.insert(path.clone(), std::fs::read(&path).unwrap());
+                }
+            }
+        }
+        let mut out = std::collections::BTreeMap::new();
+        walk(dir, dir, &mut out);
+        out
+    }
+
+    /// The `status` of every audit line `resurrect` wrote, in file order.
+    fn resurrect_audit_statuses(log_path: &std::path::Path) -> Vec<String> {
+        std::fs::read_to_string(log_path)
+            .unwrap_or_default()
+            .lines()
+            .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+            .filter(|v| v.get("command").and_then(serde_json::Value::as_str) == Some("resurrect"))
+            .map(|v| v.get("status").and_then(serde_json::Value::as_str).unwrap_or_default().to_string())
+            .collect()
+    }
+
+    /// The bare `--project P` dry run lists the undying set the bare form
+    /// revives: one row per undying id, an id alive now left out, each row
+    /// marked as one the bare form picks.
+    #[test]
+    fn dry_run_bare_form_lists_the_undying_set_with_live_ids_left_out() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["AOIDE_STAGE_DIR", "AOIDE_STATE_DIR", "XDG_RUNTIME_DIR", "AOIDE_AUDIT_LOG"]);
+        let (root, proj_path) = setup("resurrect-dry-bare");
+
+        set_ledger(&[
+            ledger_entry("undying-a", "claude", &proj_path, "2026-08-20T01:00:00Z"),
+            ledger_entry("undying-live", "claude", &proj_path, "2026-08-20T02:00:00Z"),
+            ledger_entry("plain", "claude", &proj_path, "2026-08-20T03:00:00Z"),
+        ]);
+        let mut undying = Vec::new();
+        aoide_storage::undying::set_undying(&mut undying, "undying-a", true);
+        aoide_storage::undying::set_undying(&mut undying, "undying-live", true);
+        aoide_storage::undying::save_undying(&undying).unwrap();
+        write_stage(
+            &sessions_path(),
+            &SessionsFile {
+                schema_version: "0".into(),
+                sessions: vec![session("undying-live", &proj_path, "working", "2026-08-20T02:00:00Z", None)],
+            },
+        )
+        .unwrap();
+
+        let out = session_resurrect(&flag_invocation(&["resurrect"], &[("project", "proj"), ("dry-run", "true")]));
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "msg: {}", out.message);
+        let rows = candidates(&out);
+        assert_eq!(session_ids(&rows), vec!["undying-a"], "{rows:?}");
+        assert_eq!(rows[0]["pickedByBare"], true, "{rows:?}");
+        assert_eq!(rows[0]["agent"], "claude", "{rows:?}");
+        assert_eq!(rows[0]["project"], "proj", "{rows:?}");
+        assert_eq!(rows[0]["cwd"], proj_path.as_str(), "{rows:?}");
+        assert_eq!(rows[0]["endedAt"], "2026-08-20T01:00:00Z", "{rows:?}");
+        assert!(rows[0]["restoreText"].is_string(), "{rows:?}");
+        assert!(out.message.contains("undying-a"), "{}", out.message);
+        assert!(!out.message.contains("undying-live"), "{}", out.message);
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// `--all` lists every anchored entry of the project, newest first, and
+    /// sets `pickedByBare` on exactly the rows the bare form revives: the
+    /// newest row of a duplicated undying id, and no row of an id alive now.
+    /// Another project's entries never appear.
+    #[test]
+    fn dry_run_all_lists_every_anchored_entry_newest_first_and_marks_only_the_bare_picks() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["AOIDE_STAGE_DIR", "AOIDE_STATE_DIR", "XDG_RUNTIME_DIR", "AOIDE_AUDIT_LOG"]);
+        let (root, proj_path) = setup("resurrect-dry-all");
+
+        set_ledger(&[
+            ledger_entry("old", "claude", &proj_path, "2026-08-20T01:00:00Z"),
+            ledger_entry("dup", "claude", &proj_path, "2026-08-20T03:00:00Z"),
+            ledger_entry("dup", "claude", &proj_path, "2026-08-20T04:00:00Z"),
+            ledger_entry("plain", "claude", &proj_path, "2026-08-20T05:00:00Z"),
+            ledger_entry("live", "claude", &proj_path, "2026-08-20T06:00:00Z"),
+            ledger_entry("elsewhere", "claude", "/not/under/the/project", "2026-08-20T07:00:00Z"),
+        ]);
+        let mut undying = Vec::new();
+        for id in ["old", "dup", "live"] {
+            aoide_storage::undying::set_undying(&mut undying, id, true);
+        }
+        aoide_storage::undying::save_undying(&undying).unwrap();
+        write_stage(
+            &sessions_path(),
+            &SessionsFile {
+                schema_version: "0".into(),
+                sessions: vec![session("live", &proj_path, "working", "2026-08-20T06:00:00Z", None)],
+            },
+        )
+        .unwrap();
+
+        let out = session_resurrect(&flag_invocation(
+            &["resurrect"],
+            &[("project", "proj"), ("all", "true"), ("dry-run", "true")],
+        ));
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "msg: {}", out.message);
+        let rows = candidates(&out);
+        let got: Vec<(&str, &str, bool)> = rows
+            .iter()
+            .map(|r| {
+                (
+                    r["sessionId"].as_str().unwrap(),
+                    r["endedAt"].as_str().unwrap(),
+                    r["pickedByBare"].as_bool().unwrap(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            got,
+            vec![
+                ("live", "2026-08-20T06:00:00Z", false),
+                ("plain", "2026-08-20T05:00:00Z", false),
+                ("dup", "2026-08-20T04:00:00Z", true),
+                ("dup", "2026-08-20T03:00:00Z", false),
+                ("old", "2026-08-20T01:00:00Z", true),
+            ],
+            "{rows:?}"
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The listing is the launch: `--all` lists exactly the anchored entries
+    /// `--all` would launch, and the message is the plan `approved_selection`
+    /// compares, so approving the plan the dry run showed is accepted.
+    #[test]
+    fn dry_run_all_lists_exactly_the_anchored_entries_and_approval_accepts_the_plan_shown() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["AOIDE_STAGE_DIR", "AOIDE_STATE_DIR", "XDG_RUNTIME_DIR", "AOIDE_AUDIT_LOG"]);
+        let (root, proj_path) = setup("resurrect-dry-plan");
+        let other = unique_stage("resurrect-dry-plan-other");
+        let other_str = other.to_str().unwrap().to_string();
+        let mut add = invocation(&["project", "add"], &["other", &other_str]);
+        add.door = aoide_protocol::Door::Daemon;
+        let added = crate::graph::project_add(&add);
+        assert_eq!(added.status, aoide_protocol::output::Status::Ok, "msg: {}", added.message);
+
+        set_ledger(&[
+            ledger_entry("p-old", "claude", &proj_path, "2026-08-20T01:00:00Z"),
+            ledger_entry("p-new", "claude", &proj_path, "2026-08-20T02:00:00Z"),
+            ledger_entry("o-1", "claude", &other_str, "2026-08-20T03:00:00Z"),
+        ]);
+
+        let out = session_resurrect(&flag_invocation(
+            &["resurrect"],
+            &[("project", "proj"), ("all", "true"), ("dry-run", "true")],
+        ));
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "msg: {}", out.message);
+        let rows = candidates(&out);
+        assert_eq!(session_ids(&rows), vec!["p-new", "p-old"], "{rows:?}");
+
+        let launch = flag_invocation(&["resurrect"], &[("project", "proj"), ("all", "true")]);
+        let shown = match select_candidates(&launch, "proj") {
+            Ok(selection) => plan_lines(&selection),
+            Err(o) => panic!("the real --all selection refused: {}", o.message),
+        };
+        assert_eq!(out.message, shown.join("\n"));
+        assert!(approved_selection(&launch, &shown).is_ok(), "approval refused the plan the dry run showed");
+
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&other);
+    }
+
+    /// `--id S` lists one row, marked only when the bare form would revive
+    /// that row: an undying id is picked, an ordinary one is not.
+    #[test]
+    fn dry_run_id_lists_one_row_and_marks_it_only_when_the_bare_form_would_revive_it() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["AOIDE_STAGE_DIR", "AOIDE_STATE_DIR", "XDG_RUNTIME_DIR", "AOIDE_AUDIT_LOG"]);
+        let (root, proj_path) = setup("resurrect-dry-id");
+
+        set_ledger(&[
+            ledger_entry("u", "claude", &proj_path, "2026-08-20T01:00:00Z"),
+            ledger_entry("n", "claude", &proj_path, "2026-08-20T02:00:00Z"),
+        ]);
+        let mut undying = Vec::new();
+        aoide_storage::undying::set_undying(&mut undying, "u", true);
+        aoide_storage::undying::save_undying(&undying).unwrap();
+
+        let picked = session_resurrect(&flag_invocation(
+            &["resurrect"],
+            &[("project", "proj"), ("id", "u"), ("dry-run", "true")],
+        ));
+        assert_eq!(picked.status, aoide_protocol::output::Status::Ok, "msg: {}", picked.message);
+        let rows = candidates(&picked);
+        assert_eq!(session_ids(&rows), vec!["u"], "{rows:?}");
+        assert_eq!(rows[0]["pickedByBare"], true, "{rows:?}");
+
+        let plain = session_resurrect(&flag_invocation(
+            &["resurrect"],
+            &[("project", "proj"), ("id", "n"), ("dry-run", "true")],
+        ));
+        assert_eq!(plain.status, aoide_protocol::output::Status::Ok, "msg: {}", plain.message);
+        let rows = candidates(&plain);
+        assert_eq!(session_ids(&rows), vec!["n"], "{rows:?}");
+        assert_eq!(rows[0]["pickedByBare"], false, "{rows:?}");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A dry run in every flag mode launches nothing (the recording terminal
+    /// never runs), holds nothing, writes no state file (the audit log aside),
+    /// and writes exactly one audit line per call, marked `dry-run`.
+    #[cfg(unix)]
+    #[test]
+    fn dry_run_launches_nothing_holds_nothing_and_writes_no_state() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(RESURRECT_ENV);
+        let (root, proj_path) = setup("resurrect-dry-zero");
+        std::env::remove_var("AOIDE_DAEMON_SOCKET");
+        std::env::remove_var("AOIDE_SESSION_ID");
+        let marker = marker_terminal(&root);
+        set_ledger(&[
+            ledger_entry("u", "claude", &proj_path, "2026-08-20T01:00:00Z"),
+            ledger_entry("p", "claude", &proj_path, "2026-08-20T02:00:00Z"),
+        ]);
+        let mut undying = Vec::new();
+        aoide_storage::undying::set_undying(&mut undying, "u", true);
+        aoide_storage::undying::save_undying(&undying).unwrap();
+        let before = snapshot(&root);
+
+        for flags in [
+            vec![("project", "proj"), ("dry-run", "true")],
+            vec![("project", "proj"), ("all", "true"), ("dry-run", "true")],
+            vec![("project", "proj"), ("id", "p"), ("dry-run", "true")],
+        ] {
+            let out = session_resurrect(&flag_invocation(&["resurrect"], &flags));
+            assert_eq!(out.status, aoide_protocol::output::Status::Ok, "{flags:?}: {}", out.message);
+        }
+        no_marker_within_the_launch_wait(&marker);
+        assert!(held_entries().is_empty(), "a dry run queued a hold: {:?}", held_entries());
+        assert_eq!(snapshot(&root), before, "a dry run wrote state");
+        assert_eq!(resurrect_audit_statuses(&root.join("log")), vec!["dry-run".to_string(); 3]);
+
+        // The positive control: the same fixture's real call launches within
+        // `LAUNCH_WAIT`, so the check above would have caught such a launch.
+        let launched = session_resurrect(&flag_invocation(&["resurrect"], &[("project", "proj"), ("id", "p")]));
+        assert_eq!(launched.status, aoide_protocol::output::Status::Ok, "msg: {}", launched.message);
+        assert!(wait_for(&marker), "the real call launched on this fixture");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// `resurrect` opens only to the CLI and daemon doors, so a door that
+    /// cannot approve is reached only here, by calling the handler directly.
+    /// The real call holds the whole command; a dry run with `--project` is
+    /// refused instead, holding nothing, launching nothing and showing the
+    /// caller no ledger field.
+    #[cfg(unix)]
+    #[test]
+    fn dry_run_on_a_door_that_cannot_approve_holds_nothing_and_launches_nothing() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(RESURRECT_ENV);
+        let (root, proj_path) = setup("resurrect-dry-mcp");
+        std::env::remove_var("AOIDE_DAEMON_SOCKET");
+        std::env::remove_var("AOIDE_SESSION_ID");
+        let marker = marker_terminal(&root);
+        set_ledger(&[ledger_entry("u", "claude", &proj_path, "2026-08-20T01:00:00Z")]);
+        let mut undying = Vec::new();
+        aoide_storage::undying::set_undying(&mut undying, "u", true);
+        aoide_storage::undying::save_undying(&undying).unwrap();
+        let before = snapshot(&root);
+
+        for flags in [
+            vec![("project", "proj"), ("dry-run", "true")],
+            vec![("project", "proj"), ("all", "true"), ("dry-run", "true")],
+            vec![("project", "proj"), ("id", "u"), ("dry-run", "true")],
+        ] {
+            let mut dry = flag_invocation(&["resurrect"], &flags);
+            dry.door = Door::Mcp;
+            let out = session_resurrect_with(&dry, |_| None::<String>);
+            assert_eq!(out.status, aoide_protocol::output::Status::Error, "{flags:?}: {}", out.message);
+            assert_eq!(out.data.as_ref().unwrap()["reason"], "dry-run-not-held", "{flags:?}");
+            assert_eq!(out.data.as_ref().unwrap()["refusal"]["kind"], serde_json::json!(Kind::Refused), "{flags:?}");
+            let shown = serde_json::to_string(&out).unwrap();
+            for key in ["sessionId", "cwd", "restoreText", "agent"] {
+                assert!(!shown.contains(&format!("\"{key}\"")), "{flags:?} shows `{key}`: {shown}");
+            }
+        }
+        assert_eq!(resurrect_audit_statuses(&root.join("log")), vec!["dry-run".to_string(); 3]);
+        assert!(held_entries().is_empty(), "a dry run queued a hold: {:?}", held_entries());
+        assert_eq!(snapshot(&root), before, "a dry run wrote state");
+        no_marker_within_the_launch_wait(&marker);
+
+        let mut real = flag_invocation(&["resurrect"], &[("project", "proj")]);
+        real.door = Door::Mcp;
+        let held = session_resurrect_with(&real, |_| None::<String>);
+        assert_eq!(held.data.as_ref().unwrap()["state"], "pending", "{}", held.message);
+        assert_eq!(held_entries().len(), 1, "the same call without the flag is the one hold");
+
+        // The positive control: the CLI door's real call launches the undying
+        // set on this fixture within `LAUNCH_WAIT`, so the check above would
+        // have caught such a launch.
+        let launched = session_resurrect(&flag_invocation(&["resurrect"], &[("project", "proj")]));
+        assert_eq!(launched.status, aoide_protocol::output::Status::Ok, "msg: {}", launched.message);
+        assert!(wait_for(&marker), "the real call launched on this fixture");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A dry run without `--project` from a door that cannot approve is the
+    /// real call's own usage error: the same status, message and data, with no
+    /// hold or launch before it. `--id` and `--all` are the two forms.
+    #[cfg(unix)]
+    #[test]
+    fn a_projectless_dry_run_gets_the_real_calls_outcome_and_holds_nothing() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(RESURRECT_ENV);
+        let (root, proj_path) = setup("resurrect-projectless-mcp");
+        std::env::remove_var("AOIDE_DAEMON_SOCKET");
+        std::env::remove_var("AOIDE_SESSION_ID");
+        let marker = marker_terminal(&root);
+        set_ledger(&[ledger_entry("u", "claude", &proj_path, "2026-08-20T01:00:00Z")]);
+        let mut undying = Vec::new();
+        aoide_storage::undying::set_undying(&mut undying, "u", true);
+        aoide_storage::undying::save_undying(&undying).unwrap();
+        let before = snapshot(&root);
+
+        for flags in [vec![("id", "u")], vec![("all", "true")]] {
+            let mut real = flag_invocation(&["resurrect"], &flags);
+            real.door = Door::Mcp;
+            let real_out = session_resurrect_with(&real, |_| None::<String>);
+            assert!(real_out.message.contains("missing required flag --project"), "{flags:?}: {}", real_out.message);
+
+            let mut dry_flags = flags.clone();
+            dry_flags.push(("dry-run", "true"));
+            let mut dry = flag_invocation(&["resurrect"], &dry_flags);
+            dry.door = Door::Mcp;
+            let dry_out = session_resurrect_with(&dry, |_| None::<String>);
+            assert_eq!(dry_out.status, real_out.status, "{flags:?}");
+            assert_eq!(dry_out.message, real_out.message, "{flags:?}");
+            assert_eq!(dry_out.data, real_out.data, "{flags:?}");
+        }
+        assert!(held_entries().is_empty(), "a dry run queued a hold: {:?}", held_entries());
+        assert_eq!(snapshot(&root), before, "a dry run wrote state");
+        no_marker_within_the_launch_wait(&marker);
+
+        // The positive control: the CLI door's real call launches the undying
+        // set on this fixture within `LAUNCH_WAIT`, so the check above would
+        // have caught such a launch.
+        let launched = session_resurrect(&flag_invocation(&["resurrect"], &[("project", "proj"), ("all", "true")]));
+        assert_eq!(launched.status, aoide_protocol::output::Status::Ok, "msg: {}", launched.message);
+        assert!(wait_for(&marker), "the real call launched on this fixture");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The bare form is refused from an unattested caller on a door that cannot
+    /// approve, dry or not: a bare dry run gets the refusal the real call gets,
+    /// writes one audit line marked `dry-run`, and launches and holds nothing.
+    /// The same fixture's CLI-door call launches within `LAUNCH_WAIT`, so the
+    /// check below would catch such a launch.
+    #[cfg(unix)]
+    #[test]
+    fn a_bare_dry_run_from_an_unattested_door_gets_the_real_refusal_and_launches_nothing() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(RESURRECT_ENV);
+        let this_host = aoide_storage::display::local_host_name();
+        let (root, cwd) = setup_manifest(
+            "resurrect-dry-bare-refusal",
+            vec![manifest_spec(&this_host, ".", "claude", Some("echo from-the-manifest"))],
+        );
+        std::env::remove_var("AOIDE_DAEMON_SOCKET");
+        std::env::remove_var("AOIDE_SESSION_ID");
+        let marker = marker_terminal(&root);
+
+        let mut real = flag_invocation(&["resurrect"], &[]);
+        real.door = Door::Mcp;
+        let refused = session_resurrect_with(&real, |_| None::<String>);
+        assert_eq!(refused.status, aoide_protocol::output::Status::Error, "{}", refused.message);
+        assert_eq!(refused.data.as_ref().unwrap()["reason"], "bare-resurrect-not-held");
+
+        let mut dry = flag_invocation(&["resurrect"], &[("dry-run", "true")]);
+        dry.door = Door::Mcp;
+        let answer = session_resurrect_with(&dry, |_| None::<String>);
+        assert_eq!(answer.status, refused.status, "{}", answer.message);
+        assert_eq!(answer.message, refused.message);
+        assert_eq!(answer.data, refused.data, "the dry run gives the real call's refusal");
+        assert_eq!(
+            resurrect_audit_statuses(&root.join("log")),
+            vec!["refused".to_string(), "dry-run".to_string()],
+            "the dry run writes one audit line, marked dry-run"
+        );
+        assert!(held_entries().is_empty(), "nothing was held");
+
+        no_marker_within_the_launch_wait(&marker);
+
+        let launched = session_resurrect(&flag_invocation(&["resurrect"], &[]));
+        assert_eq!(launched.status, aoide_protocol::output::Status::Ok, "msg: {}", launched.message);
+        assert!(wait_for(&marker), "the real bare call launched on this fixture");
+        drop(cwd);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Bare mode's dry run lists each spec with the decision its launch would
+    /// make: a clean spawn, a ledger revival, a refusal, or a remote summon
+    /// whose local pre-wire check passes. A remote spec is never sent: the
+    /// node's port takes no connection and nothing launches. From a door that
+    /// cannot approve, a bare dry run is refused instead, as the real call is
+    /// (`a_bare_dry_run_from_an_unattested_door_gets_the_real_refusal_and_launches_nothing`).
+    #[cfg(unix)]
+    #[test]
+    fn dry_run_bare_mode_lists_the_manifest_specs_and_launches_nothing() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(RESURRECT_ENV);
+        let host = aoide_storage::display::local_host_name();
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let url = format!("http://{}/", listener.local_addr().unwrap());
+        let (root, cwd) = setup_manifest(
+            "resurrect-dry-manifest",
+            vec![
+                manifest_spec(&host, ".", "claude", Some("claude --resume-me")),
+                manifest_spec(&host, "sub", "claude", None),
+                manifest_spec(&host, ".", "no-such-harness", None),
+                manifest_spec("nowhere", ".", "claude", Some("true")),
+                manifest_spec("sakaki", ".", "claude", Some("git -C /home/khoa/Aoide pull --ff-only")),
+            ],
+        );
+        std::env::remove_var("AOIDE_DAEMON_SOCKET");
+        std::env::remove_var("AOIDE_SESSION_ID");
+        let marker = marker_terminal(&root);
+        std::fs::create_dir_all(root.join("sub")).unwrap();
+        let sub_str = root.join("sub").to_str().unwrap().to_string();
+        set_ledger(&[ledger_entry("sub-old", "claude", &sub_str, "2026-08-20T01:00:00Z")]);
+        aoide_storage::node_store::save_nodes(&[verified_node("sakaki", &url)]).unwrap();
+        let before = snapshot(&root);
+
+        let out = session_resurrect(&flag_invocation(&["resurrect"], &[("dry-run", "true")]));
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "msg: {}", out.message);
+        let rows = candidates(&out);
+        let dispositions: Vec<&str> = rows.iter().map(|r| r["disposition"].as_str().unwrap()).collect();
+        assert_eq!(
+            dispositions,
+            vec!["clean-spawned", "revived-from-ledger", "failed", "failed", "summoned-remote"],
+            "{rows:?}"
+        );
+        assert_eq!(rows[0]["argv"], serde_json::json!(["claude", "--resume-me"]), "{rows:?}");
+        assert_eq!(rows[1]["resumedFrom"], "sub-old", "{rows:?}");
+        assert!(rows[2]["reason"].as_str().unwrap().contains("no `command` given"), "{rows:?}");
+        assert!(rows[3]["reason"].as_str().unwrap().contains("not a registered node"), "{rows:?}");
+        assert_eq!(rows[4]["text"], "git -C /home/khoa/Aoide pull --ff-only", "{rows:?}");
+        assert!(listener.accept().is_err(), "a dry run connected to the node");
+
+        assert!(held_entries().is_empty(), "a dry run queued a hold: {:?}", held_entries());
+        assert_eq!(resurrect_audit_statuses(&root.join("log")), vec!["dry-run".to_string()], "one audit line");
+
+        no_marker_within_the_launch_wait(&marker);
+        assert_eq!(snapshot(&root), before, "a dry run wrote state");
+
+        // The positive control: the same fixture's real call launches within
+        // `LAUNCH_WAIT`, so the check above would have caught such a launch.
+        // The node is dropped first:
+        // a summon to a listening port that never answers would hang.
+        drop(listener);
+        let launched = session_resurrect(&flag_invocation(&["resurrect"], &[]));
+        assert_eq!(launched.status, aoide_protocol::output::Status::Ok, "msg: {}", launched.message);
+        assert!(wait_for(&marker), "the real bare call launched on this fixture");
+        drop(cwd);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A dry run of a flag mode refuses an unknown project or an unknown id
+    /// with the refusal the real call gives. Its audit line is written where
+    /// the real call's is, marked `dry-run`.
+    #[test]
+    fn dry_run_refuses_an_unknown_project_or_id_as_the_real_call_does() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["AOIDE_STAGE_DIR", "AOIDE_STATE_DIR", "XDG_RUNTIME_DIR", "AOIDE_AUDIT_LOG"]);
+        let (root, _proj_path) = setup("resurrect-dry-refusals");
+
+        for flags in [vec![("project", "nope")], vec![("project", "proj"), ("id", "no-such-id")]] {
+            let real = session_resurrect(&flag_invocation(&["resurrect"], &flags));
+            let mut dry_flags = flags.clone();
+            dry_flags.push(("dry-run", "true"));
+            let dry = session_resurrect(&flag_invocation(&["resurrect"], &dry_flags));
+            assert_eq!(dry.status, real.status, "{flags:?}");
+            assert_eq!(dry.message, real.message, "{flags:?}");
+            assert_eq!(dry.data, real.data, "{flags:?}");
+        }
+        let statuses = resurrect_audit_statuses(&root.join("log"));
+        assert_eq!(statuses.iter().filter(|s| s.as_str() == "error").count(), 2, "{statuses:?}");
+        assert_eq!(statuses.iter().filter(|s| s.as_str() == "dry-run").count(), 2, "{statuses:?}");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The dry run's bare-mode rows agree with the real launch for local
+    /// specs: the same spec gets the same disposition, so the listing is what
+    /// the launch does. (A remote spec's wire outcome is not predicted, so it
+    /// is not in this comparison.)
+    #[cfg(unix)]
+    #[test]
+    fn dry_run_manifest_dispositions_match_the_real_launch_for_local_specs() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(RESURRECT_ENV);
+        let host = aoide_storage::display::local_host_name();
+        let (root, cwd) = setup_manifest(
+            "resurrect-dry-parity",
+            vec![
+                manifest_spec(&host, ".", "claude", Some("claude --resume-me")),
+                manifest_spec(&host, "sub", "claude", None),
+                manifest_spec(&host, ".", "no-such-harness", None),
+            ],
+        );
+        let _marker = marker_terminal(&root);
+        std::fs::create_dir_all(root.join("sub")).unwrap();
+        let sub_str = root.join("sub").to_str().unwrap().to_string();
+        set_ledger(&[ledger_entry("sub-old", "claude", &sub_str, "2026-08-20T01:00:00Z")]);
+
+        let dry = session_resurrect(&flag_invocation(&["resurrect"], &[("dry-run", "true")]));
+        assert_eq!(dry.status, aoide_protocol::output::Status::Ok, "msg: {}", dry.message);
+        let mut dry_dispositions: Vec<String> = candidates(&dry)
+            .iter()
+            .map(|r| r["disposition"].as_str().unwrap().to_string())
+            .collect();
+
+        let real = session_resurrect(&flag_invocation(&["resurrect"], &[]));
+        assert_eq!(real.status, aoide_protocol::output::Status::Ok, "msg: {}", real.message);
+        let data = real.data.as_ref().unwrap();
+        let mut real_dispositions: Vec<String> = ["resurrected", "skipped", "failed"]
+            .iter()
+            .flat_map(|bucket| data[*bucket].as_array().unwrap().iter())
+            .map(|r| r["disposition"].as_str().unwrap().to_string())
+            .collect();
+
+        dry_dispositions.sort();
+        real_dispositions.sort();
+        assert_eq!(dry_dispositions, vec!["clean-spawned", "failed", "revived-from-ledger"]);
+        assert_eq!(dry_dispositions, real_dispositions);
+
+        drop(cwd);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A ledger line's ids and agent are an agent's own text. A dry run prints
+    /// them spelled, as the pending view spells a held plan line, and its data
+    /// keeps them raw. The held plan is the raw plan, which approval accepts.
+    #[test]
+    fn dry_run_spells_a_hostile_ledger_entry_and_keeps_the_plan_raw() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["AOIDE_STAGE_DIR", "AOIDE_STATE_DIR", "XDG_RUNTIME_DIR", "AOIDE_AUDIT_LOG"]);
+        let (root, proj_path) = setup("resurrect-dry-hostile-flag");
+        let id = "s\u{1b}\r\u{202e}x";
+        let agent = "a\u{1b}\r\u{202e}";
+        set_ledger(&[ledger_entry(id, agent, &proj_path, "2026-08-20T01:00:00Z")]);
+
+        let dry = session_resurrect(&flag_invocation(
+            &["resurrect"],
+            &[("project", "proj"), ("all", "true"), ("dry-run", "true")],
+        ));
+        assert_eq!(dry.status, aoide_protocol::output::Status::Ok, "msg: {}", dry.message);
+        assert_eq!(dry.message, "s\\x1b\\r\\u{202e}x (a\\x1b\\r\\u{202e}): no restore recorded, nothing typed");
+        let rows = candidates(&dry);
+        assert_eq!(rows[0]["sessionId"], id);
+        assert_eq!(rows[0]["agent"], agent);
+        let log = std::fs::read_to_string(root.join("log")).unwrap();
+        let audit: serde_json::Value = serde_json::from_str(log.lines().last().unwrap()).unwrap();
+        assert_eq!(
+            audit["message"].as_str().unwrap(),
+            aoide_protocol::untrusted::escape_for_log(&dry.message),
+            "the audit line carries the message the dry run answers"
+        );
+
+        let launch = flag_invocation(&["resurrect"], &[("project", "proj"), ("all", "true")]);
+        let shown = held_plan(&launch, "proj");
+        let raw = match select_candidates(&launch, "proj") {
+            Ok(selection) => plan_lines(&selection),
+            Err(o) => panic!("the real --all selection refused: {}", o.message),
+        };
+        assert_eq!(shown, raw, "the held plan is the raw plan");
+        assert_eq!(shown, vec![format!("{id} ({agent}): no restore recorded, nothing typed")]);
+        assert!(approved_selection(&launch, &shown).is_ok(), "approval accepts the plan it was held with");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A manifest's own text is as untrusted as a ledger's. A spec whose dir
+    /// and command hold ESC, CR and U+202E shows spelled in the bare dry run's
+    /// message, and its data keeps the raw strings.
+    #[cfg(unix)]
+    #[test]
+    fn dry_run_bare_mode_spells_a_hostile_spec_and_keeps_its_data_raw() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(RESURRECT_ENV);
+        let this_host = aoide_storage::display::local_host_name();
+        let dir = "d\u{1b}\r\u{202e}";
+        let command = "tool\u{1b}x \u{202e}y\r";
+        let (root, cwd) = setup_manifest(
+            "resurrect-dry-hostile-bare",
+            vec![manifest_spec(&this_host, dir, "claude", Some(command))],
+        );
+        std::env::remove_var("AOIDE_DAEMON_SOCKET");
+        std::env::remove_var("AOIDE_SESSION_ID");
+
+        let out = session_resurrect(&flag_invocation(&["resurrect"], &[("dry-run", "true")]));
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "msg: {}", out.message);
+        let rows = candidates(&out);
+        assert_eq!(rows[0]["dir"], dir);
+        assert_eq!(rows[0]["command"], command);
+        assert_eq!(rows[0]["argv"], serde_json::json!(["tool\u{1b}x", "\u{202e}y"]));
+        let lines: Vec<&str> = out.message.split('\n').collect();
+        assert_eq!(lines.len(), 2, "a header line, then one line per spec: {}", out.message);
+        assert!(lines[0].starts_with("manifest at `"), "{}", out.message);
+        assert_eq!(lines[1], "d\\x1b\\r\\u{202e} (claude): clean spawn `'tool\\x1bx' '\\u{202e}y'`");
+        assert!(
+            out.message.chars().all(|c| c == '\n' || (' '..='~').contains(&c)),
+            "a raw control or format character in the message: {:?}",
+            out.message
+        );
+
+        drop(cwd);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// An attested MCP caller is not refused, dry or not: its bare dry run
+    /// lists the manifest's specs and its flag-mode dry run lists the ledger
+    /// rows. Neither launches. The ledger row anchors the spec's directory, so
+    /// the bare row is the revival the launch would make.
+    #[cfg(unix)]
+    #[test]
+    fn an_attested_mcp_dry_run_lists_and_launches_nothing() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(RESURRECT_ENV);
+        let this_host = aoide_storage::display::local_host_name();
+        let (root, cwd) = setup_manifest(
+            "resurrect-dry-attested",
+            vec![manifest_spec(&this_host, ".", "claude", Some("echo from-the-manifest"))],
+        );
+        std::env::remove_var("AOIDE_DAEMON_SOCKET");
+        std::env::remove_var("AOIDE_SESSION_ID");
+        let marker = marker_terminal(&root);
+        let root_str = root.to_str().unwrap().to_string();
+        let mut add = invocation(&["project", "add"], &["proj", &root_str]);
+        add.door = Door::Daemon;
+        assert_eq!(crate::graph::project_add(&add).status, aoide_protocol::output::Status::Ok);
+        set_ledger(&[ledger_entry("u", "claude", &root_str, "2026-08-20T01:00:00Z")]);
+
+        let mut bare = flag_invocation(&["resurrect"], &[("dry-run", "true")]);
+        bare.door = Door::Mcp;
+        let listed = session_resurrect_with(&bare, |_| Some("sess".to_string()));
+        assert_eq!(listed.status, aoide_protocol::output::Status::Ok, "msg: {}", listed.message);
+        assert_eq!(candidates(&listed)[0]["disposition"], "revived-from-ledger", "{}", listed.message);
+
+        let mut flag = flag_invocation(&["resurrect"], &[("project", "proj"), ("all", "true"), ("dry-run", "true")]);
+        flag.door = Door::Mcp;
+        let rows = session_resurrect_with(&flag, |_| Some("sess".to_string()));
+        assert_eq!(rows.status, aoide_protocol::output::Status::Ok, "msg: {}", rows.message);
+        assert_eq!(session_ids(&candidates(&rows)), vec!["u"]);
+
+        assert_eq!(resurrect_audit_statuses(&root.join("log")), vec!["dry-run".to_string(); 2]);
+        assert!(held_entries().is_empty(), "a dry run queued a hold: {:?}", held_entries());
+        no_marker_within_the_launch_wait(&marker);
+
+        // The positive control: the CLI door's real call launches the anchored
+        // ledger rows on this fixture within `LAUNCH_WAIT`, so the check above
+        // would have caught such a launch.
+        let launched = session_resurrect(&flag_invocation(&["resurrect"], &[("project", "proj"), ("all", "true")]));
+        assert_eq!(launched.status, aoide_protocol::output::Status::Ok, "msg: {}", launched.message);
+        assert!(wait_for(&marker), "the real call launched on this fixture");
+        drop(cwd);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A manifest root's own directory name is as untrusted as a spec's text.
+    /// A root named with ESC, CR and U+202E shows spelled in the header line of
+    /// a bare dry run's message, and `data.manifestRoot` keeps the raw path.
+    #[cfg(unix)]
+    #[test]
+    fn dry_run_spells_a_hostile_manifest_root_name_and_keeps_its_data_raw() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(RESURRECT_ENV);
+        let this_host = aoide_storage::display::local_host_name();
+        let specs = || vec![manifest_spec(&this_host, ".", "claude", Some("echo from-the-manifest"))];
+        let (root, cwd) = setup_manifest("resurrect-dry-hostile-root", specs());
+        let hostile = root.join("r\u{1b}\r\u{202e}t");
+        std::fs::create_dir_all(&hostile).unwrap();
+        aoide_storage::manifest::save_manifest(
+            &hostile,
+            &aoide_storage::manifest::Manifest { version: aoide_storage::manifest::MANIFEST_VERSION, sessions: specs() },
+        )
+        .unwrap();
+        let hostile_cwd = CwdGuard::enter(&hostile);
+        std::env::remove_var("AOIDE_DAEMON_SOCKET");
+        std::env::remove_var("AOIDE_SESSION_ID");
+
+        let out = session_resurrect(&flag_invocation(&["resurrect"], &[("dry-run", "true")]));
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "msg: {}", out.message);
+        let lines: Vec<&str> = out.message.split('\n').collect();
+        assert_eq!(lines.len(), 2, "a header line, then one line per spec: {}", out.message);
+        assert!(lines[0].contains("r\\x1b\\r\\u{202e}t"), "the header spells the root name: {}", lines[0]);
+        assert!(
+            out.message.chars().all(|c| c == '\n' || (' '..='~').contains(&c)),
+            "a raw control or format character in the message: {:?}",
+            out.message
+        );
+        assert_eq!(out.data.as_ref().unwrap()["manifestRoot"], hostile.to_str().unwrap());
+
+        drop(hostile_cwd);
+        drop(cwd);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A dry run writes nothing to `pending.json`: a seeded file is unchanged
+    /// byte for byte; the real call on the same door adds exactly one entry.
+    #[cfg(unix)]
+    #[test]
+    fn a_dry_run_leaves_a_seeded_pending_file_byte_for_byte_and_a_real_hold_adds_one() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(RESURRECT_ENV);
+        let (root, proj_path) = setup("resurrect-dry-pending");
+        std::env::remove_var("AOIDE_DAEMON_SOCKET");
+        std::env::remove_var("AOIDE_SESSION_ID");
+        set_ledger(&[ledger_entry("u", "claude", &proj_path, "2026-08-20T01:00:00Z")]);
+        let mut undying = Vec::new();
+        aoide_storage::undying::set_undying(&mut undying, "u", true);
+        aoide_storage::undying::save_undying(&undying).unwrap();
+
+        let mut seed = flag_invocation(&["resurrect"], &[("project", "proj"), ("all", "true")]);
+        seed.door = Door::Mcp;
+        let seeded = session_resurrect_with(&seed, |_| None::<String>);
+        assert_eq!(seeded.data.as_ref().unwrap()["state"], "pending", "{}", seeded.message);
+        assert_eq!(held_entries().len(), 1, "the seed is one held entry");
+        let before = std::fs::read(crate::graph::send::pending_path()).unwrap();
+
+        let mut dry = flag_invocation(&["resurrect"], &[("project", "proj"), ("dry-run", "true")]);
+        dry.door = Door::Mcp;
+        let out = session_resurrect_with(&dry, |_| None::<String>);
+        assert_eq!(out.data.as_ref().unwrap()["reason"], "dry-run-not-held", "{}", out.message);
+        assert_eq!(std::fs::read(crate::graph::send::pending_path()).unwrap(), before, "a dry run changed pending.json");
+
+        let mut real = flag_invocation(&["resurrect"], &[("project", "proj")]);
+        real.door = Door::Mcp;
+        let held = session_resurrect_with(&real, |_| None::<String>);
+        assert_eq!(held.data.as_ref().unwrap()["state"], "pending", "{}", held.message);
+        assert_eq!(held_entries().len(), 2, "the real call adds exactly one held entry");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A recording `$AOIDE_TERMINAL`: each launch appends a `RUN` line, then one
+    /// line per argv word, so a test reads back exactly what the terminal was
+    /// handed. Unix only, like every launch test here.
+    #[cfg(unix)]
+    fn recording_terminal(root: &std::path::Path) -> std::path::PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+        let rec = root.join("terminal.rec");
+        let script = root.join("record-terminal.sh");
+        std::fs::write(
+            &script,
+            format!(
+                "#!/bin/sh\nprintf 'RUN\\n' >> '{rec}'\nfor a in \"$@\"; do printf '%s\\n' \"$a\" >> '{rec}'; done\n",
+                rec = rec.display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::env::set_var("AOIDE_TERMINAL", &script);
+        std::env::set_var("WAYLAND_DISPLAY", "wayland-0");
+        rec
+    }
+
+    /// Every launch the recording terminal saw, as its argv words in order.
+    #[cfg(unix)]
+    fn recorded_launches(rec: &std::path::Path) -> Vec<Vec<String>> {
+        let raw = std::fs::read_to_string(rec).unwrap_or_default();
+        let mut runs: Vec<Vec<String>> = Vec::new();
+        for line in raw.lines() {
+            if line == "RUN" {
+                runs.push(Vec::new());
+            } else if let Some(run) = runs.last_mut() {
+                run.push(line.to_string());
+            }
+        }
+        runs
+    }
+
+    /// An ended eidolon session with a journal named by its ledger line is
+    /// resumed once, as `eidolon tui --session <journal>`.
+    #[cfg(unix)]
+    #[test]
+    fn an_ended_eidolon_session_resumes_from_the_journal_its_ledger_line_names() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(RESURRECT_ENV);
+        let (root, proj_path) = setup("resurrect-by-log");
+        let rec = recording_terminal(&root);
+        let journal = root.join("s.eid");
+        std::fs::write(&journal, "").unwrap();
+        let journal = journal.to_string_lossy().into_owned();
+        set_ledger(&[ledger_entry_with_log("ledger-eid", "eidolon", &proj_path, Some(journal.as_str()))]);
+
+        let out = session_resurrect(&flag_invocation(&["resurrect"], &[("project", "proj"), ("id", "ledger-eid")]));
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "msg: {}", out.message);
+        let launches = recorded_launches(&rec);
+        assert_eq!(launches.len(), 1, "one launch; launches: {launches:?}, data: {:?}", out.data);
+        let argv = &launches[0];
+        let tail: Vec<&str> = argv[argv.len() - 4..].iter().map(String::as_str).collect();
+        assert_eq!(tail, ["eidolon", "tui", "--session", journal.as_str()]);
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The journal path reaches the terminal as one argv word, even with a
+    /// space and a quote in it.
+    #[cfg(unix)]
+    #[test]
+    fn a_journal_path_with_a_space_and_a_quote_stays_one_argv_word() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(RESURRECT_ENV);
+        let (root, proj_path) = setup("resurrect-by-log-awkward");
+        let rec = recording_terminal(&root);
+        let journal = root.join("my journal's.eid");
+        std::fs::write(&journal, "").unwrap();
+        let journal = journal.to_string_lossy().into_owned();
+        set_ledger(&[ledger_entry_with_log("ledger-eid", "eidolon", &proj_path, Some(journal.as_str()))]);
+
+        let out = session_resurrect(&flag_invocation(&["resurrect"], &[("project", "proj"), ("id", "ledger-eid")]));
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "msg: {}", out.message);
+        let launches = recorded_launches(&rec);
+        assert_eq!(launches.len(), 1, "one launch; launches: {launches:?}");
+        let argv = &launches[0];
+        assert_eq!(argv.last().unwrap(), &journal, "argv: {argv:?}");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A by-journal candidate whose ledger `logPath` is skipped by `log_path`'s
+    /// value launches nothing, and both its launch and a dry run give one
+    /// reason, which names the entry and the cause.
+    #[cfg(unix)]
+    fn assert_by_log_skip(
+        tag: &str,
+        log_path: impl FnOnce(&std::path::Path) -> Option<String>,
+        cause: &str,
+    ) {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(RESURRECT_ENV);
+        let (root, proj_path) = setup(tag);
+        let rec = recording_terminal(&root);
+        let log_path = log_path(&root);
+        set_ledger(&[ledger_entry_with_log("ledger-eid", "eidolon", &proj_path, log_path.as_deref())]);
+
+        let out = session_resurrect(&flag_invocation(&["resurrect"], &[("project", "proj"), ("id", "ledger-eid")]));
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "msg: {}", out.message);
+        let skipped = out.data.as_ref().unwrap()["skipped"].as_array().unwrap().clone();
+        assert_eq!(skipped.len(), 1, "data: {:?}", out.data);
+        let reason = skipped[0]["reason"].as_str().unwrap().to_string();
+        assert!(reason.contains("ledger-eid") && reason.contains(cause), "reason: {reason}");
+
+        let dry = session_resurrect(&flag_invocation(
+            &["resurrect"],
+            &[("project", "proj"), ("id", "ledger-eid"), ("dry-run", "true")],
+        ));
+        assert_eq!(dry.status, aoide_protocol::output::Status::Ok, "msg: {}", dry.message);
+        let row = &dry.data.as_ref().unwrap()["candidates"][0];
+        assert_eq!(row["disposition"], "skipped", "dry-run row: {row}");
+        assert_eq!(row["reason"].as_str().unwrap(), reason, "the dry run must give the launch's reason");
+
+        assert!(recorded_launches(&rec).is_empty(), "a skipped candidate launched a terminal");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_by_log_entry_without_a_log_path_is_skipped_with_its_reason() {
+        assert_by_log_skip("resurrect-no-log-path", |_| None, "has no logPath");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_by_log_entry_with_a_relative_log_path_is_skipped_with_its_reason() {
+        assert_by_log_skip(
+            "resurrect-relative-log",
+            |_| Some("relative/s.eid".to_string()),
+            "not an absolute, plain path",
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_by_log_entry_whose_log_path_holds_an_escape_is_skipped_with_its_reason() {
+        assert_by_log_skip(
+            "resurrect-esc-log",
+            |_| Some("/nonexistent-root/s\u{1b}.eid".to_string()),
+            "not an absolute, plain path",
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_by_log_entry_whose_log_path_is_a_terminal_transcript_is_skipped_with_its_reason() {
+        assert_by_log_skip(
+            "resurrect-transcript-log",
+            |root| {
+                let dir = root.join("state").join("sessions");
+                std::fs::create_dir_all(&dir).unwrap();
+                let transcript = dir.join("ledger-eid.log");
+                std::fs::write(&transcript, "transcript").unwrap();
+                Some(transcript.to_string_lossy().into_owned())
+            },
+            "session logs dir",
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_by_log_entry_whose_log_path_names_no_file_is_skipped_with_its_reason() {
+        assert_by_log_skip(
+            "resurrect-missing-log",
+            |root| Some(root.join("missing.eid").to_string_lossy().into_owned()),
+            "names no regular file",
+        );
+    }
+
+    /// The journal is the session, so a by-journal revival keeps the undying
+    /// mark on the ledger id, and its new id gets none.
+    #[cfg(unix)]
+    #[test]
+    fn an_undying_by_log_entry_keeps_its_mark_and_its_revival_gets_none() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(RESURRECT_ENV);
+        let (root, proj_path) = setup("resurrect-by-log-undying");
+        let _rec = recording_terminal(&root);
+        let journal = root.join("s.eid");
+        std::fs::write(&journal, "").unwrap();
+        let journal = journal.to_string_lossy().into_owned();
+        set_ledger(&[ledger_entry_with_log("ledger-eid", "eidolon", &proj_path, Some(journal.as_str()))]);
+        let mut undying = Vec::new();
+        aoide_storage::undying::set_undying(&mut undying, "ledger-eid", true);
+        aoide_storage::undying::save_undying(&undying).unwrap();
+
+        let out = session_resurrect(&flag_invocation(&["resurrect"], &[("project", "proj"), ("id", "ledger-eid")]));
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "msg: {}", out.message);
+        let resurrected = out.data.as_ref().unwrap()["resurrected"].as_array().unwrap().clone();
+        assert_eq!(resurrected.len(), 1, "data: {:?}", out.data);
+        let new_id = resurrected[0]["sessionId"].as_str().unwrap().to_string();
+
+        let undying = aoide_storage::undying::load_undying();
+        assert!(aoide_storage::undying::is_undying(&undying, "ledger-eid"), "the journal is the session: its mark stays");
+        assert!(!aoide_storage::undying::is_undying(&undying, &new_id), "the new id must get no mark");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    // -- One engine per session (ruling 165) --
+
+    const NOW: i64 = 1_800_000_000;
+
+    fn claim_taken(session_id: &str, new_id: &str, age_secs: i64) -> aoide_storage::resuming::Claim {
+        aoide_storage::resuming::Claim {
+            session_id: session_id.to_string(),
+            new_id: new_id.to_string(),
+            at: aoide_storage::time::iso_utc_from_epoch(NOW - age_secs),
+            journal: None,
+        }
+    }
+
+    fn roster_record(id: &str, state: &str) -> aoide_storage::records::SessionRecord {
+        aoide_storage::records::SessionRecord {
+            session_id: id.to_string(),
+            state: state.to_string(),
+            ..Default::default()
+        }
+    }
+
+    /// The block as these tests state it: the candidate's journal and the open
+    /// journals resolved once through [`Journal::of`], which resolves nothing for a
+    /// path that does not exist.
+    fn blocked(
+        entry: &aoide_storage::ledger::LedgerEntry,
+        by_log: bool,
+        sessions: &[aoide_storage::records::SessionRecord],
+        claims: &[aoide_storage::resuming::Claim],
+        presence: &[(String, String)],
+        now: i64,
+    ) -> Option<Blocked> {
+        let candidate = candidate_journal(entry, by_log);
+        let roster = roster_journals(sessions);
+        let presence: Vec<(String, Journal)> =
+            presence.iter().map(|(id, log)| (id.clone(), Journal::of(log))).collect();
+        block_verdict(entry, candidate.as_ref(), sessions, &roster, claims, &presence, now)
+    }
+
+    #[test]
+    fn a_live_record_under_the_candidates_own_id_blocks_it() {
+        let entry = ledger_entry("ledger-claude", "claude", "/w", "2026-08-20T01:00:00Z");
+        let sessions = [roster_record("ledger-claude", "running")];
+        assert_eq!(
+            blocked(&entry, false, &sessions, &[], &[], NOW),
+            Some(Blocked::Live { live_id: "ledger-claude".into() })
+        );
+    }
+
+    #[test]
+    fn a_live_resume_of_the_candidate_blocks_it() {
+        let entry = ledger_entry("ledger-claude", "claude", "/w", "2026-08-20T01:00:00Z");
+        let mut resumed = roster_record("resurrect-9-1", "idle");
+        resumed.resumed_from = Some("ledger-claude".into());
+        assert_eq!(
+            blocked(&entry, false, &[resumed], &[], &[], NOW),
+            Some(Blocked::Live { live_id: "resurrect-9-1".into() })
+        );
+    }
+
+    #[test]
+    fn a_live_record_on_the_candidates_journal_blocks_a_by_log_candidate() {
+        let entry = ledger_entry_with_log("ledger-eid", "eidolon", "/w", Some("/r/s.eid"));
+        let mut live = roster_record("eid-live", "running");
+        live.log_path = Some("/r/s.eid".into());
+        assert_eq!(
+            blocked(&entry, true, &[live], &[], &[], NOW),
+            Some(Blocked::Live { live_id: "eid-live".into() })
+        );
+    }
+
+    #[test]
+    fn an_open_journal_of_the_presence_scan_blocks_a_by_log_candidate() {
+        let entry = ledger_entry_with_log("ledger-eid", "eidolon", "/w", Some("/r/s.eid"));
+        let journals = [("eid-open".to_string(), "/r/s.eid".to_string())];
+        assert_eq!(
+            blocked(&entry, true, &[], &[], &journals, NOW),
+            Some(Blocked::Live { live_id: "eid-open".into() })
+        );
+    }
+
+    #[test]
+    fn a_claim_whose_new_id_is_live_is_in_flight() {
+        let entry = ledger_entry("ledger-claude", "claude", "/w", "2026-08-20T01:00:00Z");
+        let claims = [claim_taken("ledger-claude", "resurrect-9-2", 5)];
+        let sessions = [roster_record("resurrect-9-2", "running")];
+        assert_eq!(
+            blocked(&entry, false, &sessions, &claims, &[], NOW),
+            Some(Blocked::InFlight { new_id: "resurrect-9-2".into(), age_secs: 5, by_journal: false })
+        );
+    }
+
+    #[test]
+    fn a_young_claim_with_an_unregistered_new_id_is_in_flight() {
+        let entry = ledger_entry("ledger-claude", "claude", "/w", "2026-08-20T01:00:00Z");
+        let claims = [claim_taken("ledger-claude", "resurrect-9-3", 5)];
+        assert_eq!(
+            blocked(&entry, false, &[], &claims, &[], NOW),
+            Some(Blocked::InFlight { new_id: "resurrect-9-3".into(), age_secs: 5, by_journal: false })
+        );
+    }
+
+    #[test]
+    fn an_in_flight_refusal_strips_its_text_and_keeps_its_data() {
+        use aoide_protocol::untrusted::is_unsafe;
+        let hostile = "\u{1b}[31m\u{202E}";
+        let new_id = format!("resurrect-9-6{hostile}");
+        let entry = ledger_entry(&format!("ledger-claude{hostile}"), &format!("claude{hostile}"), "/w", "2026-08-20T01:00:00Z");
+        let claims = [claim_taken(&entry.session_id, &new_id, 5)];
+        let verdict = blocked(&entry, false, &[], &claims, &[], NOW).expect("a young claim blocks its own session");
+        let refusal = blocked_refusal(&entry, verdict);
+        assert!(!refusal.reason.chars().any(is_unsafe), "the reason prints stripped: {:?}", refusal.reason);
+        assert_eq!(refusal.named.clone(), Some(("claimedBy", new_id.clone())), "claimedBy keeps the claim's bytes");
+        let row = refusal_row(&entry, refusal);
+        assert_eq!(row["sessionId"], json!(entry.session_id));
+        assert_eq!(row["agent"], json!(entry.agent));
+        assert_eq!(row["claimedBy"], json!(new_id));
+    }
+
+    #[test]
+    fn a_live_refusal_strips_its_text_and_keeps_its_data() {
+        use aoide_protocol::untrusted::is_unsafe;
+        let hostile = "\u{1b}[31m\u{202E}";
+        let live_id = format!("resurrect-9-8{hostile}");
+        let entry = ledger_entry(&format!("ledger-claude{hostile}"), &format!("claude{hostile}"), "/w", "2026-08-20T01:00:00Z");
+        let mut resumed = roster_record(&live_id, "idle");
+        resumed.resumed_from = Some(entry.session_id.clone());
+        let verdict = blocked(&entry, false, &[resumed], &[], &[], NOW).expect("a live resume blocks its source");
+        let refusal = blocked_refusal(&entry, verdict);
+        assert!(!refusal.reason.chars().any(is_unsafe), "the reason prints stripped: {:?}", refusal.reason);
+        assert_eq!(refusal.named, Some(("liveSessionId", live_id)));
+    }
+
+    #[test]
+    fn a_journal_skip_strips_the_id_and_the_agent() {
+        use aoide_protocol::untrusted::is_unsafe;
+        let hostile = "\u{1b}[31m\u{202E}";
+        let entry = ledger_entry(&format!("ledger-eid{hostile}"), &format!("eidolon{hostile}"), "/w", "2026-08-20T01:00:00Z");
+        let reason = journal_of(&entry).expect_err("a line with no logPath has no journal");
+        assert!(!reason.chars().any(is_unsafe), "the skip prints stripped: {reason:?}");
+    }
+
+    #[test]
+    fn an_unresumed_harness_prints_its_agent_stripped() {
+        use aoide_protocol::untrusted::is_unsafe;
+        let hostile = "\u{1b}[31m\u{202E}";
+        let reason = unresumed_reason(&format!("claude{hostile}"));
+        assert!(!reason.chars().any(is_unsafe), "the taught line prints stripped: {reason:?}");
+    }
+
+    #[test]
+    fn a_manifest_spec_with_no_launch_prints_its_agent_stripped() {
+        use aoide_protocol::untrusted::is_unsafe;
+        let hostile = "\u{1b}[31m\u{202E}";
+        let spec = manifest_spec("local", ".", &format!("claude{hostile}"), None);
+        let reason = clean_argv(&spec).expect_err("an agent with no launch and no command is refused");
+        assert!(!reason.chars().any(is_unsafe), "the refusal prints stripped: {reason:?}");
+    }
+
+    #[test]
+    fn a_remote_spec_with_a_hostile_host_fails_stripped_and_keeps_its_host() {
+        use aoide_protocol::untrusted::is_unsafe;
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["AOIDE_STAGE_DIR", "AOIDE_STATE_DIR", "XDG_RUNTIME_DIR", "AOIDE_AUDIT_LOG"]);
+        let hostile = "\u{1b}[31m\u{202E}";
+        let host = format!("some-other-host{hostile}");
+        let (root, cwd) = setup_manifest(
+            "resurrect-manifest-remote-hostile",
+            vec![manifest_spec(&host, ".", "claude", None)],
+        );
+
+        let out = session_resurrect(&flag_invocation(&["resurrect"], &[]));
+        drop(cwd);
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "msg: {}", out.message);
+        assert!(!out.message.chars().any(is_unsafe), "the message prints stripped: {:?}", out.message);
+        let data = out.data.as_ref().unwrap();
+        let failed = data["failed"].as_array().unwrap();
+        assert_eq!(failed.len(), 1, "data: {data}");
+        assert_eq!(failed[0]["disposition"], "failed");
+        assert_eq!(failed[0]["host"], json!(host), "the host keeps its bytes: {data}");
+        let reason = failed[0]["reason"].as_str().unwrap();
+        assert!(reason.contains("node add"), "reason must teach `node add`: {reason:?}");
+        assert!(!reason.chars().any(is_unsafe), "the reason prints stripped: {reason:?}");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_failed_summon_strips_its_reason_and_keeps_its_host() {
+        use aoide_protocol::untrusted::is_unsafe;
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["AOIDE_STAGE_DIR", "AOIDE_STATE_DIR", "XDG_RUNTIME_DIR", "AOIDE_AUDIT_LOG"]);
+        let hostile = "\u{1b}[31m\u{202E}";
+        let host = format!("far{hostile}");
+        let (root, cwd) = setup_manifest(
+            "resurrect-manifest-summon-hostile",
+            vec![manifest_spec(&host, ".", "claude", Some("true"))],
+        );
+        aoide_storage::node_store::save_nodes(&[verified_node(&host, "http://127.0.0.1:9/")]).unwrap();
+
+        let out = session_resurrect(&flag_invocation(&["resurrect"], &[]));
+        drop(cwd);
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "msg: {}", out.message);
+        let data = out.data.as_ref().unwrap();
+        let failed = data["failed"].as_array().unwrap();
+        assert_eq!(failed.len(), 1, "data: {data}");
+        assert_eq!(failed[0]["host"], json!(host), "the host keeps its bytes: {data}");
+        let reason = failed[0]["reason"].as_str().unwrap();
+        assert!(reason.contains("summoning on node"), "reason: {reason:?}");
+        assert!(!reason.chars().any(is_unsafe), "the reason prints stripped: {reason:?}");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_spec_dir_that_escapes_a_hostile_root_fails_stripped_and_keeps_its_bytes() {
+        use aoide_protocol::untrusted::is_unsafe;
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["AOIDE_STAGE_DIR", "AOIDE_STATE_DIR", "XDG_RUNTIME_DIR", "AOIDE_AUDIT_LOG"]);
+        let hostile = "\u{1b}[31m\u{202E}";
+        let (root, cwd) = setup_manifest("resurrect-manifest-hostile-root", vec![]);
+        let this_host = aoide_storage::display::local_host_name();
+        let dir = format!("../x{hostile}");
+        let manifest = aoide_storage::manifest::Manifest {
+            version: aoide_storage::manifest::MANIFEST_VERSION,
+            sessions: vec![manifest_spec(&this_host, &dir, "claude", None)],
+        };
+        let hostile_root = root.join(format!("p{hostile}"));
+
+        let out = resurrect_from_manifest(&flag_invocation(&["resurrect"], &[]), &hostile_root, &manifest);
+        drop(cwd);
+        assert!(!out.message.chars().any(is_unsafe), "the message prints stripped: {:?}", out.message);
+        let data = out.data.as_ref().unwrap();
+        assert_eq!(data["manifestRoot"], hostile_root.to_string_lossy().to_string());
+        let failed = data["failed"].as_array().unwrap();
+        assert_eq!(failed.len(), 1, "data: {data}");
+        assert_eq!(failed[0]["dir"], json!(dir), "the dir keeps its bytes: {data}");
+        let reason = failed[0]["reason"].as_str().unwrap();
+        assert!(reason.contains("escapes the project root"), "reason: {reason:?}");
+        assert!(!reason.chars().any(is_unsafe), "the reason prints stripped: {reason:?}");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn an_unknown_hostile_project_prints_stripped_and_keeps_its_name() {
+        use aoide_protocol::untrusted::is_unsafe;
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["AOIDE_STAGE_DIR", "AOIDE_STATE_DIR", "XDG_RUNTIME_DIR", "AOIDE_AUDIT_LOG"]);
+        let hostile = "\u{1b}[31m\u{202E}";
+        let (root, _proj_path) = setup("resurrect-unknown-hostile-project");
+        let name = format!("nope{hostile}");
+
+        let out = session_resurrect(&flag_invocation(&["resurrect"], &[("project", name.as_str())]));
+        assert_eq!(out.status, aoide_protocol::output::Status::Error);
+        assert!(!out.message.chars().any(is_unsafe), "the message prints stripped: {:?}", out.message);
+        let data = out.data.as_ref().unwrap();
+        assert_eq!(data["project"], json!(name));
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_dry_run_strips_each_reason_and_spells_its_plan() {
+        use aoide_protocol::untrusted::is_unsafe;
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(RESURRECT_ENV);
+        let hostile = "\u{1b}[31m\u{202E}";
+        let host = format!("nowhere{hostile}");
+        let (root, cwd) = setup_manifest(
+            "resurrect-dry-hostile",
+            vec![manifest_spec(&host, ".", "claude", Some("true"))],
+        );
+        std::env::remove_var("AOIDE_DAEMON_SOCKET");
+        std::env::remove_var("AOIDE_SESSION_ID");
+
+        let out = session_resurrect(&flag_invocation(&["resurrect"], &[("dry-run", "true")]));
+        drop(cwd);
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "msg: {}", out.message);
+        let rows = candidates(&out);
+        assert_eq!(rows.len(), 1, "{rows:?}");
+        assert_eq!(rows[0]["disposition"], "failed", "{rows:?}");
+        assert_eq!(rows[0]["host"], json!(host), "{rows:?}");
+        let reason = rows[0]["reason"].as_str().unwrap();
+        assert!(reason.contains("not a registered node"), "{rows:?}");
+        assert!(!reason.chars().any(is_unsafe), "the reason prints stripped: {reason:?}");
+        assert!(out.message.split('\n').all(|l| !l.chars().any(is_unsafe)), "the message prints stripped: {:?}", out.message);
+        assert!(out.message.contains("\\x1b[31m"), "the plan line is spelled: {:?}", out.message);
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn an_old_claim_with_an_unregistered_new_id_is_stale_and_blocks_nothing() {
+        let entry = ledger_entry("ledger-claude", "claude", "/w", "2026-08-20T01:00:00Z");
+        let claims = [claim_taken("ledger-claude", "resurrect-9-4", 3600)];
+        assert_eq!(blocked(&entry, false, &[], &claims, &[], NOW), None);
+    }
+
+    #[test]
+    fn a_claim_whose_new_id_is_done_is_stale_and_blocks_nothing() {
+        let entry = ledger_entry("ledger-claude", "claude", "/w", "2026-08-20T01:00:00Z");
+        let claims = [claim_taken("ledger-claude", "resurrect-9-5", 5)];
+        let sessions = [roster_record("resurrect-9-5", "done")];
+        assert_eq!(blocked(&entry, false, &sessions, &claims, &[], NOW), None);
+    }
+
+    #[test]
+    fn a_candidate_with_nothing_against_it_is_free() {
+        let entry = ledger_entry("ledger-claude", "claude", "/w", "2026-08-20T01:00:00Z");
+        assert_eq!(blocked(&entry, false, &[], &[], &[], NOW), None);
+    }
+
+    #[test]
+    fn a_claim_stamped_three_seconds_ahead_blocks_and_its_age_reads_0s() {
+        let entry = ledger_entry("ledger-claude", "claude", "/w", "2026-08-20T01:00:00Z");
+        let claims = [claim_taken("ledger-claude", "resurrect-9-7", -3)];
+        assert_eq!(
+            blocked(&entry, false, &[], &claims, &[], NOW),
+            Some(Blocked::InFlight { new_id: "resurrect-9-7".into(), age_secs: 0, by_journal: false })
+        );
+    }
+
+    #[test]
+    fn a_claim_stamped_an_hour_ahead_blocks_nothing() {
+        let entry = ledger_entry("ledger-claude", "claude", "/w", "2026-08-20T01:00:00Z");
+        let claims = [claim_taken("ledger-claude", "resurrect-9-8", -3600)];
+        assert_eq!(blocked(&entry, false, &[], &claims, &[], NOW), None);
+    }
+
+    #[test]
+    fn a_journal_that_resolves_to_the_candidates_file_blocks_it_though_spelled_apart() {
+        let entry = ledger_entry_with_log("ledger-eid", "eidolon", "/w", Some("/r/s.eid"));
+        let candidate = Journal { spelled: "/r/s.eid".into(), resolved: Some("/real/s.eid".into()) };
+        let presence = [(
+            "eid-open".to_string(),
+            Journal { spelled: "/r/link.eid".into(), resolved: Some("/real/s.eid".into()) },
+        )];
+        assert_eq!(
+            block_verdict(&entry, Some(&candidate), &[], &[], &[], &presence, NOW),
+            Some(Blocked::Live { live_id: "eid-open".into() })
+        );
+    }
+
+    #[test]
+    fn a_roster_log_that_resolves_to_the_candidates_file_blocks_it_though_spelled_apart() {
+        let entry = ledger_entry_with_log("ledger-eid", "eidolon", "/w", Some("/r/s.eid"));
+        let candidate = Journal { spelled: "/r/s.eid".into(), resolved: Some("/real/s.eid".into()) };
+        let sessions = [aoide_storage::records::SessionRecord {
+            session_id: "eid-roster".into(),
+            state: "running".into(),
+            log_path: Some("/r/link.eid".into()),
+            ..Default::default()
+        }];
+        let roster = [Some(Journal { spelled: "/r/link.eid".into(), resolved: Some("/real/s.eid".into()) })];
+        assert_eq!(
+            block_verdict(&entry, Some(&candidate), &sessions, &roster, &[], &[], NOW),
+            Some(Blocked::Live { live_id: "eid-roster".into() })
+        );
+    }
+
+    /// A recording terminal that also copies the claims file at each launch
+    /// into `claims-at-launch`, so a test can read what the launch saw.
+    #[cfg(unix)]
+    fn recording_terminal_with_claims(root: &Path) -> (std::path::PathBuf, std::path::PathBuf) {
+        use std::os::unix::fs::PermissionsExt;
+        let rec = root.join("terminal.rec");
+        let dump = root.join("claims-at-launch");
+        let claims = aoide_storage::resuming::resuming_path();
+        let script = root.join("record-terminal.sh");
+        std::fs::write(
+            &script,
+            format!(
+                "#!/bin/sh\nprintf 'RUN\\n' >> '{rec}'\nfor a in \"$@\"; do printf '%s\\n' \"$a\" >> '{rec}'; done\ncat '{claims}' > '{dump}' 2>/dev/null || printf 'absent\\n' > '{dump}'\n",
+                rec = rec.display(),
+                claims = claims.display(),
+                dump = dump.display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::env::set_var("AOIDE_TERMINAL", &script);
+        std::env::set_var("WAYLAND_DISPLAY", "wayland-0");
+        (rec, dump)
+    }
+
+    /// Two `aoide resurrect --project P --id X` processes started together: one
+    /// launches X, and the other is refused as in flight, or as live.
+    #[cfg(unix)]
+    #[test]
+    fn two_resurrects_started_together_launch_once() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(RESURRECT_ENV);
+        let (root, proj_path) = setup("resurrect-two-procs");
+        let (rec, dump) = recording_terminal_with_claims(&root);
+        set_ledger(&[ledger_entry("ledger-claude", "claude", &proj_path, "2026-08-20T01:00:00Z")]);
+
+        let bin = built_aoide_bin();
+        let run = || {
+            std::process::Command::new(&bin)
+                .args(["resurrect", "--project", "proj", "--id", "ledger-claude", "--json"])
+                .env_remove("AOIDE_SESSION_ID")
+                .env_remove("AOIDE_DAEMON_SOCKET")
+                .output()
+                .unwrap()
+        };
+        let (first, second) = std::thread::scope(|s| {
+            let a = s.spawn(|| run());
+            let b = s.spawn(|| run());
+            (a.join().unwrap(), b.join().unwrap())
+        });
+
+        let launches = recorded_launches(&rec);
+        assert_eq!(launches.len(), 1, "exactly one launch; launches: {launches:?}");
+        let new_id = launches[0]
+            .iter()
+            .find_map(|w| w.strip_prefix("--id="))
+            .expect("the launch names its new id")
+            .to_string();
+        let at_launch = std::fs::read_to_string(&dump).unwrap_or_default();
+        assert!(
+            at_launch.contains(&new_id) && at_launch.contains("ledger-claude"),
+            "the claim is written before the launch it guards; at launch: {at_launch}"
+        );
+        let texts: Vec<String> = [first, second]
+            .iter()
+            .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+            .collect();
+        assert!(
+            texts.iter().any(|t| t.contains("in flight") || t.contains("is live")),
+            "the other run must be refused; stdout: {texts:?}"
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A launch that fails leaves no claim behind, so a later resurrect of the
+    /// same session is not blocked by one.
+    #[cfg(unix)]
+    #[test]
+    fn a_failed_launch_leaves_no_claim_and_a_later_resurrect_is_not_blocked() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(RESURRECT_ENV);
+        let (root, proj_path) = setup("resurrect-failed-claim");
+        set_ledger(&[ledger_entry("ledger-claude", "claude", &proj_path, "2026-08-20T01:00:00Z")]);
+        std::env::remove_var("AOIDE_TERMINAL");
+
+        let out = session_resurrect(&flag_invocation(&["resurrect"], &[("project", "proj"), ("id", "ledger-claude")]));
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "msg: {}", out.message);
+        let failed = out.data.as_ref().unwrap()["failed"].as_array().unwrap().len();
+        assert_eq!(failed, 1, "data: {:?}", out.data);
+        let claims = aoide_storage::resuming::load_claims().unwrap();
+        assert!(claims.iter().all(|c| c.session_id != "ledger-claude"), "a failed launch drops its claim: {claims:?}");
+
+        let (rec, _dump) = recording_terminal_with_claims(&root);
+        let out = session_resurrect(&flag_invocation(&["resurrect"], &[("project", "proj"), ("id", "ledger-claude")]));
+        assert_eq!(recorded_launches(&rec).len(), 1, "a later resurrect launches; data: {:?}", out.data);
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A by-journal candidate whose presence scan cannot say which journals are
+    /// open is refused, and nothing launches.
+    /// It listens so its meta is read: nothing listening means skipped unread.
+    #[cfg(unix)]
+    #[test]
+    fn a_by_log_candidate_with_an_unknown_presence_scan_is_skipped_and_nothing_launches() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(RESURRECT_ENV);
+        let (root, proj_path) = setup("resurrect-presence-unknown");
+        let journal = root.join("s.eid");
+        std::fs::write(&journal, "").unwrap();
+        let presence = root.join("eidolon").join("garbage");
+        std::fs::create_dir_all(&presence).unwrap();
+        std::fs::write(presence.join("meta.json"), "{ not json").unwrap();
+        let _held_open = std::os::unix::net::UnixListener::bind(presence.join("sock")).unwrap();
+        let journal = journal.to_string_lossy().into_owned();
+        set_ledger(&[ledger_entry_with_log("ledger-eid", "eidolon", &proj_path, Some(journal.as_str()))]);
+        let (rec, _dump) = recording_terminal_with_claims(&root);
+
+        let out = session_resurrect(&flag_invocation(&["resurrect"], &[("project", "proj"), ("id", "ledger-eid")]));
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "msg: {}", out.message);
+        let skipped = out.data.as_ref().unwrap()["skipped"].as_array().unwrap().clone();
+        assert_eq!(skipped.len(), 1, "data: {:?}", out.data);
+        let reason = skipped[0]["reason"].as_str().unwrap();
+        assert!(reason.contains("presence"), "reason: {reason}");
+        assert!(recorded_launches(&rec).is_empty(), "an unknown presence scan launched a terminal");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A by-journal candidate whose presence socket accepts and never answers is
+    /// still open: the presence's pid is this process, which the real `ps` lists,
+    /// so the session is live and nothing launches.
+    #[cfg(unix)]
+    #[test]
+    fn a_by_log_candidate_whose_presence_is_silent_is_skipped_as_live() {
+        use std::os::unix::net::UnixListener;
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(RESURRECT_ENV);
+        let (root, proj_path) = setup("resurrect-presence-silent");
+        let journal = root.join("s.eid");
+        std::fs::write(&journal, "").unwrap();
+        let journal = journal.to_string_lossy().into_owned();
+        let presence = root.join("eidolon").join("user-silent");
+        std::fs::create_dir_all(&presence).unwrap();
+        std::fs::write(
+            presence.join("meta.json"),
+            serde_json::json!({
+                "id": "user-silent", "pid": std::process::id(), "log": journal,
+                "cwd": proj_path, "repo": null, "model": "m", "started_ms": 0,
+                "title": "t", "busy": false
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let _held_open = UnixListener::bind(presence.join("sock")).unwrap();
+        set_ledger(&[ledger_entry_with_log("ledger-eid", "eidolon", &proj_path, Some(journal.as_str()))]);
+        let (rec, _dump) = recording_terminal_with_claims(&root);
+
+        let out = session_resurrect(&flag_invocation(&["resurrect"], &[("project", "proj"), ("id", "ledger-eid")]));
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "msg: {}", out.message);
+        let skipped = out.data.as_ref().unwrap()["skipped"].as_array().unwrap().clone();
+        assert_eq!(skipped.len(), 1, "data: {:?}", out.data);
+        let reason = skipped[0]["reason"].as_str().unwrap();
+        assert!(reason.contains("is live as user-silent"), "the live sentence names the presence id: {reason}");
+        assert!(recorded_launches(&rec).is_empty(), "a silent, pid-live presence launched a terminal");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A claim stamped an hour ahead of the clock is stale: it blocks nothing,
+    /// the claim step drops it, and the candidate launches once.
+    #[cfg(unix)]
+    #[test]
+    fn a_claim_stamped_an_hour_ahead_does_not_block_and_the_candidate_launches_once() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(RESURRECT_ENV);
+        let (root, proj_path) = setup("resurrect-claim-future");
+        set_ledger(&[ledger_entry("ledger-claude", "claude", &proj_path, "2026-08-20T01:00:00Z")]);
+        let future = aoide_storage::time::iso_utc_from_epoch(super::super::conduct::unix_ts() as i64 + 3600);
+        aoide_storage::resuming::save_claims(&[aoide_storage::resuming::Claim {
+            session_id: "ledger-claude".into(),
+            new_id: "resurrect-future-1".into(),
+            at: future,
+            journal: None,
+        }])
+        .unwrap();
+        let (rec, _dump) = recording_terminal_with_claims(&root);
+
+        let out = session_resurrect(&flag_invocation(&["resurrect"], &[("project", "proj"), ("id", "ledger-claude")]));
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "msg: {}", out.message);
+        assert_eq!(recorded_launches(&rec).len(), 1, "data: {:?}", out.data);
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Two ledger lines for one id: the older names no journal, the newer names
+    /// one. `--id` takes the newest line, so it launches once, by its journal.
+    #[cfg(unix)]
+    #[test]
+    fn an_id_with_two_ledger_lines_launches_once_by_the_newest_journal() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(RESURRECT_ENV);
+        let (root, proj_path) = setup("resurrect-id-newest");
+        let journal = root.join("s.eid");
+        std::fs::write(&journal, "").unwrap();
+        let journal = journal.to_string_lossy().into_owned();
+        set_ledger(&[
+            ledger_entry_with_log("ledger-eid", "eidolon", &proj_path, None),
+            ledger_entry_with_log("ledger-eid", "eidolon", &proj_path, Some(journal.as_str())),
+        ]);
+        let (rec, _dump) = recording_terminal_with_claims(&root);
+
+        let out = session_resurrect(&flag_invocation(&["resurrect"], &[("project", "proj"), ("id", "ledger-eid")]));
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "msg: {}", out.message);
+        let launches = recorded_launches(&rec);
+        assert_eq!(launches.len(), 1, "data: {:?}", out.data);
+        assert!(launches[0].contains(&journal), "launched by the newest line's journal: {:?}", launches[0]);
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A `logPath` that is a link to a regular journal is skipped by its own
+    /// sentence: the check reads the path without following the link.
+    #[cfg(unix)]
+    #[test]
+    fn a_log_path_that_is_a_link_to_a_journal_is_skipped_and_nothing_launches() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(RESURRECT_ENV);
+        let (root, proj_path) = setup("resurrect-journal-link");
+        let journal = root.join("s.eid");
+        std::fs::write(&journal, "").unwrap();
+        let link = root.join("link.eid");
+        std::os::unix::fs::symlink(&journal, &link).unwrap();
+        let link = link.to_string_lossy().into_owned();
+        set_ledger(&[ledger_entry_with_log("ledger-eid", "eidolon", &proj_path, Some(link.as_str()))]);
+        let (rec, _dump) = recording_terminal_with_claims(&root);
+
+        let out = session_resurrect(&flag_invocation(&["resurrect"], &[("project", "proj"), ("id", "ledger-eid")]));
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "msg: {}", out.message);
+        let skipped = out.data.as_ref().unwrap()["skipped"].as_array().unwrap().clone();
+        assert_eq!(skipped.len(), 1, "data: {:?}", out.data);
+        let reason = skipped[0]["reason"].as_str().unwrap();
+        assert!(reason.contains("has a logPath that is a symbolic link"), "reason: {reason}");
+        assert!(recorded_launches(&rec).is_empty(), "a link to a journal launched a terminal");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A quoted `'{cmd}'` template joins the launch into one shell line. A
+    /// journal path holding `$(id)`, a backtick, a `'` and a space must reach
+    /// the recorder as one argv word, byte for byte.
+    #[cfg(unix)]
+    #[test]
+    fn a_quoted_terminal_template_hands_a_hostile_journal_path_on_as_one_word() {
+        use std::os::unix::fs::PermissionsExt;
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(RESURRECT_ENV);
+        let (root, proj_path) = setup("resurrect-hostile-path");
+        let journal = root.join("it's $(id) `x` s.eid");
+        std::fs::write(&journal, "").unwrap();
+        let journal = journal.to_string_lossy().into_owned();
+        set_ledger(&[ledger_entry_with_log("ledger-eid", "eidolon", &proj_path, Some(journal.as_str()))]);
+        // The recorder takes the joined line as its one argument and splits it
+        // the way a shell would, so each word it prints is what the terminal runs.
+        let rec = root.join("terminal.rec");
+        let script = root.join("record-terminal.sh");
+        std::fs::write(
+            &script,
+            format!(
+                "#!/bin/sh\nprintf 'RUN\\n' >> '{rec}'\neval \"set -- $1\"\nfor a in \"$@\"; do printf '%s\\n' \"$a\" >> '{rec}'; done\n",
+                rec = rec.display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::env::set_var("AOIDE_TERMINAL", format!("{} '{{cmd}}'", script.display()));
+        std::env::set_var("WAYLAND_DISPLAY", "wayland-0");
+
+        let out = session_resurrect(&flag_invocation(&["resurrect"], &[("project", "proj"), ("id", "ledger-eid")]));
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "msg: {}", out.message);
+        let launches = recorded_launches(&rec);
+        assert_eq!(launches.len(), 1, "data: {:?}", out.data);
+        assert_eq!(
+            launches[0].last().map(String::as_str),
+            Some(journal.as_str()),
+            "the journal reaches the recorder as one word: {:?}",
+            launches[0]
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A conducting stage lock that cannot be taken refuses the candidate: the
+    /// claim cannot be written under the lock, so nothing launches.
+    #[cfg(unix)]
+    #[test]
+    fn a_stage_lock_that_cannot_be_taken_skips_the_candidate_and_nothing_launches() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(RESURRECT_ENV);
+        let (root, proj_path) = setup("resurrect-lock-unopenable");
+        set_ledger(&[ledger_entry("ledger-claude", "claude", &proj_path, "2026-08-20T01:00:00Z")]);
+        // `setup`'s `project add` has already taken the stage lock, leaving
+        // the lock file in place; a directory at its path makes the open fail.
+        let lock = root.join("stage").join(".stage.lock");
+        std::fs::remove_file(&lock).unwrap();
+        std::fs::create_dir(&lock).unwrap();
+        let (rec, _dump) = recording_terminal_with_claims(&root);
+
+        let out = session_resurrect(&flag_invocation(&["resurrect"], &[("project", "proj"), ("id", "ledger-claude")]));
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "msg: {}", out.message);
+        let skipped = out.data.as_ref().unwrap()["skipped"].as_array().unwrap().clone();
+        assert_eq!(skipped.len(), 1, "data: {:?}", out.data);
+        let reason = skipped[0]["reason"].as_str().unwrap();
+        assert!(reason.contains("stage lock"), "reason: {reason}");
+        assert!(recorded_launches(&rec).is_empty(), "an untaken stage lock launched a terminal");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A dry run reports a fresh claim as in flight, and leaves the claims file
+    /// exactly as it found it, whether present or absent.
+    #[cfg(unix)]
+    #[test]
+    fn a_dry_run_against_a_fresh_claim_shows_in_flight_and_leaves_the_claims_file_alone() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(RESURRECT_ENV);
+        let (root, proj_path) = setup("resurrect-dry-claim");
+        set_ledger(&[ledger_entry("ledger-claude", "claude", &proj_path, "2026-08-20T01:00:00Z")]);
+        let (rec, _dump) = recording_terminal_with_claims(&root);
+        let path = aoide_storage::resuming::resuming_path();
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let bytes = format!(
+            r#"{{"v":1,"claims":[{{"sessionId":"ledger-claude","newId":"resurrect-held-1","at":"{}"}}]}}"#,
+            aoide_storage::time::now_iso_utc()
+        );
+        std::fs::write(&path, &bytes).unwrap();
+
+        let dry = || {
+            session_resurrect(&flag_invocation(
+                &["resurrect"],
+                &[("project", "proj"), ("id", "ledger-claude"), ("dry-run", "true")],
+            ))
+        };
+        let out = dry();
+        let row = out.data.as_ref().unwrap()["candidates"][0].clone();
+        assert_eq!(row["disposition"], "skipped", "row: {row}");
+        assert!(row["reason"].as_str().unwrap().contains("in flight"), "row: {row}");
+        assert_eq!(row["claimedBy"], "resurrect-held-1", "row: {row}");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), bytes, "a dry run must not touch the claims file");
+
+        std::fs::remove_file(&path).unwrap();
+        let _ = dry();
+        assert!(!path.exists(), "a dry run must not create the claims file");
+        assert!(recorded_launches(&rec).is_empty(), "a dry run launched a terminal");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// An ended eidolon ledger line for `session_id`, anchored at `cwd`, whose
+    /// journal is `log_path`, with its own `ended_at`.
+    fn eidolon_line_ended(session_id: &str, cwd: &str, ended_at: &str, log_path: &str) -> aoide_storage::ledger::LedgerEntry {
+        let mut line = serde_json::to_value(ledger_entry(session_id, "eidolon", cwd, ended_at)).unwrap();
+        line["logPath"] = json!(log_path);
+        serde_json::from_value(line).unwrap()
+    }
+
+    /// A claim for another session on the candidate's journal blocks it while
+    /// the claim is in flight, and the block is by journal.
+    #[test]
+    fn a_claim_for_another_id_on_the_same_journal_blocks() {
+        let entry = ledger_entry_with_log("ledger-b", "eidolon", "/w", Some("/r/s.eid"));
+        let candidate = Journal { spelled: "/r/s.eid".into(), resolved: Some("/real/s.eid".into()) };
+        let mut claim = claim_taken("ledger-a", "resurrect-a-1", 5);
+        claim.journal = Some("/real/s.eid".into());
+        assert_eq!(
+            block_verdict(&entry, Some(&candidate), &[], &[], &[claim], &[], NOW),
+            Some(Blocked::InFlight { new_id: "resurrect-a-1".into(), age_secs: 5, by_journal: true })
+        );
+    }
+
+    /// The same claim blocks nothing once it is stale.
+    #[test]
+    fn a_stale_claim_for_another_id_on_the_same_journal_blocks_nothing() {
+        let entry = ledger_entry_with_log("ledger-b", "eidolon", "/w", Some("/r/s.eid"));
+        let candidate = Journal { spelled: "/r/s.eid".into(), resolved: Some("/real/s.eid".into()) };
+        let mut claim = claim_taken("ledger-a", "resurrect-a-1", 3600);
+        claim.journal = Some("/real/s.eid".into());
+        assert_eq!(block_verdict(&entry, Some(&candidate), &[], &[], &[claim], &[], NOW), None);
+    }
+
+    /// A claim with no journal blocks only the session it names.
+    #[test]
+    fn a_claim_without_a_journal_blocks_only_its_own_id() {
+        let entry = ledger_entry_with_log("ledger-b", "eidolon", "/w", Some("/r/s.eid"));
+        let candidate = Journal { spelled: "/r/s.eid".into(), resolved: Some("/real/s.eid".into()) };
+        let other = claim_taken("ledger-a", "resurrect-a-1", 5);
+        assert_eq!(block_verdict(&entry, Some(&candidate), &[], &[], &[other], &[], NOW), None);
+        let own = claim_taken("ledger-b", "resurrect-b-1", 5);
+        assert_eq!(
+            block_verdict(&entry, Some(&candidate), &[], &[], &[own], &[], NOW),
+            Some(Blocked::InFlight { new_id: "resurrect-b-1".into(), age_secs: 5, by_journal: false })
+        );
+    }
+
+    /// `--all` over two ended eidolon lines with distinct ids and one journal:
+    /// the newer line launches, and the older is skipped, its journal held by
+    /// the newer line's launch.
+    #[cfg(unix)]
+    #[test]
+    fn an_all_run_launches_one_of_two_lines_that_share_a_journal() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(RESURRECT_ENV);
+        let (root, proj_path) = setup("resurrect-all-shared-journal");
+        let journal = root.join("s.eid");
+        std::fs::write(&journal, "").unwrap();
+        let journal = journal.to_string_lossy().into_owned();
+        set_ledger(&[
+            eidolon_line_ended("ledger-old", &proj_path, "2026-08-19T01:00:00Z", &journal),
+            eidolon_line_ended("ledger-new", &proj_path, "2026-08-20T01:00:00Z", &journal),
+        ]);
+        let (rec, _dump) = recording_terminal_with_claims(&root);
+
+        let out = session_resurrect(&flag_invocation(&["resurrect"], &[("project", "proj"), ("all", "true")]));
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "msg: {}", out.message);
+        assert_eq!(recorded_launches(&rec).len(), 1, "one launch; message: {}", out.message);
+        let claimed = aoide_storage::resuming::load_claims()
+            .unwrap()
+            .into_iter()
+            .find(|c| c.session_id == "ledger-new")
+            .expect("the newer line holds the claim");
+        let data = out.data.as_ref().expect("the run reports its rows");
+        let skipped = data["skipped"].as_array().expect("the older line is skipped");
+        assert_eq!(skipped.len(), 1, "data: {data}");
+        assert_eq!(skipped[0]["sessionId"], "ledger-old");
+        assert_eq!(skipped[0]["claimedBy"], claimed.new_id.as_str());
+        let reason = skipped[0]["reason"].as_str().unwrap_or_default();
+        assert!(reason.contains("shares its journal with a launch in flight as"), "reason: {reason}");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// `--id` of one line launches it. `--id` of the other line, on the same
+    /// journal, is refused, and its skipped row names the first launch's claim.
+    #[cfg(unix)]
+    #[test]
+    fn a_second_id_on_a_journal_a_launch_holds_is_refused_across_calls() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(RESURRECT_ENV);
+        let (root, proj_path) = setup("resurrect-second-id-journal");
+        let journal = root.join("s.eid");
+        std::fs::write(&journal, "").unwrap();
+        let journal = journal.to_string_lossy().into_owned();
+        set_ledger(&[
+            eidolon_line_ended("ledger-old", &proj_path, "2026-08-19T01:00:00Z", &journal),
+            eidolon_line_ended("ledger-new", &proj_path, "2026-08-20T01:00:00Z", &journal),
+        ]);
+        let (rec, _dump) = recording_terminal_with_claims(&root);
+
+        let first = session_resurrect(&flag_invocation(&["resurrect"], &[("project", "proj"), ("id", "ledger-new")]));
+        assert_eq!(first.status, aoide_protocol::output::Status::Ok, "msg: {}", first.message);
+        assert_eq!(recorded_launches(&rec).len(), 1, "the first id launches; message: {}", first.message);
+        let claimed = aoide_storage::resuming::load_claims()
+            .unwrap()
+            .into_iter()
+            .find(|c| c.session_id == "ledger-new")
+            .expect("the first launch holds a claim")
+            .new_id;
+
+        let second = session_resurrect(&flag_invocation(&["resurrect"], &[("project", "proj"), ("id", "ledger-old")]));
+        assert_eq!(recorded_launches(&rec).len(), 1, "the other line launches nothing; message: {}", second.message);
+        let data = second.data.as_ref().expect("the refusal is a skipped row");
+        let skipped = data["skipped"].as_array().expect("the skipped rows");
+        assert_eq!(skipped.len(), 1, "data: {data}");
+        assert_eq!(skipped[0]["claimedBy"], claimed.as_str());
+        let reason = skipped[0]["reason"].as_str().unwrap_or_default();
+        assert!(reason.contains("shares its journal with a launch in flight as"), "reason: {reason}");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A by-journal launch's claim names its journal, resolved; an id launch's
+    /// claim names none.
+    #[cfg(unix)]
+    #[test]
+    fn a_by_journal_claim_names_its_journal_and_an_id_claim_names_none() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(RESURRECT_ENV);
+        let (root, proj_path) = setup("resurrect-claim-journal");
+        let journal_path = root.join("s.eid");
+        std::fs::write(&journal_path, "").unwrap();
+        let resolved = std::fs::canonicalize(&journal_path).unwrap().to_string_lossy().into_owned();
+        let journal = journal_path.to_string_lossy().into_owned();
+        set_ledger(&[
+            eidolon_line_ended("ledger-eid", &proj_path, "2026-08-20T01:00:00Z", &journal),
+            ledger_entry("ledger-claude", "claude", &proj_path, "2026-08-20T02:00:00Z"),
+        ]);
+        let (rec, _dump) = recording_terminal_with_claims(&root);
+
+        let by_journal = session_resurrect(&flag_invocation(&["resurrect"], &[("project", "proj"), ("id", "ledger-eid")]));
+        assert_eq!(by_journal.status, aoide_protocol::output::Status::Ok, "msg: {}", by_journal.message);
+        let by_id = session_resurrect(&flag_invocation(&["resurrect"], &[("project", "proj"), ("id", "ledger-claude")]));
+        assert_eq!(by_id.status, aoide_protocol::output::Status::Ok, "msg: {}", by_id.message);
+        assert_eq!(recorded_launches(&rec).len(), 2, "both launch; message: {}", by_id.message);
+
+        let raw: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(aoide_storage::resuming::resuming_path()).unwrap()).unwrap();
+        let claims = raw["claims"].as_array().expect("the claims array");
+        let eid = claims.iter().find(|c| c["sessionId"] == "ledger-eid").expect("the by-journal claim");
+        assert_eq!(eid["journal"], resolved.as_str(), "claim: {eid}");
+        let claude = claims.iter().find(|c| c["sessionId"] == "ledger-claude").expect("the id claim");
+        assert!(claude.get("journal").is_none(), "an id launch's claim has no journal key: {claude}");
+
         let _ = std::fs::remove_dir_all(&root);
     }
 }

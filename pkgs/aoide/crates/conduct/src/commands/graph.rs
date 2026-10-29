@@ -69,6 +69,7 @@ pub fn register(r: &mut Registry) {
             "project add aoide ~/Aoide ~/Aoide-docs",
             "project add aoide ~/Aoide --new",
         ],
+        launches: true,
     ));
     r.insert(cmd!(
         path: ["project", "remove"],
@@ -104,6 +105,7 @@ pub fn register(r: &mut Registry) {
         gated: false,
         implemented: true,
         handler: crate::graph::link,
+        approves: true,
     ));
     r.insert({
         let mut c = cmd!(
@@ -120,6 +122,7 @@ pub fn register(r: &mut Registry) {
             gated: false,
             implemented: true,
             handler: crate::graph::session_start,
+            approves: true,
         );
         // Hook-plumbing, not an operator command — a harness's own lifecycle
         // drives it, never a human typing it directly (task #101 R1). Hidden
@@ -167,6 +170,7 @@ pub fn register(r: &mut Registry) {
             gated: false,
             implemented: true,
             handler: crate::graph::session_hook,
+            approves: true,
         );
         c.internal = true;
         c
@@ -197,15 +201,17 @@ pub fn register(r: &mut Registry) {
         ],
         brief: "Spawn an agent command as a detached, conducted session.",
         doors: &[Door::Cli, Door::Daemon, Door::Mcp],
+        approves: true, launches: true,
     ));
     r.insert(cmd!(
         path: ["resurrect"],
-        summary: "Revive sessions. BARE (no --project/--all/--id): walk up from cwd for the nearest .aoide/project.json and revive THAT manifest's specs directly — no projects.json registration needed. Each local-host spec (a spec whose host doesn't match this host's own name is skipped, remote summoning lands in a later phase) enriches off the newest matching state/session-ledger.jsonl entry (same cwd/agent) through the exact --id path below when one exists, else clean-spawns windowed from the spec's own command or the agent's default launch. WITH --project (resolved against projects.json by exact name; --all/--id ignore the manifest entirely): anchors ledger entries to it (longest-prefix, same rule the bare `graph` render uses), then selects — bare (no --all/--id) resumes the project's WHOLE undying set (state/undying.json, `session grant undying on|off`) minus any id already alive; --all widens to every anchored entry; --id narrows to one. Each candidate resolves through two arms: a harness with a verified resume argv spawns windowed running `<harness> --resume <id>`; a conducted TERMINAL (no harness profile, but a captured `restore` snapshot) spawns windowed running its login shell, then — once registered — types its last foreground command at the prompt (`--yes`, never `--submit`: a human presses Enter; only when it was demonstrably running one, and not when the restore refuses it, as for a recorded `sudo …`); an idle one restores its cwd alone and delivers nothing. Neither arm resolving is skipped with a taught message. The revived session always mints a NEW sessionId (ids are never recycled) and is stamped resumedFrom, rendered as a `resumed` graph edge; an undying old id transfers its mark onto the new one. A windowed-spawn failure (no $AOIDE_TERMINAL / no display) is folded into `failed` rather than erroring the command, so a headless host degrades gracefully. Over MCP the caller must be attested to revive: with no sealed session (and always from the A2A door) `--project …` is held whole in pending.json for `session pending approve` and nothing launches, and BARE mode is refused (it would run the manifest's commands from a directory the approver never sees).",
+        summary: "Revive sessions. BARE (no --project/--all/--id): walk up from cwd for the nearest .aoide/project.json and revive THAT manifest's specs directly — no projects.json registration needed. Each local-host spec (a spec whose host doesn't match this host's own name is skipped, remote summoning lands in a later phase) enriches off the newest matching state/session-ledger.jsonl entry (same cwd/agent) through the exact --id path below when one exists, else clean-spawns windowed from the spec's own command or the agent's default launch. WITH --project (resolved against projects.json by exact name; --all/--id ignore the manifest entirely): anchors ledger entries to it (longest-prefix, same rule the bare `graph` render uses), then selects — bare (no --all/--id) resumes the project's WHOLE undying set (state/undying.json, `session grant undying on|off`) minus any id already alive; --all widens to every anchored entry; --id narrows to one. Each candidate resolves through two arms: a harness with a verified resume argv spawns windowed running `<harness> --resume <id>`; a conducted TERMINAL (no harness profile, but a captured `restore` snapshot) spawns windowed running its login shell, then — once registered — types its last foreground command at the prompt (`--yes`, never `--submit`: a human presses Enter; only when it was demonstrably running one, and not when the restore refuses it, as for a recorded `sudo …`); an idle one restores its cwd alone and delivers nothing. Neither arm resolving is skipped with a taught message. The revived session always mints a NEW sessionId (ids are never recycled) and is stamped resumedFrom, rendered as a `resumed` graph edge; an undying old id transfers its mark onto the new one. A windowed-spawn failure (no $AOIDE_TERMINAL / no display) is folded into `failed` rather than erroring the command, so a headless host degrades gracefully. Over MCP the caller must be attested to revive: with no sealed session (and always from the A2A door) `--project …` is held whole in pending.json for `session pending approve` and nothing launches, and BARE mode is refused (it would run the manifest's commands from a directory the approver never sees). --dry-run lists the same rows and launches, holds and types nothing. From a door that cannot approve, an unattested caller's dry run gets what the call would give it: bare mode's refusal, a usage error without --project, and with --project a refusal (dry-run-not-held), since the call would be held and show that caller nothing.",
         args: [],
         flags: [
             flag!("project", "string", "Project name to resurrect a session for; resolved against projects.json by exact name. Omit entirely, along with --all/--id, to use bare-manifest mode instead (walk up from cwd for .aoide/project.json)."),
             flag!("all", "bool", "Resurrect every anchored, resumable ledger entry instead of just the single most recent. Requires --project; ignores any .aoide/project.json."),
             flag!("id", "string", "Resurrect one specific ledger sessionId instead of the most recent (mutually exclusive with --all; --id wins if both given). Requires --project; ignores any .aoide/project.json."),
+            flag!("dry-run", "bool", "List the rows this resurrect would act on, launching, holding and typing nothing. Each row names its disposition, and pickedByBare marks the rows the bare --project form would revive. The handler audits it with status dry-run, beside the line the door writes for every call. Where the call would be held for an approval, the dry run is refused instead."),
         ],
         gated: false,
         implemented: true,
@@ -216,6 +222,7 @@ pub fn register(r: &mut Registry) {
             "resurrect --project aoide --all",
         ],
         brief: "Revive sessions from the project's record.",
+        approves: true, launches: true,
     ));
     r.insert(cmd!(
         path: ["send"],
@@ -241,6 +248,7 @@ pub fn register(r: &mut Registry) {
         one_of: &[&["id", "to"]],
         brief: "Inject text into a conducted session (held for approval unless --yes).",
         doors: &[Door::Cli, Door::Daemon, Door::Mcp],
+        approves: true,
     ));
     r.insert(cmd!(
         path: ["session", "pending", "list"],
@@ -254,11 +262,11 @@ pub fn register(r: &mut Registry) {
     ));
     r.insert(cmd!(
         path: ["session", "trace"],
-        summary: "Render a session's TRACE, one line per record — the run, step by step (docs/architecture/EIDOLON-TRACE.md: eidolon publishes its journal as one JSON record per line — as a `<log>.jsonl` mirror the installed generation writes, or through its own read-only export door `eidolon log --json <journal> [--after <id>]` — and Aoide resolves it through the record's presence metadata; it is the one harness that does today). <id> resolves like `send --to` (id / tail4 / petname). Human form is `#<id>  <hh:mm:ss local>  <kind>  <summary>` — an assistant message shows its thinking (dimmed, cut) then its text then each `→ tool(name)`, a tool result shows its first line prefixed `!` when it errored, a settled turn shows its stop reason and tokens. --tail N shows the last N records (default 50); --follow re-reads for new lines until Ctrl-C (CLI-only); --json carries the raw trace lines through unchanged, byte for byte, PLUS `data.steps`: the same window PROJECTED, one object per emitted content block in the record's own order (`{id, ts, kind, text, error, clipped}`, kind in thinking/say/tool/result/settled/user/other), bounded by the window, by blocks-per-record and by a whole-projection cap (`stepsOmitted` names the last one's count); --clip line|detail sets how much of each block `steps` keeps. A session whose harness keeps no trace (or whose presence names none) is a taught error naming which of the two it is, never an empty listing. Read-only: no stage write, no daemon, no lock.",
+        summary: "Render a session's TRACE, one line per record — the run, step by step (docs/architecture/EIDOLON-TRACE.md: eidolon publishes its journal as one JSON record per line — as a `<log>.jsonl` mirror the installed generation writes, or through its own read-only export door `eidolon log --json <journal> [--after <id>]` — and Aoide resolves it through the record's presence metadata; it is the one harness that does today). <id> resolves like `send --to` (id / tail4 / petname). Human form is `#<id>  <hh:mm:ss local>  <kind>  <summary>` — an assistant message shows its thinking (dimmed, cut) then its text then each `→ tool(name)`, a tool result shows its first line prefixed `!` when it errored, a settled turn shows its stop reason and tokens. --tail N shows the last N records (default 50); --follow re-reads for new lines until Ctrl-C (CLI-only); --json carries `data.lines`, the journal's own JSON lines: raw unsafe characters removed, JSON escapes kept, so a decoded line holds untrusted strings and a consumer shows the steps; PLUS `data.steps`: the same window PROJECTED, one object per emitted content block in the record's own order (`{id, ts, kind, text, error, clipped}`, kind in thinking/say/tool/result/settled/user/other), bounded by the window, by blocks-per-record and by a whole-projection cap (`stepsOmitted` names the last one's count); --clip line|detail sets how much of each block `steps` keeps. A session whose harness keeps no trace (or whose presence names none) is a taught error naming which of the two it is, never an empty listing. Read-only: no stage write, no daemon, no lock.",
         args: [arg!("id", "string", true, "Session to render: a local session id, its tail4, or its petname (resolved by the same resolver `send --to` uses).")],
         flags: [
             flag!("tail", "int", "Show only the last N records (default 50). A non-numeric or zero value is a usage error, never a silently empty listing."),
-            flag!("clip", "string", "How much of each emitted block `--json`'s `data.steps` carries: `line` (default — each block on one clipped line, the same spelling the human body shows) or `detail` (the block's own line breaks, kept longer, plus a tool call's arguments, for a details view). An unknown word is a usage error, never a silent widening. `data.lines` is unaffected: it stays the raw records."),
+            flag!("clip", "string", "How much of each emitted block `--json`'s `data.steps` carries: `line` (default — each block on one clipped line, the same spelling the human body shows) or `detail` (the block's own line breaks, kept longer, plus a tool call's arguments, for a details view). An unknown word is a usage error, never a silent widening. `data.lines` is unaffected: it stays the whole records."),
             flag!("follow", "bool", "Re-read the trace every 500ms and print new records as they land; blocks until Ctrl-C. CLI-only — a follow that parks a connection makes no sense over MCP/A2A/the daemon socket.", doors: &[Door::Cli]),
         ],
         gated: false,
@@ -300,6 +308,7 @@ pub fn register(r: &mut Registry) {
         implemented: true,
         handler: crate::graph::pending_approve,
         examples: ["session pending approve 0 --expect <fingerprint>"],
+        approves: true, launches: true,
     ));
     r.insert(cmd!(
         path: ["session", "pending", "deny"],
@@ -310,6 +319,7 @@ pub fn register(r: &mut Registry) {
         implemented: true,
         handler: crate::graph::pending_deny,
         examples: ["session pending deny 0 --expect <fingerprint>"],
+        approves: true,
     ));
     r.insert(cmd!(
         path: ["session", "permit"],
@@ -323,6 +333,7 @@ pub fn register(r: &mut Registry) {
         gated: false,
         implemented: true,
         handler: crate::graph::session_permit,
+        approves: true,
     ));
     r.insert(cmd!(
         path: ["session", "prune"],
@@ -370,6 +381,7 @@ pub fn register(r: &mut Registry) {
         implemented: true,
         handler: crate::graph::session_conduct,
         brief: "Run an agent command on its own PTY as a conductable session.",
+        approves: true, launches: true,
     ));
     // ── bare `session`: the ROSTER (session-surface redesign, command-defrag
     // lane X, 2026-08-28 — supersedes both the U3 undying picker that used
@@ -576,6 +588,7 @@ pub fn register_mail_ring(r: &mut Registry) {
         implemented: true,
         handler: crate::graph::mail_ring,
         examples: ["mail ring --for claude-mail"],
+        approves: true,
     ));
     r.insert(cmd!(
         path: ["session", "project"],

@@ -35,6 +35,24 @@ The MCP-open set has a second golden per app crate,
 command to MCP updates that list in the same commit; a command is closed to
 MCP until its own `doors` says otherwise.
 
+The approve and launch marks have two more goldens in the core binary,
+`approves_paths_match_the_golden_snapshot` and
+`launches_paths_match_the_golden_snapshot`, beside the MCP-open one. Each lists
+exactly the entries that carry its mark. `protocol/tests/approve_checks.rs`
+lists each file under a crate's `src/` that names `can_approve` or
+`refuse_unapproving_door`, with its count. The walk skips files named
+`tests.rs`, skips each line whose first non-blank characters are `//`, stops at
+the first line that starts, after blanks, with `mod tests {` or
+`pub(crate) mod tests {`, and does not read a crate's `tests/`, build scripts,
+examples or benches. That list is exact, not a ratchet: a new or removed approve
+check moves it in the same commit. The command whose handler reaches a new check
+gets `approves`, and its path joins the approves golden in that commit too. A
+removed check's command loses `approves`, and its path leaves the golden in that
+commit too, unless another limb of the rule still holds for it. The counts are
+per file, so a removed check and an added one in the same listed file keep the
+count and the scan passes; review checks that. The scan cannot see which command
+a check serves, or a new caller of an existing check, so review checks those.
+
 ## No cross-crate copying
 
 Every crate born from the Phase 2–9 restructure carries a shim-discipline

@@ -33,6 +33,8 @@ terminal's rights to its remote callers.
 - The resident daemon also serves the core shellbridge: `run_loop` spawns
   `aoide_conduct::shellbridge::run_core` once its own socket is bound, so
   `aoide/shellbridge.sock` (the core arms, not gated on strillix) starts with aoided.
+  `run_loop` seeds the core's stage files (`seed_core_stage`) before it takes
+  the watcher's baseline, so the seed is part of the baseline.
 - `daemon` — the `aoided` daemon. `run` is the one-shot policy self-check
   `aoide daemon` still runs. `run_loop`/`serve_daemon` (P-D2,
   `docs/architecture/AOIDED.md`) are the RESIDENT daemon `bin/aoided.rs`
@@ -43,10 +45,12 @@ terminal's rights to its remote callers.
   non-blocking `flock`s held for the process's life, so a held lock
   refuses the start before anything is bound. Then bind the control socket
   (`$AOIDE_DAEMON_SOCKET`, else `$XDG_RUNTIME_DIR/aoide/aoided.sock`,
-  `daemon::socket_path`), spawn a thread-per-connection accept loop
-  (fallible `Builder::spawn`, accept-error backoff — the secrets broker's
-  own accept-loop discipline, reused by convention), then tick forever
-  (~1s; P-D3's two producers, below). Newline-delimited JSON, the secrets
+  `daemon::socket_path`), seed the core's stage files, take the watcher's
+  baseline, spawn a thread-per-connection accept loop (fallible
+  `Builder::spawn`, accept-error backoff — the secrets broker's own
+  accept-loop discipline, reused by convention), start the core shellbridge,
+  append the `started` line to the events feed, then tick forever (~1s;
+  P-D3's two producers, below). Newline-delimited JSON, the secrets
   wire framing verbatim, request lines read via `read_capped_line`'s
   `fill_buf`/`consume` loop (P-D4 — the byte cap is checked on every buffer
   fill, not only after a `\n` arrives, closing the P-D2-flagged gap where a
@@ -66,38 +70,51 @@ terminal's rights to its remote callers.
   planned (`docs/architecture/AOIDED.md`'s "L2" section). `registry` still
   rides along the DI seam unused — no op resolves a dotted tool name
   against it the way MCP's `tools/call` does.
-- `producers` (P-D3, `docs/architecture/AOIDED.md`'s "L1" section) — the
-  daemon tick's two producers, both constructed once at `run_loop` startup
-  and ticked every iteration. `SecretsMirror` tails the secrets broker's
-  OWN events feed, its location resolved via `aoide_secrets::socket::
-  socket_path`/`events_path` (`daemon::run_loop`'s own construction site —
-  plain, wire-type-free `PathBuf` resolvers, reused rather than re-derived;
-  this crate's `aoide-secrets` dependency also covers the A2A door's
-  inbound bearer resolve). The mirror IS deliberately kept off that
-  crate's wire/record TYPES for parsing, so "never copy an unknown field"
-  is structural — `mirror_secrets_line` reads a bare `serde_json::Value`
-  and copies exactly four named fields, `id`/`secret`/`consumer`/
-  `timeoutSecs`, for one of the five recognized outcomes,
-  `released`/`parked`/`completed`/`dismissed`/`expired`) and re-publishes
-  each as a `class:"secret",source:"secrets-mirror"` record on the
-  daemon's own feed. `HandEditWatcher` stat-sweeps a fixed six-file roster
+- `producers` (P-D3, `docs/architecture/AOIDED.md`'s "L1" section) — the daemon
+  tick's two producers, both constructed once at `run_loop` startup and ticked
+  every iteration. `SecretsMirror` tails the secrets broker's OWN events feed,
+  its location resolved via `aoide_secrets::socket::socket_path`/`events_path`
+  (`daemon::run_loop`'s own construction site — plain, wire-type-free `PathBuf`
+  resolvers, reused rather than re-derived; this crate's `aoide-secrets`
+  dependency also covers the A2A door's inbound bearer resolve). The mirror IS
+  deliberately kept off that crate's wire/record TYPES for parsing, so "never
+  copy an unknown field" is structural — `mirror_secrets_line` reads a bare
+  `serde_json::Value` and copies exactly four named fields,
+  `id`/`secret`/`consumer`/ `timeoutSecs`, for one of the five recognized
+  outcomes, `released`/`parked`/`completed`/`dismissed`/`expired`) and
+  re-publishes each as a `class:"secret",source:"secrets-mirror"` record on the
+  daemon's own feed. `HandEditWatcher` stat-sweeps a fixed seven-file roster
   (`daemon::stage_roster`: `sessions.json`/`hooks.json`/`projects.json`/
-  `graph.json` from `aoide-storage`, `pending.json`/`notifications.json` from
-  `aoide-conduct`) each tick and fires a `class:"audit",kind:"hand-edit"`
-  event for any file whose `(mtime, len)` no longer matches its baseline
-  (the #69 hand-edit watcher) — detection and narration only, this daemon
-  never reverts a hand edit. `note_own_write` is the seam P-D6's own
-  tick-reconcile/reap writes (below) fold into so they are never reported
-  back as a hand edit. **The watcher itself is a single `Arc<Mutex<
-  HandEditWatcher>>` (task #92), shared between the tick thread and
-  `handle_conn`'s connection threads** — not tick-private: a dispatched
-  session command (`session start/end`/etc., `{"op":"dispatch"}`) writes
-  stage files on ITS OWN connection thread, not the tick's, so
-  `rebaseline_stage_roster` re-baselines the WHOLE roster after every
-  completed dispatch (roster-wide, not a per-command "which files did this
-  write" table) before that connection's reply goes out — closing the
-  window where the daemon's own routed write got reported back to itself as
-  a hand edit one tick later.
+  `graph.json` from `aoide-storage`,
+  `pending.json`/`notifications.json`/`jobs.json` from `aoide-conduct`) each
+  tick and fires a `class:"audit",kind:"hand-edit"` event for any file whose
+  `(mtime, len)` no longer matches its baseline (the #69 hand-edit watcher) —
+  detection and narration only, this daemon never reverts a hand edit. Writes
+  aoided makes itself are not hand edits:
+  the watcher is registered with storage's write seam (`fs::watch_writes`), so
+  every atomic stage write this process makes after the watcher registers folds
+  into it at its rename, whichever thread makes it. Each change the watcher
+  finds, and each such write that moves a file, also raises a `class:"state"`
+  line for that file: at most one per file per second, a change inside the
+  second written by the first observation after it (`producers`' "The state
+  cue").
+  **`run_loop` builds the one watcher after the seed and holds its `Arc` for the
+  life of the loop** (`HandEditWatcher::registered`). A dispatched session
+  command (`session start/end`/etc., `{"op":"dispatch"}`) writes stage files on
+  its connection thread, and that write folds at its rename like any other, so
+  the connection thread runs three steps: the dispatch, the seal of a fresh
+  `session start`, and the reply. The tick writes every hand-edit line and runs
+  the reconcile on the files its sweep returns. A change `aoided` did not make
+  keeps its `hand-edit` line, and so does a foreign write that one of `aoided`'s
+  own writes then replaces. The watcher sees a change as a move in a file's
+  length or mtime, so it misses a write that keeps both: a same-uid writer can
+  set the mtime back. It sees only what happens while it is registered. A write
+  made while `aoided` is down, or at start before the watcher registers, is part
+  of its first baseline and raises no line: the start-up migration, and the seed
+  of an absent or corrupt `sessions.json` or `hooks.json`, which keeps no copy
+  of the file it replaces. One race remains: a foreign write that lands between
+  the watcher's check and its fold, around the rename of `aoided`'s own write,
+  is folded, with one `state` line and no `hand-edit` line.
 - **Graph residency (P-D6, `docs/architecture/AOIDED.md`'s "L4")** —
   `run_loop`'s tick, after narrating the hand-edit sweep above, does two
   more things every iteration: `reconcile_graph_projection(changed_files)`
@@ -110,9 +127,9 @@ terminal's rights to its remote callers.
   on the very next tick rather than waiting for the next dispatch to touch
   it; `run_internal_reap` calls the SAME `aoide_conduct::reap::
   reap_and_announce` `session reap` always runs, every `REAP_EVERY_TICKS`
-  (12) ticks (~12s, matching the systemd timer's own cadence), re-baselining
-  `HandEditWatcher` via `note_own_write` for whatever it touched so its own
-  sweep is never mistaken for a hand edit next tick. Neither producer keeps
+  (12) ticks (~12s, matching the systemd timer's own cadence). Its writes fold
+  into `HandEditWatcher` at their rename, so its own sweep is never mistaken
+  for a hand edit next tick. Neither producer keeps
   a separate in-memory roster — every dispatch (routed or internal) reads
   the stage files fresh, so "fold in the newest write" falls directly out
   of "the file on disk is the single source of truth at every instant";
@@ -179,8 +196,7 @@ terminal's rights to its remote callers.
   and refuses one whose peer uid doesn't match this daemon's own euid,
   fail-closed on an unidentified peer — the same `admin_gate` shape the
   secrets broker already holds, restated here for this THIRD socket
-  (`daemon::cross_uid_gate`, `shellbridge::cross_uid_gate` in
-  `aoide-conduct`). Cross-uid only: every legitimate connector already
+  (`daemon::cross_uid_gate`, `aoide_protocol::shellbridge::cross_uid_gate`). Cross-uid only: every legitimate connector already
   shares the daemon's own uid under OQ1-A. Separately,
   `invocation_from_dispatch_request` stamps an absent `from` flag
   explicit-empty so a `send` handler running INSIDE this process (a
@@ -502,42 +518,31 @@ terminal's rights to its remote callers.
   and the deposit outcome — mirroring `pair_request`'s "audit every call" shape
   rather than `message_send`'s narrower one, since a deposit never passes
   through `cli/src/dispatch.rs`'s own per-command audit and this is the only
-  place a flood becomes visible. A filed **letter** mints an ack back to the
-  origin, spools it, and best-effort drains that node once through the SAME
-  `aoide_conduct::mail_bridge:: drain_node` the daemon's own periodic tick uses
-  — one drain implementation; `aoide-server` never dials out on its own account.
+  place a flood becomes visible. A filed **letter** owes nothing: its
+  `accepted` answer is its receipt (ruling 131), so the door mints, spools and
+  dials nothing for it, and a duplicate answers `duplicate` the same way.
   **A container addressed to another node is not this receiver's to open**
   (`deposit_sealed`'s `Hopped` arm): the door writes no mail line, records the
   hop in the audit log, spools it toward the node the four steps pick, best-effort drains that hop
   (never one the route said is HELD), and answers `accepted` with the hop named
-  — nothing filed as correspondence, no reader armed and NO ack, because the
-  letter is not here. The audit stamp and the chain agree on the caller's name
-  through the charter line (`declared_caller_name` → `routing::declared_name`),
-  never the `nodes.json` nickname. It never rings the doorbell itself (P-M5a-2c:
-  the resident daemon is the policy and audit boundary for every ring, so this
-  door files and acks and stops there) — a remotely-deposited letter arms its
-  readers exactly like a locally-filed one, but is rung only by the next
-  daemon-side trigger for that name (a reader's Stop hook, a local filing, `mail
-  ring` by hand), until a later slice (P-M5b-2) gives this door its own forward
-  path to the daemon. A filed **receipt** never rings — it is not arming mail
-  (`aoide_storage::mail`'s own `arms` predicate) — and instead retires the local
-  outbox entry it confirms via `aoide_storage::outbox::retire_by_ack` (spec item
-  7 — a pure lookup keyed on the receipt's own verified origin and acked msgid,
-  so a forged or stale ack simply retires nothing). A **duplicate** re-sends the
-  ack only when the original filing was a letter, and is a silent no-op
-  otherwise, so an ack is never itself acked — but `aoide_client::mail_wire::
-  settle_deposit` (through `aoide_conduct::mail_bridge`) spools that resend
-  through `aoide_storage::outbox::write_ack_if_absent`, not a bare write (mail
-  register §26 outbox fix): a redelivery is skipped only while an ack for the
-  same msgid is still sitting undelivered in the origin's outbox, so a
-  permanently-dead link that keeps redelivering the same duplicate spools
-  exactly one ack, not one per redelivery, while a genuine loss (the earlier
-  ack's own entry has since retired) still correctly respools — see that
-  function's own doc for why this is not a permanent ledger, and `storage`'s own
-  `outbox::has_pending_ack_unlocked` doc for why the pending check is a single
-  marker-file stat, never a directory scan, against a spool that can hold tens
-  of thousands of entries. Every `outbox` call here runs strictly AFTER
-  `mail::deposit` has already released its own lock — `mail` and `outbox` share
+  — nothing filed as correspondence, no reader armed, and no answer owed back,
+  because the letter is not here. The audit stamp and the chain agree on the
+  caller's name through the charter line (`declared_caller_name` →
+  `routing::declared_name`), never the `nodes.json` nickname. It never rings the
+  doorbell itself (P-M5a-2c: the resident daemon is the policy and audit
+  boundary for every ring, so this door files and answers and stops there) — a
+  remotely-deposited letter arms its readers exactly like a locally-filed one,
+  but is rung only by the next daemon-side trigger for that name (a reader's
+  Stop hook, a local filing, `mail ring` by hand), until a later slice (P-M5b-2)
+  gives this door its own forward path to the daemon. A filed **receipt from an
+  older node** never rings — it is not arming mail (`aoide_storage::mail`'s own
+  `arms` predicate) — and instead retires the own letter it confirms, if any,
+  via `aoide_storage::outbox::retire_by_ack` (a lookup keyed on the receipt's
+  own verified origin and acked msgid; a forged or stale receipt retires
+  nothing, and a transit, charter or receipt entry is never retired by it). A
+  duplicate receipt goes through the same call. Every `outbox` call here runs
+  strictly AFTER `mail::deposit` has already released its own lock — `mail` and
+  `outbox` share
   the identical non-reentrant stage-lock primitive, so nesting one inside the
   other would deadlock a process against itself. **`aoide/mailPoll` (P-M3,
   `docs/architecture/MAIL.md`, CONTRACTS.md §6) is the relay-first half of the
@@ -557,25 +562,25 @@ terminal's rights to its remote callers.
   `hold` entry toward that node plus every `now` entry whose own attempts have
   been failing. **A poll writes no `tries`, no bookmark and no new state file
   anywhere**: its hand-over may seal an entry or park it, and writes no try and
-  no outcome for a container it hands over. An entry retires only the ways it
-  always did (a valid ack, `mail outbox rm`), for a
-  held own letter the poll of the hop it was spooled toward files, and for an
-  own letter its session's end (ruling 131), which
-  is what makes a re-poll before the ack hand the same envelopes over again by
+  no outcome for a container it hands over. An entry retires only on its
+  confirmation: a valid receipt from an older node naming an own letter,
+  `mail outbox rm`, a held own
+  letter the poll of the hop it was spooled toward files, or an own letter whose
+  session ended (ruling 131). A re-poll hands the same envelopes over again by
   construction. It self-audits UNCONDITIONALLY under its own
   `a2a.aoide/mailPoll` label, carrying the caller and the handed-over COUNT —
   the pull direction's flood signal, visible at the node that spooled the
   letters. The answer is BOUNDED at `aoide_storage::outbox::POLL_BATCH_CAP`
-  (50), oldest first: the poller acks what it files, so the next poll advances,
-  and an unbounded batch would be a body the client's own `MAX_RESPONSE_BYTES`
-  refuses. **`down` is the door's now**: the two mail methods read the
-  declaration set once per request and refuse a caller their mesh declares
-  `down` with that word as a RESULT (audited), beside the `message` half — the
-  per-request quarantine `aoide node allow <node> message off` (MAIL.md
-  §Status). An UNLOADABLE set refuses both methods with `config-invalid` and
-  keeps serving everything else: no zone checks means no mail, never mail with
-  the walls down. **An unloadable set is answered BEFORE caller resolution, to
-  every caller**: where the request's signature verifies
+  (50), oldest first: the poller's `filed` names retire what it took, so the
+  next poll advances, and an unbounded batch would be a body the client's own
+  `MAX_RESPONSE_BYTES` refuses. **`down` is the door's now**: the two mail
+  methods read the declaration set once per request and refuse a caller their
+  mesh declares `down` with that word as a RESULT (audited), beside the
+  `message` half — the per-request quarantine `aoide node allow <node> message
+  off` (MAIL.md §Status). An UNLOADABLE set refuses both methods with
+  `config-invalid` and keeps serving everything else: no zone checks means no
+  mail, never mail with the walls down. **An unloadable set is answered BEFORE
+  caller resolution, to every caller**: where the request's signature verifies
   against the key its own `X-Aoide-Node` holds on the charter in force, the door
   answers the refused `config-invalid` result — fixed text, with the load error
   audited only, never sent — after the clock checks, the charter signature and
@@ -728,3 +733,4 @@ and `a2a::serve` take the assembled `Registry` and dispatcher as parameters
 rather than reaching for a crate-global singleton — that singleton doesn't
 exist until the app crate (`cli`/`strillix`) assembles it, and `server → cli`
 would invert the dependency direction the whole split exists to forbid.
+

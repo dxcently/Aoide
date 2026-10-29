@@ -36,19 +36,20 @@
 //! **`--follow` blocks until Ctrl-C** and is CLI-only, the same shape
 //! `events tail`/`secrets watch` hold: a follow-style command makes no sense
 //! over MCP/A2A, where one connection would be parked until a human at the
-//! other end gave up. `--json` in follow mode prints each NEW record line
-//! verbatim (the line already IS the wire shape) rather than an envelope per
-//! tick.
+//! other end gave up. `--json` in follow mode prints each NEW record line,
+//! stripped of the characters no terminal may be handed (the line already IS
+//! the wire shape), rather than an envelope per tick.
 //!
-//! **`--json` carries `data.steps`, and `data.lines` stays exactly what it
-//! was.** `lines` is the raw records, byte for byte (unchanged, and what a
-//! `--follow` tick prints); `steps` is the same window PROJECTED — one object
-//! per emitted content block, in the record's own order, `{ id, ts, kind,
-//! text, error, clipped }` with `kind` in `thinking · say · tool · result ·
-//! settled · user · other`. It is bounded by construction, never by the
-//! journal: the `--tail` window, [`MAX_BLOCKS_PER_RECORD`] blocks of any one
-//! record, [`MAX_STEPS`] steps of the whole projection (`stepsOmitted` names
-//! how many the last bound dropped), and `clip` characters per step.
+//! **`--json` carries `data.steps`, and `data.lines` keeps the records' own
+//! shape.** `lines` is the records, each stripped of the characters no terminal
+//! may be handed (and what a `--follow` tick prints); `steps` is the same
+//! window PROJECTED — one object per emitted content block, in the record's own
+//! order, `{ id, ts, kind, text, error, clipped }` with `kind` in `thinking ·
+//! say · tool · result · settled · user · other`. It is bounded by
+//! construction, never by the journal: the `--tail` window,
+//! [`MAX_BLOCKS_PER_RECORD`] blocks of any one record, [`MAX_STEPS`] steps of
+//! the whole projection (`stepsOmitted` names how many the last bound dropped),
+//! and `clip` characters per step.
 //! `--clip detail` widens each block's text (the block's own line breaks kept,
 //! up to `DETAIL_MAX_LINES`, a few hundred characters) and adds a `tool_use`'s
 //! arguments; `line` (the default, and the only spelling the human body and
@@ -64,7 +65,9 @@ use super::common::{require_args, stage_error};
 use super::model::{load_stage, resolved_parent, sessions_path, SessionRecord, SessionsFile};
 use aoide_protocol::agents::{agent_profile, eidolon_trace_record, TraceRecord};
 use aoide_protocol::output::Outcome;
-use aoide_protocol::Invocation;
+use aoide_protocol::style::{Color, Stream, Style};
+use aoide_protocol::untrusted::strip_unsafe;
+use aoide_protocol::{Door, Invocation};
 use aoide_storage::addr::{self, LocalCandidate, Resolution};
 use serde_json::{json, Value};
 use std::collections::HashSet;
@@ -226,10 +229,15 @@ fn clip_chars(s: &str, max: usize) -> (String, bool) {
     }
 }
 
+/// The text a line shows: flattened, then stripped. Every clip counts this, so
+/// the cut it reports is the cut of what is shown.
+fn flat_shown(s: &str) -> String {
+    strip_unsafe(&s.split_whitespace().collect::<Vec<_>>().join(" "))
+}
+
 /// [`one_line_clip`] with the cut reported.
 fn one_line_clipped(s: &str, max: usize) -> (String, bool) {
-    let flat = s.split_whitespace().collect::<Vec<_>>().join(" ");
-    clip_chars(&flat, max)
+    clip_chars(&flat_shown(s), max)
 }
 
 /// One whitespace-flattened line, clipped at a char boundary with a trailing
@@ -248,11 +256,8 @@ pub(in crate::graph) fn one_line_clip(s: &str, max: usize) -> String {
 /// paint a thousand-line step.
 fn detail_clipped(s: &str, max: usize) -> (String, bool) {
     let trimmed = s.trim_end();
-    let (kept, cut_lines) = if trimmed.lines().count() > DETAIL_MAX_LINES {
-        (trimmed.lines().take(DETAIL_MAX_LINES).collect::<Vec<_>>().join("\n"), true)
-    } else {
-        (trimmed.to_string(), false)
-    };
+    let cut_lines = trimmed.lines().count() > DETAIL_MAX_LINES;
+    let kept = trimmed.lines().take(DETAIL_MAX_LINES).map(strip_unsafe).collect::<Vec<_>>().join("\n");
     let (out, cut_chars) = clip_chars(&kept, max);
     (out, cut_lines || cut_chars)
 }
@@ -269,7 +274,12 @@ fn clip_block(text: &str, clip: Clip, max: usize) -> (String, bool) {
 /// the text's own internal whitespace — the tool-result first line, where a
 /// tab or a column of spaces is part of what the result printed.
 pub(in crate::graph) fn clip_keep_ws(s: &str, max: usize) -> String {
-    clip_chars(s, max).0
+    clip_chars(&kept_ws(s), max).0
+}
+
+/// A tab is one space, then the strip: what a kept line shows of its spacing.
+fn kept_ws(s: &str) -> String {
+    strip_unsafe(&s.replace('\t', " "))
 }
 
 /// One record's own timestamp as `hh:mm:ss` in LOCAL time — libc's
@@ -332,7 +342,7 @@ fn field(payload: Option<&Value>, key: &str, max: usize) -> String {
 fn assistant_steps(record: &TraceRecord, clip: Clip) -> Vec<Step> {
     let p = record.payload.as_ref();
     let step = |kind: &'static str, text: String, clipped: bool| Step {
-        id: record.id.clone(),
+        id: strip_unsafe(&record.id),
         ts_ms: record.ts_ms,
         kind,
         text,
@@ -373,7 +383,7 @@ fn assistant_steps(record: &TraceRecord, clip: Clip) -> Vec<Step> {
                     // step unbounded.
                     Clip::Detail => match block.get("input") {
                         Some(v) if !v.is_null() && v != &json!({}) => {
-                            let (args, cut) = clip_chars(&v.to_string(), DETAIL_ARGS_MAX);
+                            let (args, cut) = clip_chars(&strip_unsafe(&v.to_string()), DETAIL_ARGS_MAX);
                             (format!("{name} {args}"), name_clipped || cut)
                         }
                         _ => (name, name_clipped),
@@ -411,7 +421,7 @@ fn user_steps(record: &TraceRecord, clip: Clip) -> Vec<Step> {
         let (text, clipped) = clip_block(raw, clip, clip.text_max());
         if !text.is_empty() {
             steps.push(Step {
-                id: record.id.clone(),
+                id: strip_unsafe(&record.id),
                 ts_ms: record.ts_ms,
                 kind: "user",
                 text,
@@ -452,7 +462,7 @@ fn tool_result_text(payload: Option<&Value>, clip: Clip) -> (String, bool) {
             if first.is_empty() {
                 (String::new(), false)
             } else {
-                clip_chars(first, clip.result_max())
+                clip_chars(&kept_ws(first), clip.result_max())
             }
         }
     }
@@ -544,7 +554,7 @@ fn summary_text(record: &TraceRecord) -> (String, bool) {
     let cut = |key: &str| -> bool {
         p.and_then(|p| p.get(key))
             .and_then(Value::as_str)
-            .map(|s| s.split_whitespace().collect::<Vec<_>>().join(" ").chars().count() > TEXT_MAX)
+            .map(|s| flat_shown(s).chars().count() > TEXT_MAX)
             .unwrap_or(false)
     };
     match record.kind.as_str() {
@@ -606,7 +616,7 @@ fn steps_of(record: &TraceRecord, clip: Clip) -> Vec<Step> {
                 Vec::new()
             } else {
                 vec![Step {
-                    id: record.id.clone(),
+                    id: strip_unsafe(&record.id),
                     ts_ms: record.ts_ms,
                     kind: "result",
                     text,
@@ -621,7 +631,7 @@ fn steps_of(record: &TraceRecord, clip: Clip) -> Vec<Step> {
                 Vec::new()
             } else {
                 vec![Step {
-                    id: record.id.clone(),
+                    id: strip_unsafe(&record.id),
                     ts_ms: record.ts_ms,
                     kind: other_kind(&record.kind),
                     text,
@@ -637,7 +647,7 @@ fn steps_of(record: &TraceRecord, clip: Clip) -> Vec<Step> {
 /// the count dropped reported — the ONE place a whole window becomes steps, so
 /// the JSON and the renderer cannot disagree about a record's blocks. A line
 /// that is not a readable record contributes no step (it still gets its own `?`
-/// line in the human render, and its raw line in `data.lines`).
+/// line in the human render, and its line in `data.lines`).
 pub(in crate::graph) fn steps_of_lines(lines: &[&String], clip: Clip) -> (Vec<Step>, usize) {
     let mut steps: Vec<Step> = Vec::new();
     for line in lines {
@@ -705,9 +715,9 @@ fn prefixed_field(payload: Option<&Value>, key: &str, prefix: &str, max: usize) 
 fn render_line(record: &TraceRecord, dim: bool) -> String {
     let mut line = format!(
         "#{}  {}  {}",
-        record.id,
+        strip_unsafe(&record.id),
         hh_mm_ss_local(record.ts_ms),
-        record.kind
+        strip_unsafe(&record.kind)
     );
     let s = render_steps(&steps_of(record, Clip::Line), dim);
     if !s.is_empty() {
@@ -799,12 +809,15 @@ fn label(id: &str, records: &[SessionRecord], ids: &HashSet<&str>, host: &str) -
     }
 }
 
-/// Is stdout a terminal? Dimming an `AssistantMessage`'s thinking is a
-/// display nicety; a redirected/piped read gets plain text, the same
-/// discipline `aoide_protocol::pick` holds for its own ANSI.
-fn stdout_is_terminal() -> bool {
-    use std::io::IsTerminal;
-    std::io::stdout().is_terminal()
+/// The newest ledger line whose `sessionId` is exactly `target`: how a session
+/// that has left the roster is still named. Nothing else is matched against the
+/// ledger, so a petname or a prefix of an id is not an ended session.
+fn ledger_ended(target: &str) -> Option<aoide_storage::ledger::LedgerEntry> {
+    aoide_storage::ledger::read_ledger()
+        .ok()?
+        .into_iter()
+        .filter(|e| e.session_id == target)
+        .max_by_key(|e| aoide_storage::time::parse_iso_utc(&e.ended_at).unwrap_or(i64::MIN))
 }
 
 /// `session trace <id> [--tail N] [--follow] [--json]` — see the module doc.
@@ -825,6 +838,7 @@ pub fn session_trace(inv: &Invocation) -> Outcome {
     };
     let json_mode = inv.flag_present("json");
     let follow = inv.flag_present("follow");
+    let dim = inv.door == Door::Cli && Style::for_stream(Color::Auto, json_mode, Stream::Out) == Style::ON;
 
     // `<id>` resolves exactly like `send --to`: the ONE
     // `aoide_storage::addr::resolve`, over this box's live roster plus its
@@ -848,53 +862,60 @@ pub fn session_trace(inv: &Invocation) -> Outcome {
     let nodes = aoide_storage::node_store::load_nodes();
     let node_names: Vec<&str> = nodes.iter().map(|p| p.name.as_str()).collect();
 
-    let id = match addr::resolve(&target, &host, &candidates, &node_names) {
-        Resolution::Local(id) => id,
+    let echo_target = strip_unsafe(&target);
+    let (id, ended) = match addr::resolve(&target, &host, &candidates, &node_names) {
+        Resolution::Local(id) => (id, None),
         Resolution::Remote { node, .. } => {
+            let node = strip_unsafe(&node);
             return Outcome::error(
                 cmd,
                 format!(
-                    "`{target}` resolves to a session on node `{node}` — a trace is a file on the \
+                    "`{echo_target}` resolves to a session on node `{node}` — a trace is a file on the \
                      node that wrote it, so run `session trace` there"
                 ),
             )
-            .with_data(json!({ "reason": "remote-target", "node": node, "target": target }));
+            .with_data(json!({ "reason": "remote-target", "node": node, "target": echo_target }));
         }
         Resolution::Ambiguous(found) => {
+            let found: Vec<String> = found.iter().map(|f| strip_unsafe(f)).collect();
             return Outcome::error(
                 cmd,
                 format!(
-                    "`{target}` is ambiguous — {} local session(s) match: {}",
+                    "`{echo_target}` is ambiguous — {} local session(s) match: {}",
                     found.len(),
                     found.join(", ")
                 ),
             )
-            .with_data(json!({ "reason": "ambiguous", "target": target, "candidates": found }));
+            .with_data(json!({ "reason": "ambiguous", "target": echo_target, "candidates": found }));
         }
-        Resolution::NotFound => {
-            let hint = if !target.contains('/') && node_names.contains(&target.as_str()) {
-                format!(
-                    " (`{target}` names a known node, not a local session — did you mean `{target}/<session>`?)"
-                )
-            } else {
-                String::new()
-            };
-            return Outcome::error(cmd, format!("no session matches `{target}`{hint}"))
-                .with_data(json!({ "reason": "not-found", "target": target }));
-        }
+        Resolution::NotFound => match ledger_ended(&target) {
+            Some(entry) => (entry.session_id.clone(), Some(entry)),
+            None => {
+                let hint = if !target.contains('/') && node_names.contains(&target.as_str()) {
+                    format!(
+                        " (`{echo_target}` names a known node, not a local session — did you mean `{echo_target}/<session>`?)"
+                    )
+                } else {
+                    String::new()
+                };
+                return Outcome::error(cmd, format!("no session matches `{echo_target}`{hint}"))
+                    .with_data(json!({ "reason": "not-found", "target": echo_target }));
+            }
+        },
     };
+    let id = strip_unsafe(&id);
 
     // The trace is a HARNESS CAPABILITY, never a name check: a profile whose
     // `TranscriptSpec::trace` is `None` keeps no trace file at all, and
     // saying so is the honest answer (the capability test is why no consumer
     // here writes `if agent == "eidolon"`).
-    let name = label(&id, &file.sessions, &ids, &host);
-    let agent = file
-        .sessions
-        .iter()
-        .find(|r| r.session_id == id)
+    let name = strip_unsafe(&label(&id, &file.sessions, &ids, &host));
+    let row = file.sessions.iter().find(|r| r.session_id == id);
+    let agent = row
         .map(|r| r.agent.clone())
+        .or_else(|| ended.as_ref().map(|e| e.agent.clone()))
         .unwrap_or_default();
+    let agent = strip_unsafe(&agent);
     let Some(profile) = agent_profile(&agent) else {
         return Outcome::error(
             cmd,
@@ -922,13 +943,17 @@ pub fn session_trace(inv: &Invocation) -> Outcome {
     // The PATH is the same locator every other transcript reader uses: it
     // prefers the file the presence metadata names, and falls back to the
     // metadata itself when there is none.
-    let cwd = file
-        .sessions
-        .iter()
-        .find(|r| r.session_id == id)
+    let cwd = row
         .map(|r| r.cwd.clone())
+        .or_else(|| ended.as_ref().map(|e| e.cwd.clone()))
         .unwrap_or_default();
-    let Some(path) = (profile.transcript.locate)(&id, Some(&cwd), None) else {
+    // The journal the session named is the hint. A path inside the session logs
+    // dir is a terminal's transcript, never a journal, so it is never passed.
+    let log_path = row
+        .and_then(|r| r.log_path.clone())
+        .or_else(|| ended.as_ref().and_then(|e| e.log_path.clone()))
+        .filter(|p| !aoide_storage::fs::inside_session_logs(p));
+    let Some(path) = (profile.transcript.locate)(&id, Some(&cwd), log_path.as_deref()) else {
         return Outcome::error(
             cmd,
             format!(
@@ -945,25 +970,28 @@ pub fn session_trace(inv: &Invocation) -> Outcome {
                 "`{name}` has no readable trace at {} — nothing on this host resolves one for it: \
                  a producer that publishes its journal as records (a mirror file, or its own \
                  read-only export door) and a presence that names it",
-                path.display()
+                strip_unsafe(&path.to_string_lossy())
             ),
         )
         .with_data(json!({
             "reason": "no-trace",
             "sessionId": id,
-            "presence": path.to_string_lossy(),
+            "presence": strip_unsafe(&path.to_string_lossy()),
         }));
     };
 
-    if follow {
-        return follow_trace(cmd, &id, &name, &path, read_trace, tail, json_mode);
+    // An ended session has no presence left to follow: its window is printed once.
+    if follow && ended.is_none() && !row.is_some_and(|r| r.state == "done") {
+        return follow_trace(cmd, &id, &name, &path, read_trace, tail, json_mode, dim);
     }
 
     let shown = last_lines(&lines, tail);
-    let dim = stdout_is_terminal();
-    let raw: Vec<String> = shown.iter().map(|l| (*l).clone()).collect();
+    let stripped: Vec<String> = shown.iter().map(|l| strip_unsafe(l.as_str())).collect();
     let body: Vec<String> = shown.iter().map(|l| render_any(l, dim)).collect();
-    let mut message = format!("{} record(s) · {name}", body.len());
+    let mut message = match &ended {
+        Some(entry) => format!("{} record(s) · {name} · ended {}", body.len(), strip_unsafe(&entry.ended_at)),
+        None => format!("{} record(s) · {name}", body.len()),
+    };
     if !json_mode && !body.is_empty() {
         message.push('\n');
         message.push_str(&body.join("\n"));
@@ -977,14 +1005,25 @@ pub fn session_trace(inv: &Invocation) -> Outcome {
     Outcome::ok(cmd, message)
         .with_data(json!({
             "sessionId": id,
-            "trace": path.to_string_lossy(),
+            "trace": strip_unsafe(&path.to_string_lossy()),
             "tail": tail,
             "records": body.len(),
-            "lines": raw,
+            "lines": stripped,
             "clip": clip.name(),
             "steps": steps,
             "stepsOmitted": omitted,
+            "endedAt": ended.as_ref().map(|e| strip_unsafe(&e.ended_at)),
         }))
+}
+
+/// What `--follow` prints for one trace line: the line, stripped, in JSON mode,
+/// else its human render.
+fn followed_line(line: &str, json_mode: bool, dim: bool) -> String {
+    if json_mode {
+        strip_unsafe(line)
+    } else {
+        render_any(line, dim)
+    }
 }
 
 /// `--follow`: print the current window, then re-read the trace every
@@ -1001,18 +1040,14 @@ fn follow_trace(
     read_trace: fn(&Path) -> Option<Vec<String>>,
     tail: usize,
     json_mode: bool,
+    dim: bool,
 ) -> Outcome {
     use std::io::Write;
     unsafe {
         libc::signal(libc::SIGINT, on_sigint as *const () as libc::sighandler_t);
     }
-    let dim = stdout_is_terminal();
     let emit = |line: &str| {
-        if json_mode {
-            println!("{line}");
-        } else {
-            println!("{}", render_any(line, dim));
-        }
+        println!("{}", followed_line(line, json_mode, dim));
         let _ = std::io::stdout().flush();
     };
 
@@ -1048,7 +1083,7 @@ fn follow_trace(
     Outcome::ok(cmd, format!("followed {printed} record(s) · {name}"))
         .with_data(json!({
             "sessionId": id,
-            "trace": path.to_string_lossy(),
+            "trace": strip_unsafe(&path.to_string_lossy()),
             "followed": true,
             "printed": printed,
         }))
@@ -1060,6 +1095,7 @@ mod tests {
     use aoide_protocol::Door;
     use crate::graph::testutil::{unique_stage, EnvVars};
     use aoide_protocol::output::Status;
+    use aoide_protocol::untrusted::is_unsafe;
     use std::collections::BTreeMap;
 
     // The design doc's own sample lines, verbatim (EIDOLON-TRACE.md's "Line"
@@ -1141,13 +1177,14 @@ mod tests {
         root
     }
 
-    fn env_keys() -> [&'static str; 5] {
+    fn env_keys() -> [&'static str; 6] {
         [
             "AOIDE_STAGE_DIR",
             "AOIDE_STATE_DIR",
             "XDG_RUNTIME_DIR",
             "AOIDE_HOME",
             "HOME",
+            "NO_COLOR",
         ]
     }
 
@@ -1291,7 +1328,7 @@ mod tests {
         assert_eq!(data["records"], 6, "the whole short trace fits under the default tail");
         assert!(data["trace"].as_str().unwrap().ends_with("Aoide-7d23.jsonl"));
         let lines = data["lines"].as_array().unwrap();
-        assert_eq!(lines[0].as_str().unwrap(), START, "--json passes the raw lines through verbatim");
+        assert_eq!(lines[0].as_str().unwrap(), START, "--json passes a clean line through unchanged");
         assert!(out.message.contains("6 record(s)"), "{}", out.message);
         // The human body: one line per record, `#id  hh:mm:ss  kind  summary`.
         let body: Vec<&str> = out.message.lines().skip(1).collect();
@@ -1404,6 +1441,158 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    // -- An ended session: the ledger line and the journal it names --
+
+    /// An empty roster and no presence: the ledger is the only place a session
+    /// that has left can still be named.
+    fn roster_free_fixture(tag: &str) -> std::path::PathBuf {
+        let root = unique_stage(tag);
+        let stage = root.join("stage");
+        std::fs::create_dir_all(&stage).unwrap();
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        std::env::set_var("AOIDE_STATE_DIR", root.join("state"));
+        std::env::set_var("XDG_RUNTIME_DIR", &root);
+        std::fs::write(stage.join("sessions.json"), r#"{"schemaVersion":"0","sessions":[]}"#).unwrap();
+        root
+    }
+
+    /// A journal as eidolon leaves it: the `.eid` the presence named, and the
+    /// `.jsonl` mirror beside it, written second so the mirror is current.
+    fn journal_fixture(dir: &std::path::Path, name: &str, lines: &[&str]) -> String {
+        std::fs::create_dir_all(dir).unwrap();
+        let journal = dir.join(format!("{name}.eid"));
+        std::fs::write(&journal, "").unwrap();
+        std::fs::write(dir.join(format!("{name}.jsonl")), format!("{}\n", lines.join("\n"))).unwrap();
+        journal.display().to_string()
+    }
+
+    /// `sessions.json` holding one eidolon record in `state`, with `log_path`.
+    fn roster_with(root: &std::path::Path, id: &str, state: &str, log_path: &str) {
+        let body = serde_json::json!({
+            "schemaVersion": "0",
+            "sessions": [{
+                "sessionId": id,
+                "agent": "eidolon",
+                "cwd": "/home/khoa",
+                "state": state,
+                "logPath": log_path,
+            }],
+        });
+        std::fs::write(root.join("stage").join("sessions.json"), body.to_string()).unwrap();
+    }
+
+    /// Appends the ledger line an eidolon session leaves when it ends.
+    fn ended_eidolon(id: &str, petname: &str, log_path: &str) {
+        aoide_storage::ledger::append_ledger_entry(&aoide_storage::ledger::LedgerEntry {
+            session_id: id.into(),
+            agent: "eidolon".into(),
+            cwd: "/home/khoa".into(),
+            petname: Some(petname.into()),
+            ended_at: "2026-08-20T01:00:00Z".into(),
+            log_path: Some(log_path.into()),
+            ..Default::default()
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn a_ledger_only_eidolon_session_reads_its_trace_from_its_journal_and_says_it_ended() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&env_keys());
+        let root = roster_free_fixture("trace-ledger-only");
+        let lines = [START, USER, ASSISTANT, RESULT, BUDGET, SETTLED];
+        let journal = journal_fixture(&root.join("journals"), "Aoide-ended", &lines);
+        ended_eidolon("Aoide-ended", "quiet-finch", &journal);
+
+        let out = session_trace(&trace_invocation(&["Aoide-ended"], &[]));
+        assert_eq!(out.status, Status::Ok, "msg: {}", out.message);
+        let data = out.data.clone().unwrap();
+        assert_eq!(data["sessionId"], "Aoide-ended");
+        assert_eq!(data["records"], 6, "the journal's whole trace fits under the default tail");
+        assert_eq!(data["endedAt"], "2026-08-20T01:00:00Z");
+        assert!(out.message.contains("ended 2026-08-20T01:00:00Z"), "{}", out.message);
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_done_record_whose_presence_is_gone_reads_its_trace_through_its_log_path() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&env_keys());
+        let root = roster_free_fixture("trace-done-hint");
+        let lines = [START, USER, ASSISTANT, RESULT, BUDGET, SETTLED];
+        let journal = journal_fixture(&root.join("journals"), "Aoide-done", &lines);
+        roster_with(&root, "Aoide-done", "done", &journal);
+
+        let out = session_trace(&trace_invocation(&["Aoide-done"], &[]));
+        assert_eq!(out.status, Status::Ok, "msg: {}", out.message);
+        assert_eq!(out.data.clone().unwrap()["records"], 6);
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_log_path_inside_the_session_logs_dir_is_never_a_hint() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&env_keys());
+        let root = roster_free_fixture("trace-wrapper-hint");
+        // A journal-shaped pair under the session logs dir: the hint would
+        // reach it, were that dir not refused.
+        let lines = [START, USER, ASSISTANT, RESULT, BUDGET, SETTLED];
+        let wrapper = journal_fixture(&root.join("state").join("sessions"), "Aoide-wrapper", &lines);
+        roster_with(&root, "Aoide-wrapper", "done", &wrapper);
+
+        let out = session_trace(&trace_invocation(&["Aoide-wrapper"], &[]));
+        assert_eq!(out.status, Status::Error, "msg: {}", out.message);
+        assert_eq!(out.data.clone().unwrap()["reason"], "no-presence");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn an_id_that_is_not_an_exact_ledger_session_id_is_not_found() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&env_keys());
+        let root = roster_free_fixture("trace-not-found");
+        let journal = journal_fixture(&root.join("journals"), "Aoide-pet", &[START]);
+        ended_eidolon("Aoide-pet", "brave-otter-ledger", &journal);
+
+        // Neither an unknown id, nor a ledger petname, nor a prefix of a ledger
+        // id, names the ledger line: only its exact sessionId does.
+        for target in ["Aoide-nothing", "brave-otter-ledger", "Aoide-p"] {
+            let out = session_trace(&trace_invocation(&[target], &[]));
+            assert_eq!(out.status, Status::Error, "{target}: {}", out.message);
+            assert_eq!(out.data.clone().unwrap()["reason"], "not-found", "{target}: {}", out.message);
+        }
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn follow_on_a_ledger_only_session_prints_what_is_there_and_returns() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&env_keys());
+        let root = roster_free_fixture("trace-follow-ended");
+        let lines = [START, USER, ASSISTANT, RESULT, BUDGET, SETTLED];
+        let journal = journal_fixture(&root.join("journals"), "Aoide-follow-ended", &lines);
+        ended_eidolon("Aoide-follow-ended", "steady-lark", &journal);
+
+        // A follow that loops never returns: the deadline fails the test instead.
+        let inv = trace_invocation(&["Aoide-follow-ended"], &[("follow", "true")]);
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(session_trace(&inv));
+        });
+        let out = rx
+            .recv_timeout(std::time::Duration::from_secs(30))
+            .expect("--follow on an ended session returns");
+        assert_eq!(out.status, Status::Ok, "msg: {}", out.message);
+        assert_eq!(out.data.clone().unwrap()["records"], 6);
+        assert!(out.message.contains("ended"), "{}", out.message);
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     #[test]
     fn follow_is_cli_only_and_a_missing_id_is_a_usage_error() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -1502,7 +1691,7 @@ mod tests {
         assert_eq!(ok.len(), 1);
         assert_eq!(ok[0].kind, "result");
         assert!(!ok[0].error);
-        assert_eq!(ok[0].text, "1\t# Per-rice widget slots", "first line only, no `!` prefix");
+        assert_eq!(ok[0].text, "1 # Per-rice widget slots", "first line only, no `!` prefix");
         assert!(!ok[0].text.contains("catalog"));
 
         let err = steps_of(&eidolon_trace_record(RESULT_ERR).unwrap(), Clip::Detail);
@@ -1583,7 +1772,7 @@ mod tests {
         assert!(!steps.iter().any(|s| s.text.starts_with("r0 ")));
 
         // A malformed line contributes no step (it keeps its `?` human line and
-        // its raw line in `data.lines`), and a readable one after it still does.
+        // its line in `data.lines`), and a readable one after it still does.
         let lines = vec!["{ not json".to_string(), START.to_string()];
         let refs: Vec<&String> = lines.iter().collect();
         let (steps, omitted) = steps_of_lines(&refs, Clip::Line);
@@ -1626,7 +1815,7 @@ mod tests {
         assert_eq!(steps[2]["id"], "2", "the record's own id");
         assert!(steps[2]["ts"].as_i64().unwrap() > 0);
         assert_eq!(steps[5]["error"], false);
-        // `data.lines` is untouched — raw records, byte for byte.
+        // `data.lines` is each record, stripped; a clean one is unchanged.
         let lines = data["lines"].as_array().unwrap();
         assert_eq!(lines[0].as_str().unwrap(), START);
         assert_eq!(lines[2].as_str().unwrap(), ASSISTANT);
@@ -1650,7 +1839,7 @@ mod tests {
         assert_eq!(detail["clip"], "detail");
         assert_eq!(
             detail["lines"], full_lines,
-            "the clip never touches the raw lines"
+            "the clip never touches the lines"
         );
         let tool = detail["steps"]
             .as_array()
@@ -1685,6 +1874,198 @@ mod tests {
             &[("clip", "line"), ("json", "true")],
         ));
         assert_eq!(plain.data.unwrap()["steps"], explicit.data.unwrap()["steps"]);
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    fn no_unsafe(s: &str) -> bool {
+        s.chars().all(|c| !is_unsafe(c))
+    }
+
+    /// Journal lines whose text, thinking, tool call and tool result carry what
+    /// no terminal may be handed: ESC, BEL, an OSC 52 clipboard write, U+009B
+    /// and the bidi override U+202E. The last line is not JSON and holds a raw
+    /// ESC.
+    fn hostile_lines() -> Vec<String> {
+        vec![
+            json!({"id": 1, "parent": 0, "ts_ms": 1789603005570u64, "kind": {"UserMessage": {"role": "user", "content": [{"type": "text", "text": "ask \u{1b}]52;c;cGF0aA==\u{7} visible \u{202e}rtl"}]}}}).to_string(),
+            json!({"id": 2, "parent": 1, "ts_ms": 1789603009102u64, "kind": {"AssistantMessage": {"role": "assistant", "content": [
+                {"type": "thinking", "thinking": "\u{1b}[2mvisible thought\u{7}\u{9b}31m"},
+                {"type": "text", "text": "visible say \u{202e}rtl"},
+                {"type": "tool_use", "id": "call_h", "name": "read\u{1b}", "input": {"path": "a\u{9b}b"}}
+            ]}}}).to_string(),
+            json!({"id": 3, "parent": 2, "ts_ms": 1789603009140u64, "kind": {"ToolResult": {"tool_use_id": "call_h", "content": "first \u{1b}[31mred\u{7} visible\nsecond \u{202e}", "is_error": false}}}).to_string(),
+            "torn \u{1b}[31m raw line, not json".to_string(),
+        ]
+    }
+
+    #[test]
+    fn a_line_clip_counts_what_it_shows_after_the_strip() {
+        assert_eq!(one_line_clipped("a\u{1b}bc", 3), ("abc".to_string(), false));
+    }
+
+    #[test]
+    fn a_detail_block_strips_each_kept_line_and_keeps_its_breaks() {
+        assert_eq!(detail_clipped("x\u{1b}y\nz\u{7}\n", 100), ("xy\nz".to_string(), false));
+    }
+
+    #[test]
+    fn a_kept_tab_is_one_space_and_a_control_goes_before_the_clip() {
+        assert_eq!(clip_keep_ws("a\tb\u{1b}c", 10), "a bc");
+    }
+
+    #[test]
+    fn a_tool_argument_holds_no_unsafe_character_in_the_detail_clip() {
+        let line = json!({"id": 9, "parent": 8, "ts_ms": 1789603009102u64, "kind": {"AssistantMessage": {"role": "assistant", "content": [{"type": "tool_use", "id": "call_t", "name": "read", "input": {"path": "a\u{202e}b"}}]}}}).to_string();
+        let (steps, _) = steps_of_lines(&[&line], Clip::Detail);
+        assert_eq!(steps.len(), 1, "{steps:?}");
+        assert!(no_unsafe(&steps[0].text), "{:?}", steps[0].text);
+        assert!(steps[0].text.contains("ab"), "{:?}", steps[0].text);
+    }
+
+    #[test]
+    fn a_run_of_controls_the_strip_removes_is_not_a_cut() {
+        let text = format!("{}ok", "\u{1b}".repeat(150));
+        let line = json!({"id": 5, "parent": 4, "ts_ms": 1789626700000u64, "kind": {"ExternalMessage": {"from": "orchestrator", "channel": null, "text": text}}}).to_string();
+        let (steps, _) = steps_of_lines(&[&line], Clip::Line);
+        assert_eq!(steps.len(), 1, "{steps:?}");
+        assert_eq!(steps[0].text, "orchestrator: ok");
+        assert!(!steps[0].clipped, "{steps:?}");
+    }
+
+    #[test]
+    fn a_hostile_journal_prints_no_unsafe_character_one_shot() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&env_keys());
+        std::env::set_var("NO_COLOR", "1");
+        let root = roster_free_fixture("trace-hostile-one");
+        let lines = hostile_lines();
+        let refs: Vec<&str> = lines.iter().map(String::as_str).collect();
+        let journal = journal_fixture(&root.join("journals"), "Aoide-hostile", &refs);
+        ended_eidolon("Aoide-hostile", "loud-wren", &journal);
+
+        let out = session_trace(&trace_invocation(&["Aoide-hostile"], &[]));
+        assert_eq!(out.status, Status::Ok, "msg: {}", out.message);
+        assert!(out.message.chars().all(|c| c == '\n' || !is_unsafe(c)), "message: {:?}", out.message);
+        assert!(out.message.contains("visible thought"), "{}", out.message);
+        assert!(out.message.contains("visible say"), "{}", out.message);
+        let data = out.data.clone().unwrap();
+        for raw in data["lines"].as_array().unwrap() {
+            assert!(no_unsafe(raw.as_str().unwrap()), "line: {raw}");
+        }
+        let steps = data["steps"].as_array().unwrap();
+        assert!(!steps.is_empty());
+        for step in steps {
+            for key in ["id", "kind", "text"] {
+                assert!(no_unsafe(step[key].as_str().unwrap()), "{key}: {step}");
+            }
+        }
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_not_found_target_echoes_no_unsafe_character() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&env_keys());
+        let root = roster_free_fixture("trace-echo-not-found");
+
+        let out = session_trace(&trace_invocation(&["no\u{1b}such\u{202e}session"], &[]));
+        assert_eq!(out.status, Status::Error, "msg: {}", out.message);
+        assert!(out.message.chars().all(|c| c == '\n' || !is_unsafe(c)), "message: {:?}", out.message);
+        let data = out.data.clone().unwrap();
+        assert!(no_unsafe(data["target"].as_str().unwrap()), "data: {data}");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_ledger_ended_at_with_an_escape_echoes_no_unsafe_character() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&env_keys());
+        let root = roster_free_fixture("trace-echo-ended");
+        let journal = journal_fixture(&root.join("journals"), "Aoide-ended-esc", &[START, USER]);
+        aoide_storage::ledger::append_ledger_entry(&aoide_storage::ledger::LedgerEntry {
+            session_id: "Aoide-ended-esc".into(),
+            agent: "eidolon".into(),
+            cwd: "/home/khoa".into(),
+            petname: Some("quiet-finch".into()),
+            ended_at: "2026-08-20T01:00:00Z\u{1b}[31m".into(),
+            log_path: Some(journal),
+            ..Default::default()
+        })
+        .unwrap();
+
+        let out = session_trace(&trace_invocation(&["Aoide-ended-esc"], &[]));
+        assert_eq!(out.status, Status::Ok, "msg: {}", out.message);
+        assert!(out.message.chars().all(|c| c == '\n' || !is_unsafe(c)), "message: {:?}", out.message);
+        let data = out.data.clone().unwrap();
+        assert!(no_unsafe(data["endedAt"].as_str().unwrap()), "data: {data}");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_dimmed_render_of_a_hostile_line_wraps_only_stripped_text() {
+        for line in hostile_lines() {
+            let out = render_any(&line, true);
+            let bare = out.replace("\u{1b}[2m", "").replace("\u{1b}[0m", "");
+            assert!(no_unsafe(&bare), "the dim pair must wrap stripped text only: {out:?}");
+            if line.contains(r#""type":"thinking""#) {
+                assert!(out.contains("\u{1b}[2m") && out.contains("\u{1b}[0m"), "a thinking line dims: {out:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn data_lines_keeps_the_journal_escapes_and_drops_the_raw_characters() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&env_keys());
+        let root = roster_free_fixture("trace-lines-pin");
+        let line = json!({"id": 1, "parent": 0, "ts_ms": 1789603005570u64, "kind": {"UserMessage": {"role": "user", "content": [{"type": "text", "text": "red \u{1b}[31mtext \u{202e}rtl"}]}}}).to_string();
+        let journal = journal_fixture(&root.join("journals"), "Aoide-lines", &[line.as_str()]);
+        ended_eidolon("Aoide-lines", "loud-wren", &journal);
+
+        let out = session_trace(&trace_invocation(&["Aoide-lines"], &[]));
+        assert_eq!(out.status, Status::Ok, "msg: {}", out.message);
+        let data = out.data.clone().unwrap();
+        let raw = data["lines"][0].as_str().unwrap();
+        assert!(raw.contains("\\u001b[31m"), "the escape stays as its six characters: {raw}");
+        assert!(no_unsafe(raw), "the raw bidi override is stripped: {raw:?}");
+        let text = data["steps"][0]["text"].as_str().unwrap();
+        assert!(no_unsafe(text), "{text:?}");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_followed_json_line_holds_no_unsafe_character() {
+        for line in hostile_lines() {
+            let printed = followed_line(&line, true, false);
+            assert!(no_unsafe(&printed), "{printed:?}");
+        }
+    }
+
+    #[test]
+    fn a_done_record_follows_its_window_and_returns() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&env_keys());
+        let root = roster_free_fixture("trace-follow-done");
+        let lines = [START, USER, ASSISTANT, RESULT, BUDGET, SETTLED];
+        let journal = journal_fixture(&root.join("journals"), "Aoide-follow-done", &lines);
+        roster_with(&root, "Aoide-follow-done", "done", &journal);
+
+        // A follow that loops never returns: the deadline fails the test instead.
+        let inv = trace_invocation(&["Aoide-follow-done"], &[("follow", "true")]);
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(session_trace(&inv));
+        });
+        let out = rx
+            .recv_timeout(std::time::Duration::from_secs(30))
+            .expect("--follow on a done record returns");
+        assert_eq!(out.status, Status::Ok, "msg: {}", out.message);
+        assert_eq!(out.data.clone().unwrap()["records"], 6);
 
         let _ = std::fs::remove_dir_all(&root);
     }
