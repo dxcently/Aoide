@@ -221,6 +221,9 @@ pub struct AgentProfile {
     /// The context-window ceiling for a model id (see `model.rs`).
     pub model_ceiling: fn(Option<&str>) -> u64,
     pub transcript: TranscriptSpec,
+    /// This harness's chat adapter, or the reason it has none. Every profile
+    /// says which: the chat reads a harness only through this field.
+    pub chat: crate::chat::ChatSupport,
     pub hook_settings: SettingsSpec,
     /// Where this harness discovers installable skills — a directory of
     /// `<skill-name>/SKILL.md` packages — relative to `$HOME` (claude:
@@ -806,6 +809,9 @@ pub static CLAUDE_PROFILE: AgentProfile = AgentProfile {
         // No mirrored trace — claude's own transcript IS its turn log.
         trace: None,
     },
+    chat: crate::chat::ChatSupport::Unsupported(
+        "no chat adapter yet: the Claude transcript is read for say, tool and title only",
+    ),
     hook_settings: SettingsSpec {
         relative_path: ".claude/settings.json",
         format: SettingsFormat::Json,
@@ -1256,6 +1262,9 @@ pub static KIMI_PROFILE: AgentProfile = AgentProfile {
         // No mirrored trace: kimi's own wire log IS its turn record.
         trace: None,
     },
+    chat: crate::chat::ChatSupport::Unsupported(
+        "no chat adapter yet: kimi's transcript is not projected into chat lines",
+    ),
     hook_settings: SettingsSpec {
         relative_path: ".kimi-code/config.toml",
         format: SettingsFormat::Toml,
@@ -1592,6 +1601,9 @@ pub static PI_PROFILE: AgentProfile = AgentProfile {
         // No mirrored trace: pi's transcript IS its turn record.
         trace: None,
     },
+    chat: crate::chat::ChatSupport::Unsupported(
+        "no chat adapter yet: pi's transcript is not projected into chat lines",
+    ),
     hook_settings: SettingsSpec {
         relative_path: ".pi/agent/extensions/aoide-pi-session.ts",
         format: SettingsFormat::Declarative,
@@ -3010,6 +3022,10 @@ pub static EIDOLON_PROFILE: AgentProfile = AgentProfile {
     // true to cite; the FORMAT is what actually matters here — `hooks
     // install eidolon` never reads or writes this path, unlike pi's own
     // Declarative entry, which names a real aoide-authored extension file.
+    chat: crate::chat::ChatSupport::Adapter(crate::chat::ChatAdapter {
+        read: eidolon_trace_tail,
+        project: crate::chat::eidolon::project,
+    }),
     hook_settings: SettingsSpec {
         relative_path: ".config/eidolon/config.toml",
         format: SettingsFormat::Declarative,

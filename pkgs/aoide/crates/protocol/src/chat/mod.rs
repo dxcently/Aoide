@@ -9,6 +9,9 @@
 
 use crate::untrusted::strip_unsafe;
 use serde_json::{json, Map, Value};
+use std::path::Path;
+
+pub mod eidolon;
 
 /// The line's version. A new required field bumps it; a consumer ignores what
 /// it does not know.
@@ -299,6 +302,23 @@ impl ChatLine {
     pub fn json_line(&self) -> String {
         self.json().to_string()
     }
+}
+
+/// A harness's chat adapter: how its source is read, and how one source line
+/// becomes chat lines. A profile names its adapter once, in its `chat` field.
+pub struct ChatAdapter {
+    /// The source's whole lines, off its end, within the trace budget.
+    pub read: fn(&Path) -> Option<Vec<String>>,
+    /// One source line, under the aoide `session`, as its chat lines. A line
+    /// the chat does not show projects to none.
+    pub project: fn(session: &str, line: &str) -> Vec<ChatLine>,
+}
+
+/// A profile's answer to "what is its chat": an adapter, or the reason it has
+/// none.
+pub enum ChatSupport {
+    Adapter(ChatAdapter),
+    Unsupported(&'static str),
 }
 
 /// Strip, then clip to `max` characters. Returns the text and whether it was
