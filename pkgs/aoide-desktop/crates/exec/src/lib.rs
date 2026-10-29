@@ -332,20 +332,24 @@ pub fn child_env(
         (_, Err(why)) => return Err(ExecError::VaultKeysUnknown(why.to_owned())),
     };
     let melete = child == Child::Aoide && first_word == "melete";
+    let send = child == Child::Aoide && first_word == "send";
     Ok(base
         .iter()
-        .filter(|(name, _)| !scrubbed(child, melete, name, keys))
+        .filter(|(name, _)| !scrubbed(child, melete, send, name, keys))
         .cloned()
         .collect())
 }
 
 /// Whether a child's environment drops `name`. Names compare as bytes, so a name
-/// that is not UTF-8 is scrubbed by the same three rules.
-fn scrubbed(child: Child, melete: bool, name: &OsStr, keys: &[String]) -> bool {
+/// that is not UTF-8 is scrubbed by the same rules. A `send` child drops the
+/// session id and the two autogate switches: a send the person types is approved
+/// by its own `--yes`, and the child must not carry a way to approve another.
+fn scrubbed(child: Child, melete: bool, send: bool, name: &OsStr, keys: &[String]) -> bool {
     let name = name.as_bytes();
     let melete_var = name.starts_with(b"AOIDE_MELETE_") && !melete;
-    let session = child == Child::Eidolon && name == b"AOIDE_SESSION_ID";
-    melete_var || session || keys.iter().any(|key| key.as_bytes() == name)
+    let session = name == b"AOIDE_SESSION_ID" && (child == Child::Eidolon || send);
+    let autogate = send && (name == b"AOIDE_CONDUCT_AUTOGATE" || name == b"AOIDE_CONDUCT_SIBLING_AUTOGATE");
+    melete_var || session || autogate || keys.iter().any(|key| key.as_bytes() == name)
 }
 
 #[derive(Deserialize)]
@@ -552,7 +556,7 @@ impl Follow {
     /// signal alone, so a followed command prints its end line on it.
     pub fn end(mut self) -> Result<Ended, ExecError> {
         let mut child = self.child.take().expect("a followed child is held until it ends");
-        signal_pidfd(&self.pidfd, libc::SIGINT).or_else(ignore_gone).map_err(ExecError::Io)?;
+        let signalled = signal_pidfd(&self.pidfd, libc::SIGINT).or_else(ignore_gone);
         let until = Instant::now() + EXIT_BOUND;
         let mut rest = Vec::new();
         loop {
@@ -563,13 +567,11 @@ impl Follow {
         }
         let exit_by = Instant::now() + EXIT_BOUND;
         let status = loop {
-            if let Some(status) = child.try_wait().map_err(ExecError::Io)? {
-                break Some(status);
+            match child.try_wait() {
+                Ok(Some(status)) => break Some(status),
+                Ok(None) if Instant::now() < exit_by => thread::sleep(POLL),
+                Ok(None) | Err(_) => break None,
             }
-            if Instant::now() >= exit_by {
-                break None;
-            }
-            thread::sleep(POLL);
         };
         let stderr = match status {
             Some(_) => self.stderr.recv_timeout(EXIT_BOUND).ok().and_then(Result::ok).map(|(b, _)| b).unwrap_or_default(),
@@ -580,6 +582,7 @@ impl Follow {
                 Vec::new()
             }
         };
+        signalled.map_err(ExecError::Io)?;
         Ok(Ended { status, rest, stderr })
     }
 }

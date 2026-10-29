@@ -20,6 +20,7 @@
       "flags": [
         {"name": "json", "type": "bool", "description": "Structured I/O."},
         {"name": "yes", "type": "bool", "description": "Deliver without the gate."},
+        {"name": "submit", "type": "bool", "description": "Press enter after the text."},
         {"name": "id", "type": "string", "description": "Target session id.", "value": "session-id"}
       ]
     },

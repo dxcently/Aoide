@@ -97,7 +97,7 @@ fn each_child_gets_only_its_scrubbed_environment() {
     exec.call(&["melete", "status"], &[], &[], None).expect("melete status runs");
     let calls = records(&record);
     let (send, melete) = (&calls[calls.len() - 2], &calls[calls.len() - 1]);
-    assert_eq!(env_keys(send), ["AOIDE_SESSION_ID", "FAKE_AOIDE_RECORD", "PATH"]);
+    assert_eq!(env_keys(send), ["FAKE_AOIDE_RECORD", "PATH"]);
     assert_eq!(
         env_keys(melete),
         ["AOIDE_MELETE_KEY", "AOIDE_SESSION_ID", "FAKE_AOIDE_RECORD", "PATH"]

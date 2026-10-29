@@ -40,8 +40,17 @@ fn an_eidolon_child_loses_session_melete_and_vault_keys() {
 
 #[test]
 fn an_aoide_child_loses_melete_and_vault_keys_but_keeps_its_session() {
-    let env = child_env(Child::Aoide, "send", &base(), Ok(keys().as_slice())).expect("the env builds");
+    let env = child_env(Child::Aoide, "config", &base(), Ok(keys().as_slice())).expect("the env builds");
     assert_eq!(names(&env), ["PATH", "HOME", "AOIDE_SESSION_ID", "AOIDE_ROOT"]);
+}
+
+#[test]
+fn a_send_child_loses_its_session_and_both_autogate_switches() {
+    let mut base = base();
+    base.push((OsString::from("AOIDE_CONDUCT_AUTOGATE"), OsString::from("1")));
+    base.push((OsString::from("AOIDE_CONDUCT_SIBLING_AUTOGATE"), OsString::from("1")));
+    let env = child_env(Child::Aoide, "send", &base, Ok(keys().as_slice())).expect("the env builds");
+    assert_eq!(names(&env), ["PATH", "HOME", "AOIDE_ROOT"]);
 }
 
 #[test]

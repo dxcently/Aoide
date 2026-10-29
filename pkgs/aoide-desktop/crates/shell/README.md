@@ -18,6 +18,9 @@ sha2 (a dialog's digest), the door crate, and the exec crate.
   door. Its watch threads send on a bounded channel of `EVENTS_BOUND` (64)
   events; `Doors::open` takes the sending half.
 - `asks.rs`: `prepare_answer`, `send_answer`, and the `Dialog` a yes shows.
+- `chat/`: `say` sends to a session, and `follow` opens its stream as a `Chat`
+  whose `next` yields a `Push`. `chat/cases.rs` holds the follow cases, one
+  entry each. `chat/record.rs` is the one place a stream line is parsed.
 - `src/bin/fake-aoide.rs` and `src/bin/fake-eidolon.rs`, behind the `fakes`
   feature: the stand-ins the tests run in place of the installed programs.
 
@@ -218,6 +221,34 @@ asks.rs     Doors::prepare_answer(launch, ask, label)
   and a 401 or any other status is a `DoorError`. None of them removes the ask.
 - Between streams the last stream's asks stay listed, so an answer to one the
   door settled in the gap comes back 409.
+
+## How a chat is followed
+
+```
+chat::say(exec, id, text)
+  exec.call(send, --id=<id>, --submit, --yes, -- <text>)
+  --yes: the composer types it, so it is the person's own act
+  the child's env is child_env's for a send: no session id, no autogate
+
+chat::follow(exec, id)                    cases::CASES, in order
+  for each case (trace, then watch):
+    exec.follow(case.words, case.flags, [id])     a held child
+    next(5 s)
+      a line, or silence  -> Chat { case, pending }   this case answers
+      Eof (stdout closed) -> end(); its stderr is the reason; next case
+  every case refused      -> FollowError::Refused { reasons }
+
+Chat::next(wait)  -> record::line(text)
+                       a JSON object: Push::Record, strings spelled
+                       any other text: Push::Other, spelled
+                     Dropped(n) for a line past the exec crate's cap
+Chat::close()     -> SIGINT through the held child; the events after it
+```
+
+- `trace` runs `session trace --json --follow --tail=200 -- <id>`, and
+  `watch` runs `session watch --json -- <id>`. A trace prints raw journal
+  lines, not the one-shot's steps projection: projecting them is a later mode.
+- A watch's first line is a JSON frame, and its other lines are text.
 
 ## The fakes
 

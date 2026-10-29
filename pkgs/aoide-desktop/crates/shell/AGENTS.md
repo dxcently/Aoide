@@ -202,6 +202,28 @@ are in README.md.
   `an_answer_to_a_door_that_fails_its_checks_sends_no_request`, both use it.
 - The fake eidolon's start-up modes are listed in README.md's fakes section.
 
+## The chat (chat/)
+
+- `chat::say` is the one send. Its argv is `send --json --id=<id> --submit
+  --yes -- <text>`. `--yes` is the person's own act: the composer types the
+  text, and nothing else calls `say`. A frame, a document or a hostile page
+  never reaches it. The send child runs with the scrubbed environment exec gives
+  a `send`, which drops the session id and both autogate switches.
+- `chat::follow` opens a session's stream through the cases in
+  `chat/cases.rs`, in order. A case answers when its child prints a line, or
+  stays quiet for 5 s. A child that closes its stdout first has refused, and
+  its stderr is the reason. When every case refuses, `FollowError::Refused`
+  names each one and its reason. The reasons are spelled.
+- Every line a stream prints goes through `chat::record::line` before it leaves
+  the crate. A JSON object becomes a `Push::Record` with each string and key
+  spelled by `visible`. Any other line becomes a `Push::Other`, spelled. Raw
+  records pass through otherwise, since core's normalized chat line is not
+  yet emitted.
+- The JSON is parsed in `chat/record.rs` alone. `tests/chat.rs` fails for a
+  `serde_json::from_str` anywhere else in `src/chat/`.
+- A chat's end is `Chat::close`: a SIGINT to its held child, through exec's
+  pidfd. The events the child prints after it come back, through its end line.
+
 ## Not tested
 
 - A reconnect's zombie, start time or command line failure: the same checks at
@@ -221,6 +243,12 @@ are in README.md.
 
 ## Extension points
 
+- A follow case is one entry in `CASES` (`chat/cases.rs`), and its verb must
+  be declared by the schema. Adding one changes `chat/cases.rs` and the
+  README's "How a chat is followed" list, in one commit. `every_case_runs_a_verb_the_schema_declares`
+  fails for an entry whose verb the schema does not declare.
+- A chat record shape is parsed only in `chat/record.rs`. A new kind of
+  line goes there, as one arm of `line`, and its test goes in `tests/chat.rs`.
 - A new aoide command needs no code. Its path, flags and arguments come from
   `aoide schema --json`.
 - A new door command goes in `doors.rs`. It calls `verify` before any request
