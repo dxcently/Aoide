@@ -207,7 +207,7 @@ fn store_path_len(after: &str) -> Option<usize> {
         return None;
     }
     let name = &after[33..];
-    let end = name.find(|c: char| c == '/' || c == '"').unwrap_or(name.len());
+    let end = name.find(|c: char| matches!(c, '/' | '"')).unwrap_or(name.len());
     (end > 0).then_some(33 + end)
 }
 
