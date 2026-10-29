@@ -190,8 +190,8 @@ pub fn save_history(rice: &str, draft: Option<&str>, record: &HistoryRecord) -> 
 /// `next_history_number` the wrong maximum.
 ///
 /// A directory entry whose stem isn't all-digits (`head.json`, `marks.json`,
-/// a stray `NNNN.tmp.<pid>` atomic-write leftover — its stem is
-/// `"NNNN.tmp"`, which fails the digit test) is silently skipped, as is any
+/// a stray `NNNN.<n>.tmp.<pid>` atomic-write leftover — its stem is
+/// `"NNNN.<n>.tmp"`, which fails the digit test) is silently skipped, as is any
 /// `NNNN.json` that fails to parse as a `HistoryRecord` — a half-written or
 /// hand-corrupted entry is dropped from the listing rather than wedging
 /// every reader of the store.

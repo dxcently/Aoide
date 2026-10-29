@@ -312,7 +312,8 @@ they are Hyprland's, not this capability's.
 **One measured limit worth stating**: `aoide-cli`'s
 `graph_residency_p_d6` binary passes single-threaded (6/0/1) and passes each test
 alone, but a fully PARALLEL run of that binary left one test red — six resident
-daemon children on one box, against the daemon hop's own 2 s reply bound. The
+daemon children on one box, against the daemon hop's reply bound (`ROUND_TRIP_TIMEOUT` in
+`client/src/daemon.rs`). The
 tests already serialize on `aoide_test_support::env_lock`, so this is contention,
 not a code defect; it is recorded rather than papered over.
 
