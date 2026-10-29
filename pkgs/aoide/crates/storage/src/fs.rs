@@ -2204,7 +2204,7 @@ mod tests {
         let orphan = dir.join(format!("aaaa1111.tmp.{dead}"));
         let in_flight = dir.join(format!("bbbb2222.tmp.{ALWAYS_LIVE_PID}"));
         // Deliberately distinct temp shapes owned by other writers
-        // (`migrate_state_tree`, `seed_if_absent`) — `.tmp.` is a whole
+        // (`migrate_dir`, `seed_if_absent`) — `.tmp.` is a whole
         // separator, so neither is ours to remove.
         let migrate = temp_path(&dir.join("cccc3333"), "migrate-tmp", dead);
         let seed = temp_path(&dir.join("dddd4444"), "seed", dead);
@@ -3064,6 +3064,7 @@ mod tests {
     #[test]
     fn atomic_write_private_publishes_0600_beside_a_wide_file() {
         use std::os::unix::fs::PermissionsExt;
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let dir = std::env::temp_dir().join(format!("aoide-private-beside-wide-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
@@ -3073,7 +3074,14 @@ mod tests {
         std::fs::set_permissions(&neighbour, std::fs::Permissions::from_mode(0o644)).unwrap();
         let target = dir.join("ed25519.key");
 
-        atomic_write_private(&target, b"private seed bytes").unwrap();
+        // Pinned to the default 022 under the same env_lock the sibling test
+        // above takes, so a private write that passed no mode publishes `0644`
+        // here whatever the ambient umask is.
+        // SAFETY: umask(2) cannot fail; restored straight after the call.
+        let old_umask = unsafe { libc::umask(0o022) };
+        let result = atomic_write_private(&target, b"private seed bytes");
+        unsafe { libc::umask(old_umask) };
+        result.unwrap();
 
         assert_private_file(&target);
         assert_eq!(std::fs::read(&target).unwrap(), b"private seed bytes");
@@ -4233,6 +4241,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    #[cfg(unix)]
     #[test]
     fn a_write_whose_temp_cannot_be_created_never_calls_its_watch() {
         let dir = watch_dir("no-temp");
@@ -4243,7 +4252,6 @@ mod tests {
         let _spy = spy_on(&path, &calls);
 
         let err = super::atomic_write(&path, "x").unwrap_err();
-        #[cfg(unix)]
         assert_eq!(err.raw_os_error(), Some(libc::ENAMETOOLONG), "the create fails on the name, not elsewhere: {err}");
 
         assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 0);

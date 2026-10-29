@@ -542,13 +542,16 @@
 - **The atomic-write temps carry a per-write counter.** `temp_path` takes the
   next value of a process-wide `AtomicU64` (`TEMP_SEQ`) and forms
   `<stem>.<n>.tmp.<pid>` for `atomic_write*`, `<n>.migrate-tmp.<pid>` for
-  `migrate_state_tree`'s copy, and `<n>.seed.<pid>` for `seed_if_absent`. Two
+  `migrate_dir`'s copy, and `<n>.seed.<pid>` for `seed_if_absent`. Two
   writes in one process, threads included, never share one of these, so a
   rename never finds another writer's temp already moved. The counter sits
   before `.tmp.`, so the sweep, which reads the pid after the last `.tmp.`,
   still reads the pid. Two temps do not carry it: `migrate_conducting_stage`'s
   `.{name}.migrate-tmp` (no pid) at `fs.rs:514`, and `atomic_symlink`'s
   `.{name}.tmp-{pid}` at `fs.rs:603`. Neither is covered by the counter.
+  The counter adds `1 + digits(n)` bytes to each temp's name, so a target
+  whose name is within that margin of `NAME_MAX` (255 bytes on Linux) now
+  fails at create, where the `<stem>.tmp.<pid>` form still fit.
 - **`fs::atomic_write`'s temp cleanup is directory-wide, and every failing
   half unlinks its own temp.** `sweep_stale_temps` reclaims any sibling
   `<stem>.<n>.tmp.<pid>` whose pid is dead, not only temps sharing the target's
@@ -557,7 +560,7 @@
   is keyed by a msgid minted once; 1519 zero-byte orphans accumulated in one
   node's `state/outbox/` that way). The `read_dir` was already paid on every
   write, so widening the predicate costs nothing. Match `.tmp.` as a whole
-  separator: `migrate_state_tree`'s `<n>.migrate-tmp.<pid>` and `seed_if_absent`'s
+  separator: `migrate_dir`'s `<n>.migrate-tmp.<pid>` and `seed_if_absent`'s
   `<n>.seed.<pid>` are deliberately distinct shapes and must stay out of the
   sweep. A new temp-file shape in this crate picks a separator that is NOT
   `.tmp.` unless it wants this sweep to own it.
