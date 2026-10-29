@@ -129,6 +129,17 @@ fn cleanup(socket_path: &Path, events_path: &Path) {
     std::fs::remove_file(events_path).ok();
 }
 
+/// The paths a test made, removed when the test ends, panic or not.
+struct Cleanup(Vec<PathBuf>);
+
+impl Drop for Cleanup {
+    fn drop(&mut self) {
+        for path in &self.0 {
+            let _ = std::fs::remove_dir_all(path).or_else(|_| std::fs::remove_file(path));
+        }
+    }
+}
+
 /// A plain, implemented, ungated command (`guide`) dispatches over the daemon
 /// door exactly as it does over CLI/MCP, and the single audit log gains a
 /// `"door":"daemon"` record for it — `cli::dispatch::dispatch` appends this
@@ -252,8 +263,16 @@ fn a_gated_command_returns_gated_true() {
 #[test]
 fn a_daemon_dispatched_send_never_resolves_this_processs_own_ambient_session_id() {
     let _guard = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-    let _saver = aoide_test_support::EnvSaver::capture(&["AOIDE_SESSION_ID", "AOIDE_CONDUCT_AUTOGATE"]);
+    let _saver = aoide_test_support::EnvSaver::capture(&[
+        "AOIDE_SESSION_ID",
+        "AOIDE_CONDUCT_AUTOGATE",
+        "XDG_RUNTIME_DIR",
+    ]);
     std::env::remove_var("AOIDE_CONDUCT_AUTOGATE");
+    // This run's own runtime dir, so the socket path below is this test's alone.
+    let runtime = short_tmp("g8-runtime");
+    std::env::set_var("XDG_RUNTIME_DIR", &runtime);
+    let mut guard = Cleanup(vec![runtime]);
     // Stands in for whatever `aoided`'s OWN launch environment might carry —
     // a stray value a dispatched `send` must never pick up as if it were the
     // connecting caller's own attribution.
@@ -263,6 +282,7 @@ fn a_daemon_dispatched_send_never_resolves_this_processs_own_ambient_session_id(
     let id = "g8-dispatch-target";
     let socket = aoide_conduct::graph::conduct_socket_path(id);
     std::fs::create_dir_all(socket.parent().unwrap()).unwrap();
+    let _ = std::fs::remove_file(&socket);
     // Nothing must ever connect here — a wrongly-delivered send would.
     let listener = UnixListener::bind(&socket).unwrap();
     listener.set_nonblocking(true).unwrap();
@@ -280,6 +300,7 @@ fn a_daemon_dispatched_send_never_resolves_this_processs_own_ambient_session_id(
     aoide_conduct::graph::write_stage(&aoide_conduct::graph::sessions_path(), &sf).unwrap();
 
     let (stream, socket_path, events_path) = start_daemon("g8-send");
+    guard.0.extend([socket_path.clone(), events_path.clone()]);
     let mut writer = stream.try_clone().unwrap();
     let mut reader = BufReader::new(stream);
 
@@ -305,9 +326,6 @@ fn a_daemon_dispatched_send_never_resolves_this_processs_own_ambient_session_id(
         mine.get("from").is_none() || mine["from"].is_null(),
         "the pending entry must carry NO attribution — the daemon's own ambient AOIDE_SESSION_ID must never leak in as if it were the caller's: {mine}"
     );
-
-    cleanup(&socket_path, &events_path);
-    let _ = std::fs::remove_file(&socket);
 }
 
 /// The built `aoide` binary beside this test's own executable — the hook process
@@ -335,7 +353,7 @@ fn run_harness_session_start(socket: &Path, claim: &str, harness_session_id: &st
         .env("AOIDE_DAEMON_SOCKET", socket)
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
         .spawn()
         .expect("the built aoide binary runs");
     {
@@ -350,9 +368,11 @@ fn run_harness_session_start(socket: &Path, claim: &str, harness_session_id: &st
             .write_all(payload.as_bytes())
             .expect("the hook payload reaches the hook process");
     }
+    let out = child.wait_with_output().expect("the hook process is awaited");
     assert!(
-        child.wait().expect("the hook process is awaited").success(),
-        "a hook never fails its harness"
+        out.status.success(),
+        "a hook never fails its harness: {}",
+        String::from_utf8_lossy(&out.stderr)
     );
 }
 

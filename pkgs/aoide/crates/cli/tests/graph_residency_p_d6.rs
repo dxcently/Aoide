@@ -24,7 +24,7 @@ use std::os::unix::net::UnixStream;
 use aoide_protocol::win_unix::UnixStream;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant};
 
 /// Mirrors `aoide_conduct::graph::testutil::unique_stage`'s own SUN_LEN
 /// lesson (#75, restated in that module's doc): short, hashed, counter-based
@@ -277,22 +277,6 @@ fn state_events_for(events_path: &Path, file_name: &str) -> Vec<serde_json::Valu
         .collect()
 }
 
-/// Block until the wall clock crosses a fresh second boundary. Every stage
-/// timestamp in this tree is second-precision
-/// (`aoide_storage::time::now_iso_utc`, no test clock-injection seam exists
-/// today and this phase doesn't add one) — calling this once, then issuing
-/// both dispatches back to back immediately after, keeps them inside the
-/// SAME second (a local Unix-socket round trip plus one small JSON file
-/// write finishes in low single-digit milliseconds, nowhere near the ~1s of
-/// headroom this buys), so a literal byte comparison between their outputs
-/// can never flake on a second-boundary crossing.
-fn wait_for_fresh_second() {
-    let start = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
-    while SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() == start {
-        std::thread::sleep(Duration::from_millis(5));
-    }
-}
-
 fn session_start_inv(id: &str) -> Invocation {
     let mut flags = BTreeMap::new();
     flags.insert("id".to_string(), id.to_string());
@@ -311,9 +295,10 @@ fn session_start_inv(id: &str) -> Invocation {
 /// session_start`'s `daemon_dispatch` call blocks this test's own thread on
 /// the reply, so by the time it returns the daemon has already finished its
 /// `write_stage` call). `sessions.json`'s bytes are compared in full (minus
-/// the one field `do_session_start` mints randomly on every call regardless
-/// of routing, `petname` — normalized to a fixed placeholder in both files
-/// before comparing, see the comment at the comparison site) — not spot
+/// the two fields `do_session_start` mints on every call regardless of
+/// routing: `petname`, at random, and `startedAt`, at the second it ran —
+/// both normalized in both files before comparing, see the comment at the
+/// comparison site) — not spot
 /// fields — proving the daemon's projection write really is the exact same
 /// write the direct path performs for the exact same input.
 #[test]
@@ -326,12 +311,9 @@ fn routed_session_start_produces_byte_identical_sessions_json_to_the_direct_path
     std::fs::create_dir_all(&dir_direct).unwrap();
     std::fs::create_dir_all(&dir_daemon).unwrap();
 
-    // Start the daemon EARLY (its bind/accept-loop startup is not part of
-    // the timing window below) but don't route to it yet.
+    // Start the daemon before pass 1, but don't route to it yet.
     let daemon_socket = start_daemon("byte-identity");
     let dead_socket = unique_dir("byte-identity-dead").with_extension("sock");
-
-    wait_for_fresh_second();
 
     // Pass 1: direct fallback — no daemon reachable at this socket path.
     std::env::set_var("AOIDE_STAGE_DIR", &dir_direct);
@@ -348,19 +330,21 @@ fn routed_session_start_produces_byte_identical_sessions_json_to_the_direct_path
     // `do_session_start` mints a random whimsical `petname` (no `--petname`
     // flag exists to pin it — `session start`'s flag set is
     // id/agent/cwd/window/parent only) whenever a session has none yet, so
-    // it is the ONE field expected to differ between ANY two `start` calls
-    // for the same id, daemon routing or not — normalized to a fixed
-    // placeholder in BOTH documents before the comparison below, so the
+    // it and `startedAt` are the fields expected to differ between ANY two
+    // `start` calls for the same id, daemon routing or not — normalized to a
+    // fixed placeholder in BOTH documents before the comparison below, so the
     // comparison still covers every other byte in the file exactly
     // (`schemaVersion`, `sessionId`, `agent`, `windowAddress`, `cwd`,
-    // `state`, `startedAt`, `kind` — the whole shape `do_session_start`
-    // writes) rather than special-casing the file down to spot fields.
+    // `state`, `kind` — the whole shape `do_session_start` writes) rather
+    // than special-casing the file down to spot fields. `startedAt` is then
+    // checked on its own, below.
     let normalize = |bytes: &[u8]| -> Vec<u8> {
         let mut v: serde_json::Value = serde_json::from_slice(bytes).expect("sessions.json must be valid JSON");
         if let Some(sessions) = v.get_mut("sessions").and_then(|s| s.as_array_mut()) {
             for s in sessions {
                 if let Some(obj) = s.as_object_mut() {
                     obj.insert("petname".to_string(), serde_json::json!("<normalized>"));
+                    obj.insert("startedAt".to_string(), serde_json::json!("<normalized>"));
                 }
             }
         }
@@ -371,6 +355,17 @@ fn routed_session_start_produces_byte_identical_sessions_json_to_the_direct_path
     let daemon_bytes = std::fs::read(dir_daemon.join("sessions.json")).unwrap();
     let direct_norm = normalize(&direct_bytes);
     let daemon_norm = normalize(&daemon_bytes);
+
+    // `startedAt` is the second each pass ran in. Under load the two passes can
+    // straddle a second boundary, so the stamps are compared by distance, not
+    // equality: the test still fails if they drift more than 5 s apart.
+    let started_at = |bytes: &[u8]| -> i64 {
+        let v: serde_json::Value = serde_json::from_slice(bytes).expect("sessions.json must be valid JSON");
+        let stamp = v["sessions"][0]["startedAt"].as_str().expect("startedAt is a string");
+        aoide_storage::time::parse_iso_utc(stamp).expect("startedAt is ISO UTC")
+    };
+    let gap = started_at(&daemon_bytes) - started_at(&direct_bytes);
+    assert!(gap.abs() <= 5, "the two passes' startedAt stamps are {gap} s apart");
 
     assert_eq!(
         direct_norm, daemon_norm,
@@ -770,7 +765,16 @@ fn grant_exempt_inv(id: &str, state: &str) -> Invocation {
 #[test]
 fn routed_session_grant_exempt_produces_byte_identical_sessions_json_to_the_direct_path() {
     let _guard = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-    let _saver = aoide_test_support::EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_DAEMON_SOCKET", "XDG_RUNTIME_DIR"]);
+    let _saver = aoide_test_support::EnvSaver::capture(&[
+        "AOIDE_STAGE_DIR",
+        "AOIDE_DAEMON_SOCKET",
+        "XDG_RUNTIME_DIR",
+        "AOIDE_STATE_DIR",
+        "AOIDE_ROOT",
+    ]);
+    // Pinned: an unset state or root falls back to the ambient HOME.
+    std::env::set_var("AOIDE_STATE_DIR", unique_dir("grant-exempt-state"));
+    std::env::set_var("AOIDE_ROOT", unique_dir("grant-exempt-root"));
 
     let dir_direct = unique_dir("grant-exempt-direct-stage");
     let dir_daemon = unique_dir("grant-exempt-daemon-stage");
