@@ -81,13 +81,15 @@ and each crate's own invariants are in its AGENTS.md (`crates/door/AGENTS.md`,
     the root, or a `.clippy.toml` anywhere, fails
     (`only_the_roots_clippy_config_is_read`);
   - no `.cargo/config` or `.cargo/config.toml` lies in this directory, in any
-    ancestor up to `/`, or in `$CARGO_HOME`, with one exception: the file
-    nixpkgs' cargo setup hook writes at `$NIX_BUILD_TOP/.cargo/config.toml`
-    (`config` in an older nixpkgs), to point cargo at the vendored crates. The
-    test accepts it only when its text equals
+    ancestor up to `/`, or in the cargo home (`$CARGO_HOME`, or `$HOME/.cargo`
+    when that is unset), with one exception: the file
+    `$NIX_BUILD_TOP/.cargo/config.toml`, which the pinned nixpkgs' cargo setup
+    hook writes to point cargo at the vendored crates. The test accepts that
+    file only when its text equals
     `crates/shell/tests/fixtures/nix-cargo-config.toml` once every store path
-    and the vendor directory are placeholders
-    (`no_cargo_config_applies_to_the_workspace`);
+    (a `/nix/store/` hash and name, in nix's base-32) and the vendor directory
+    `$NIX_BUILD_TOP/cargo-vendor-dir` are placeholders. The golden fixes the
+    linker line too (`no_cargo_config_applies_to_the_workspace`);
   - exec's only `.rs` file is `src/lib.rs`, because cargo makes a target of any
     `.rs` under `src/bin`, `tests`, `examples` or `benches`, and exec's table
     allows the lints in each (`the_exec_crate_has_one_source_file`);

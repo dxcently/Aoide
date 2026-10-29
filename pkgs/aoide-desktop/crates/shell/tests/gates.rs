@@ -161,11 +161,12 @@ fn golden_lines(text: &str) -> Vec<&str> {
 /// The nix build's cargo config with every store path and the vendor directory
 /// replaced by a fixed placeholder, so the golden template is the same text on
 /// every build.
-fn normalize_nix_config(text: &str) -> String {
+fn normalize_nix_config(text: &str, vendor: &str) -> String {
     text.lines()
         .map(|line| {
             let body = line.trim_start();
-            if body.starts_with("directory =") {
+            let value = body.strip_prefix("directory =").map(|value| value.trim().trim_matches('"'));
+            if value == Some(vendor) {
                 format!("{}directory = \"<vendor-dir>\"\n", &line[..line.len() - body.len()])
             } else {
                 format!("{}\n", replace_store_paths(line))
@@ -180,13 +181,34 @@ fn replace_store_paths(line: &str) -> String {
     let mut rest = line;
     while let Some(at) = rest.find(STORE) {
         out.push_str(&rest[..at]);
-        out.push_str("<store-path>");
         let after = &rest[at + STORE.len()..];
-        let end = after.find(|c: char| matches!(c, '/' | '"' | '\'') || c.is_whitespace());
-        rest = &after[end.unwrap_or(after.len())..];
+        match store_path_len(after) {
+            Some(len) => {
+                out.push_str("<store-path>");
+                rest = &after[len..];
+            }
+            None => {
+                out.push_str(STORE);
+                rest = after;
+            }
+        }
     }
     out.push_str(rest);
     out
+}
+
+/// The length of the store path at the start of `after` (the text past
+/// `/nix/store/`): nix's 32 base-32 characters, `-`, and a name up to the next
+/// `/`, `"` or the end. Anything else is no store path.
+fn store_path_len(after: &str) -> Option<usize> {
+    const BASE32: &str = "0123456789abcdfghijklmnpqrsvwxyz";
+    let hash = after.get(..32)?;
+    if !hash.chars().all(|c| BASE32.contains(c)) || after.as_bytes().get(32) != Some(&b'-') {
+        return None;
+    }
+    let name = &after[33..];
+    let end = name.find(|c: char| c == '/' || c == '"').unwrap_or(name.len());
+    (end > 0).then_some(33 + end)
 }
 
 /// Where two texts first differ: the line number, and both lines there.
@@ -355,24 +377,26 @@ fn only_the_roots_clippy_config_is_read() {
 }
 
 /// No cargo config applies to the workspace: none in the root, in any ancestor
-/// up to `/` (a git root does not stop the walk), or in `$CARGO_HOME` when
-/// that is set. One is accepted: the config that nixpkgs' cargo setup hook
-/// writes at `$NIX_BUILD_TOP/.cargo/config.toml` (`config` in an older
-/// nixpkgs), which points cargo at the vendored crates. It is accepted only
-/// when its text, with every store path and the vendor directory replaced by
-/// a placeholder, equals the golden template in
-/// `tests/fixtures/nix-cargo-config.toml`. Outside nix, `NIX_BUILD_TOP` is
-/// unset or holds no such file, and nothing is accepted.
+/// up to `/` (a git root does not stop the walk), or in the cargo home. One is
+/// accepted: `.cargo/config.toml` at `$NIX_BUILD_TOP`, the name the pinned
+/// nixpkgs' cargo setup hook writes, which points cargo at the vendored crates.
+/// It is accepted only when its text, with every store path and the vendor
+/// directory `$NIX_BUILD_TOP/cargo-vendor-dir` replaced by a placeholder,
+/// equals the golden template in `tests/fixtures/nix-cargo-config.toml`. The
+/// golden fixes the linker line too. Outside nix, `NIX_BUILD_TOP` is unset or
+/// holds no such file, and nothing is accepted. The cargo home is
+/// `$CARGO_HOME`, or `$HOME/.cargo` when that is unset.
 #[test]
 fn no_cargo_config_applies_to_the_workspace() {
     let build_top = std::env::var_os("NIX_BUILD_TOP").and_then(|top| fs::canonicalize(top).ok());
+    let vendor = build_top.as_ref().map(|top| format!("{}/cargo-vendor-dir", top.display())).unwrap_or_default();
     let mut dir = fs::canonicalize(root()).expect("the root is read");
     loop {
         for name in [".cargo/config", ".cargo/config.toml"] {
             let path = dir.join(name);
-            if build_top.as_ref() == Some(&dir) && path.exists() {
+            if build_top.as_ref() == Some(&dir) && name == ".cargo/config.toml" && path.exists() {
                 let text = fs::read_to_string(&path).expect("the nix build's cargo config is read");
-                let found = normalize_nix_config(&text);
+                let found = normalize_nix_config(&text, &vendor);
                 let golden = fs::read_to_string(root().join(NIX_CONFIG_GOLDEN)).unwrap_or_default();
                 assert!(
                     found == golden,
@@ -388,11 +412,13 @@ fn no_cargo_config_applies_to_the_workspace() {
             break;
         }
     }
-    if let Some(home) = std::env::var_os("CARGO_HOME") {
-        for name in ["config", "config.toml"] {
-            let path = Path::new(&home).join(name);
-            assert!(!path.exists(), "{} would configure every build", path.display());
-        }
+    let home = std::env::var_os("CARGO_HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|home| Path::new(&home).join(".cargo")))
+        .expect("CARGO_HOME or HOME names the cargo home");
+    for name in ["config", "config.toml"] {
+        let path = home.join(name);
+        assert!(!path.exists(), "{} would configure every build", path.display());
     }
 }
 
