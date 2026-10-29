@@ -28,6 +28,7 @@ pub fn register_mcp(r: &mut Registry) {
         implemented: true,
         handler: handle_mcp_serve,
         brief: "Serve the registry as a stdio MCP server.",
+        kind: "none", verb: "none",
     ));
 }
 

@@ -91,6 +91,7 @@ would prove nothing.
 
 - This `README.md` when the command count, a root-coupled group, or a
   special-cased command changes.
-- The golden snapshot in `registry.rs` when the command-path set changes.
+- The golden snapshot in `registry.rs` when the command-path set changes, and the
+  kinds and kind-coverage goldens when a command's `kind` or `verb` changes.
 - `docs/architecture/PACKAGE-LAYOUT.md`/`CONTRACTS.md §3` when the
   core/strillix split itself shifts.

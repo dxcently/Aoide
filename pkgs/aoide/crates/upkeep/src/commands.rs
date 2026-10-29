@@ -44,6 +44,7 @@ pub fn register(r: &mut Registry) {
         handler: handle_soundcheck,
         brief: "Report-only integrity sweep of the working tree.",
         doors: &[Door::Cli, Door::Daemon, Door::Mcp],
+        kind: "none", verb: "none",
     ));
 }
 

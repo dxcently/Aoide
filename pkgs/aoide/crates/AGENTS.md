@@ -35,6 +35,15 @@ The MCP-open set has a second golden per app crate,
 command to MCP updates that list in the same commit; a command is closed to
 MCP until its own `doors` says otherwise.
 
+Every command also declares its `kind` and `verb` in its own `cmd!`, and two
+goldens in `cli/src/registry.rs` pin them: `kinds_match_the_golden_snapshot`
+(one `path kind verb` line per command) and `kind_coverage_matches_the_golden_snapshot`
+(each kind's four verbs as `ok`, `missing` or `n/a: <reason>`). A command that
+adds or retags a kind moves the first in the same commit. A command that fills
+a verb cell moves the second, and an `n/a` cell it fills loses its
+`NOT_APPLICABLE` entry in that same commit. A new kind is one name in
+`KINDS` (aoide-protocol) and its first command.
+
 The approve and launch marks have two more goldens in the core binary,
 `approves_paths_match_the_golden_snapshot` and
 `launches_paths_match_the_golden_snapshot`, beside the MCP-open one. Each lists
@@ -177,7 +186,9 @@ listings_fit_and_hang}` hold both binaries to it.
   (`aoide-protocol::registry`) inside that crate's own `commands` module;
   the two app crates never need an edit for a command that isn't moving
   binaries. Declare what it requires (`flag!(…, required: true)`,
-  `one_of: &[&["id", "to"]]`) rather than checking in the handler. A command
+  `one_of: &[&["id", "to"]]`) rather than checking in the handler. Declare its
+  `kind:` and `verb:` on the same `cmd!`; `every_command_has_a_kind` refuses a
+  blank or misspelt value. A command
   that is the first of a NEW head also adds that head to its binary's `Layout`
   (a section, and a blurb when the head has several commands) in the same
   commit; a `brief` keeps its list line from being cut mid-sentence.
