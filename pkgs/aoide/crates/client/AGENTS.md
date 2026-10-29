@@ -218,12 +218,13 @@
   bug. Don't collapse that second case into `None` "to keep the fallback
   path simple" — it hides real daemon failures as ordinary "no daemon
   running."
-- **The round trip is bounded by `ROUND_TRIP_TIMEOUT` (ten seconds).** A
-  daemon that accepts a connection and then wedges holds each daemon-first
+- **The round trip is bounded by `ROUND_TRIP_TIMEOUT`** (`client/src/daemon.rs`).
+  A daemon that accepts a connection and then wedges holds each daemon-first
   caller for that bound before it gets its answer, and nothing retries.
   `daemon_dispatch_with_timeout` takes its own bound for a caller that does
-  bounded upstream work. `daemon_dispatch_waits_out_a_reply_that_takes_three_seconds`
-  pins the default bound.
+  bounded upstream work. The test
+  `daemon_dispatch_waits_out_a_reply_that_takes_three_seconds` shows that a
+  reply at three seconds is still answered.
 
 - **`handle_node_pair_approve` dispatches by DIRECTION — inbound first,
   outbound second (P-P2) — and Design A (task #119) put the ONE wire call

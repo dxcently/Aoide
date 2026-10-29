@@ -288,8 +288,19 @@ mod tests {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let socket_path = short_tmp("slow-reply").with_extension("sock");
         let listener = UnixListener::bind(&socket_path).unwrap();
+        listener.set_nonblocking(true).unwrap();
         let handle = std::thread::spawn(move || {
-            let (mut conn, _) = listener.accept().unwrap();
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+            let mut conn = loop {
+                match listener.accept() {
+                    Ok((conn, _)) => break conn,
+                    Err(e) if e.kind() == std::io::ErrorKind::WouldBlock && std::time::Instant::now() < deadline => {
+                        std::thread::sleep(std::time::Duration::from_millis(10));
+                    }
+                    Err(e) => panic!("the client never connected: {e}"),
+                }
+            };
+            conn.set_nonblocking(false).unwrap();
             let mut buf = [0u8; 4096];
             let _ = conn.read(&mut buf).unwrap();
             std::thread::sleep(std::time::Duration::from_secs(3));
