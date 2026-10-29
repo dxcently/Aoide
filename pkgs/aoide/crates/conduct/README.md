@@ -1804,7 +1804,9 @@ instructions are stored once beside the run's PTY log and handed to the child as
 `AOIDE_TASK` / `AOIDE_TASK_INSTRUCTIONS`, and the run's end facts (`outcome`,
 `exitCode` for a real exit only, `endedAt`) land on its record. `aoide session
 watch <id>` is the read-only live view of such a run (instructions, the child's
-own unread queue, output, outcome; `--snapshot` for one bounded frame). The run's
+own unread queue, output, outcome; `--snapshot` for one bounded frame). Live
+`--json` is JSON lines: one object per event, tagged by `type` (`frame`,
+`output`, `mail`, `read`, `end`), then the outcome envelope the door prints. The run's
 slug mailbox (`self/<slug>`) is the CHILD's inbox — only letters sent TO the
 subagent, read against the child's own cursor through the read-only
 `mail::unread_for` peek; the exit report goes to the REPORT mailbox

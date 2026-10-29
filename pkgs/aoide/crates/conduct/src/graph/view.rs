@@ -1016,9 +1016,7 @@ fn follow_remote(
     let mut printed_lines = 0usize;
     let emit = |frame: &Frame, printed: &mut usize| {
         if json_mode {
-            if let Ok(value) = serde_json::to_string(frame) {
-                println!("{value}");
-            }
+            emit(true, "frame", Vec::new(), serde_json::to_value(frame).unwrap_or_default());
         } else {
             for line in render_from(frame, Some(&node.name)) {
                 println!("{line}");
@@ -1131,6 +1129,40 @@ fn live_letters(
 /// and the record every [`WATCH_POLL`] until the run ends or Ctrl-C. Ends on
 /// the RUN's own end (never on a guess) and keeps every completed-run artifact
 /// — the transcript, the sidecar, the letters — in place for inspection.
+/// The lines one follow event prints. Text mode gets the lines the event always
+/// rendered; `--json` gets ONE object tagged by `type` (`frame`, `output`,
+/// `mail`, `read`, `end`), so a reader tells the events apart by that key.
+fn stream_lines(json_mode: bool, kind: &str, text: Vec<String>, data: serde_json::Value) -> Vec<String> {
+    if !json_mode {
+        return text;
+    }
+    let mut data = data;
+    data["type"] = json!(kind);
+    vec![data.to_string()]
+}
+
+/// Print one follow event's lines; the count is what `printed` tallies.
+fn emit(json_mode: bool, kind: &str, text: Vec<String>, data: serde_json::Value) -> usize {
+    let lines = stream_lines(json_mode, kind, text, data);
+    for line in &lines {
+        println!("{line}");
+    }
+    lines.len()
+}
+
+/// The output lines of one poll's log chunk, cleaned unless `raw` (a real
+/// terminal gets the run's own bytes), each an event of its own.
+fn output_lines(chunk: &str, raw: bool, json_mode: bool) -> Vec<String> {
+    chunk
+        .split('\n')
+        .filter(|line| !line.is_empty())
+        .flat_map(|line| {
+            let line = if raw { line.to_string() } else { common::clean_line(line) };
+            stream_lines(json_mode, "output", vec![line.clone()], json!({ "line": line }))
+        })
+        .collect()
+}
+
 fn follow(
     cmd: &'static str,
     id: &str,
@@ -1145,16 +1177,7 @@ fn follow(
     }
     let mut printed_lines = 0usize;
     let emit_frame = |frame: &Frame, printed: &mut usize| {
-        if json_mode {
-            if let Ok(value) = serde_json::to_string(frame) {
-                println!("{value}");
-            }
-        } else {
-            for line in render(frame) {
-                println!("{line}");
-                *printed += 1;
-            }
-        }
+        *printed += emit(json_mode, "frame", render(frame), serde_json::to_value(frame).unwrap_or_default());
         let _ = std::io::stdout().flush();
     };
     emit_frame(first, &mut printed_lines);
@@ -1194,11 +1217,7 @@ fn follow(
             if let Some(chunk) = read_log_from(&path, offset) {
                 offset += chunk.len() as u64;
                 let text = String::from_utf8_lossy(&chunk);
-                for line in text.split('\n') {
-                    if line.is_empty() {
-                        continue;
-                    }
-                    let line = if raw_output { line.to_string() } else { common::clean_line(line) };
+                for line in output_lines(&text, raw_output, json_mode) {
                     println!("{line}");
                     printed_lines += 1;
                 }
@@ -1220,23 +1239,23 @@ fn follow(
                     .map(|f| f.sessions)
                     .unwrap_or_default();
                 let letter = mail_line(&entry, id, &roster_now);
-                for out in letter_lines(
-                    format!(
-                        "mail #{} {} {} [{}]",
-                        letter.seq,
-                        letter.from,
-                        if letter.subject.is_empty() {
-                            "(no subject)"
-                        } else {
-                            &letter.subject
-                        },
-                        letter.run
-                    ),
-                    &letter,
-                ) {
-                    println!("{out}");
-                    printed_lines += 1;
-                }
+                let header = format!(
+                    "mail #{} {} {} [{}]",
+                    letter.seq,
+                    letter.from,
+                    if letter.subject.is_empty() {
+                        "(no subject)"
+                    } else {
+                        &letter.subject
+                    },
+                    letter.run
+                );
+                printed_lines += emit(
+                    json_mode,
+                    "mail",
+                    letter_lines(header, &letter),
+                    serde_json::to_value(&letter).unwrap_or_default(),
+                );
                 new_mail += 1;
             }
         }
@@ -1247,11 +1266,13 @@ fn follow(
         if let Some(slug) = first.task.as_deref() {
             let (mark, pending) = child_queue(id, Some(slug));
             if mark > child_mark {
-                println!(
-                    "child read through seq {mark} at {} ({pending} still unread)",
-                    hhmmss_utc()
+                let at = hhmmss_utc();
+                printed_lines += emit(
+                    json_mode,
+                    "read",
+                    vec![format!("child read through seq {mark} at {at} ({pending} still unread)")],
+                    json!({ "seq": mark, "pending": pending, "at": at }),
                 );
-                printed_lines += 1;
                 child_mark = mark;
             }
         }
@@ -1267,13 +1288,21 @@ fn follow(
             _ => {}
         }
         let last = gather(id, tail, true, &roster, host, &ids).ok();
-        if let Some(frame) = &last {
-            emit_frame(frame, &mut printed_lines);
-        } else {
-            println!("stopped — not running (the record has left the roster)");
-            println!("the transcript, the instructions sidecar and the mail above remain on disk");
-            let _ = std::io::stdout().flush();
-        }
+        let (text, reason) = match &last {
+            Some(frame) => {
+                emit_frame(frame, &mut printed_lines);
+                (Vec::new(), "run-ended")
+            }
+            None => (
+                vec![
+                    "stopped — not running (the record has left the roster)".to_string(),
+                    "the transcript, the instructions sidecar and the mail above remain on disk".to_string(),
+                ],
+                "left-roster",
+            ),
+        };
+        let _ = emit(json_mode, "end", text, json!({ "reason": reason }));
+        let _ = std::io::stdout().flush();
         return Outcome::ok(cmd, format!("watched {id} to its end"))
             .with_data(json!({
                 "sessionId": id,
@@ -1290,8 +1319,8 @@ fn follow(
         .unwrap_or_default();
     let ids: HashSet<&str> = roster.iter().map(|s| s.session_id.as_str()).collect();
     if let Ok(frame) = gather(id, tail, true, &roster, host, &ids) {
-        println!("{}", frame.status);
-        println!("report: {}", frame.report);
+        let text = vec![frame.status.clone(), format!("report: {}", frame.report)];
+        let _ = emit(json_mode, "end", text, json!({ "reason": "interrupted", "status": frame.status, "report": frame.report }));
     }
     let _ = std::io::stdout().flush();
     Outcome::ok(cmd, format!("stopped watching {id}"))
@@ -1360,6 +1389,28 @@ mod tests {
     use crate::graph::testutil::{unique_stage, EnvVars};
     use aoide_storage::mail;
     use std::collections::BTreeMap;
+
+    /// `session watch --json` follows as JSON lines: every event is one object
+    /// with a `type`, and text mode keeps the lines it always printed. The
+    /// output branch is the one that used to print bare text beside the frames.
+    #[test]
+    fn a_json_follow_event_is_one_object_tagged_by_its_type() {
+        let raw_log = "plain\x1b[31m red\x07\n\nsecond";
+        let lines = output_lines(raw_log, false, true);
+        assert_eq!(lines.len(), 2, "{lines:?}");
+        for line in &lines {
+            let v: serde_json::Value = serde_json::from_str(line).expect("each follow line parses as JSON");
+            assert_eq!(v["type"], "output");
+            assert!(!v["line"].as_str().unwrap().contains('\x1b'));
+        }
+        assert_eq!(output_lines(raw_log, false, false), vec!["plain[31m red".to_string(), "second".to_string()]);
+
+        let frame = stream_lines(true, "frame", vec!["x".into()], json!({ "sessionId": "s1" }));
+        assert_eq!(serde_json::from_str::<serde_json::Value>(&frame[0]).unwrap()["type"], "frame");
+        let end = stream_lines(true, "end", vec!["gone".into()], json!({ "reason": "run-ended" }));
+        assert_eq!(serde_json::from_str::<serde_json::Value>(&end[0]).unwrap()["type"], "end");
+        assert_eq!(stream_lines(false, "end", vec!["gone".into()], json!({})), vec!["gone".to_string()]);
+    }
 
     /// A fresh isolated state/stage/runtime triple, held by the caller's
     /// `env_lock` — every test here reads and writes only its own tree.
