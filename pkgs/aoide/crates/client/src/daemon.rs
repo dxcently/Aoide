@@ -49,9 +49,11 @@ const CONNECT_TIMEOUT: Duration = Duration::from_millis(100);
 /// read so a daemon that accepted a connection and then wedged (rather than
 /// refusing outright) can never hang the calling process indefinitely. Not
 /// part of the design doc's stated "~100ms budget" (that names the CONNECT
-/// half only); generous enough for a routed handler's real file I/O to
-/// finish under ordinary load.
-const ROUND_TRIP_TIMEOUT: Duration = Duration::from_secs(2);
+/// half only). Ten seconds: a daemon under load still finishes the call and
+/// writes its reply (server/src/daemon.rs's dispatch arm runs `dispatch`
+/// before it writes), so a shorter bound reported failure for a call that had
+/// taken effect.
+const ROUND_TRIP_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Resolve the daemon's own control socket — `$AOIDE_DAEMON_SOCKET` when
 /// set to a non-blank value, else `$XDG_RUNTIME_DIR/aoide/aoided.sock`
@@ -92,7 +94,7 @@ pub fn daemon_dispatch(inv: &Invocation) -> Option<Outcome> {
 }
 
 /// Explicit reply bound for operations that perform bounded upstream work.
-/// The default dispatch callers retain their two-second bound; no retry occurs.
+/// The default dispatch callers retain their ten-second bound; no retry occurs.
 pub fn daemon_dispatch_with_timeout(inv: &Invocation, reply_timeout: Duration) -> Option<Outcome> {
     if inv.door != Door::Cli {
         return None;
