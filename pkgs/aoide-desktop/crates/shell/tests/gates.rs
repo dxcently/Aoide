@@ -252,18 +252,22 @@ fn the_exec_crate_has_one_source_file() {
     );
 }
 
-/// The files rustc read to build exec are its `src/lib.rs`, the root's
-/// `clippy.toml`, the root's `Cargo.toml` and exec's `Cargo.toml`: clippy's
-/// check builds list the last three. rustc lists every file it read in the
-/// dep-info file beside the test binary, one `file:` line each, with `\ ` for
-/// a space. A `#[path]` module or an `include!` in exec would compile another
-/// file under exec's table, and this test names it.
+/// The files rustc read to build exec, as its dep-info files name them: each
+/// file lies in `src/lib.rs`, the root's `clippy.toml` or `Cargo.toml`, or
+/// exec's `Cargo.toml`, and every dep-info file lists `src/lib.rs`. Rustc writes
+/// one file in a dep-info file per line: a target line, `<target>: <files>`,
+/// whose target lies in the deps directory; a `<file>:` line; or a
+/// `# env-dep:` line. A `#[path]` module or an `include!` in exec would compile
+/// another file under exec's table, and this test names it. Any other line
+/// reds, naming the file and the line.
 #[test]
 fn the_exec_crate_compiles_only_its_lib_rs() {
     let root = fs::canonicalize(root()).expect("the root is read");
     let deps = std::env::current_exe().expect("the test binary is known");
     let deps = deps.parent().expect("the test binary lies in a directory").to_path_buf();
-    let allowed: Vec<PathBuf> = ["crates/exec/src/lib.rs", "clippy.toml", "Cargo.toml", "crates/exec/Cargo.toml"]
+    let deps_canonical = fs::canonicalize(&deps).expect("the deps directory is read");
+    let lib = fs::canonicalize(root.join(EXEC)).expect("exec's lib.rs is read");
+    let allowed: Vec<PathBuf> = [EXEC, "clippy.toml", "Cargo.toml", "crates/exec/Cargo.toml"]
         .iter()
         .map(|rel| fs::canonicalize(root.join(rel)).unwrap_or_else(|_| root.join(rel)))
         .collect();
@@ -276,19 +280,61 @@ fn the_exec_crate_compiles_only_its_lib_rs() {
         }
         found += 1;
         let text = fs::read_to_string(&dep_info).expect("a dep-info file is read");
-        for line in text.lines().filter(|line| !line.starts_with('#')) {
-            let Some(read) = line.strip_suffix(':') else { continue };
-            let joined = root.join(read.replace("\\ ", " "));
-            let read = fs::canonicalize(&joined).unwrap_or(joined);
-            assert!(
-                allowed.contains(&read),
-                "{} lists {}, which rustc read to build exec and which is not one of its four allowed files",
-                dep_info.display(),
-                read.display()
-            );
+        let mut lists_lib = false;
+        for line in text.lines() {
+            if line.trim().is_empty() || line.starts_with("# env-dep:") {
+                continue;
+            }
+            let shown = format!("{} line `{line}`", dep_info.display());
+            let Some((listed, rest)) = line.split_once(':') else {
+                panic!("{shown} is not a target, a file or an env-dep line");
+            };
+            let files = if rest.trim().is_empty() {
+                vec![unescape(listed)]
+            } else {
+                let target = fs::canonicalize(root.join(unescape(listed))).ok();
+                let in_deps = target.and_then(|t| t.parent().map(|p| p == deps_canonical));
+                assert!(in_deps == Some(true), "{shown} is a target outside the deps directory");
+                dep_files(rest)
+            };
+            for file in files {
+                let joined = root.join(&file);
+                let read = fs::canonicalize(&joined).unwrap_or(joined);
+                assert!(
+                    allowed.contains(&read),
+                    "{shown} lists {}, which rustc read to build exec and which is not one of its allowed files",
+                    read.display()
+                );
+                lists_lib |= read == lib;
+            }
         }
+        assert!(lists_lib, "{} lists no src/lib.rs, so it read nothing of exec", dep_info.display());
     }
     assert!(found > 0, "no aoide_desktop_exec-*.d dep-info file lies in {}", deps.display());
+}
+
+/// A name in a dep-info file: `\ ` is a space.
+fn unescape(name: &str) -> String {
+    name.replace("\\ ", " ")
+}
+
+/// The files a dep-info line lists after its colon: spaces part them, and `\ `
+/// is a space within a name.
+fn dep_files(list: &str) -> Vec<String> {
+    let mut files = vec![String::new()];
+    let mut chars = list.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '\\' if chars.peek() == Some(&' ') => {
+                chars.next();
+                files.last_mut().expect("a file is open").push(' ');
+            }
+            ' ' => files.push(String::new()),
+            c => files.last_mut().expect("a file is open").push(c),
+        }
+    }
+    files.retain(|file| !file.is_empty());
+    files
 }
 
 #[test]

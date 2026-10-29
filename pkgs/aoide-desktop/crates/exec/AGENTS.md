@@ -15,9 +15,13 @@ are in README.md.
   the three lints in each (`the_exec_crate_has_one_source_file`). A `#[path]`
   module or an `include!` would compile another file under this table, so the
   gate also reads the dep-info rustc writes for this crate and refuses any file
-  in it but `src/lib.rs`, the root's `clippy.toml` and the two manifests
-  (`the_exec_crate_compiles_only_its_lib_rs`). A second file in this crate
-  changes both tests, in the same commit.
+  in it but `src/lib.rs`, the root's `clippy.toml` and the two manifests, and
+  it refuses any dep-info line that is not a target, a `<file>:` or an
+  `# env-dep:` line (`the_exec_crate_compiles_only_its_lib_rs`). The read sees
+  only the dep-info files beside the test binary: a build script or a proc
+  macro of a dependency, a linked library, and code that only a build the gate
+  does not make (a build without `fakes`) are outside it. A second file in this
+  crate changes both tests, in the same commit.
 
 ## The API
 

@@ -91,12 +91,16 @@ and each crate's own invariants are in its AGENTS.md (`crates/door/AGENTS.md`,
   - exec's only `.rs` file is `src/lib.rs`, because cargo makes a target of any
     `.rs` under `src/bin`, `tests`, `examples` or `benches`, and exec's table
     allows the lints in each (`the_exec_crate_has_one_source_file`);
-  - every file rustc read to build exec is its `src/lib.rs`, the root's
-    `clippy.toml`, the root's `Cargo.toml` or exec's `Cargo.toml`, by the
-    dep-info files cargo leaves beside the test binary
+  - the files rustc read to build exec are its `src/lib.rs`, the root's
+    `clippy.toml` and `Cargo.toml`, and exec's `Cargo.toml`, by the dep-info
+    files cargo leaves beside the test binary. Each of those files lists
+    `src/lib.rs`, and each of its lines is a target in that directory, a
+    `<file>:` line, or an `# env-dep:` line; any other line reds
     (`the_exec_crate_compiles_only_its_lib_rs`). A `#[path]` module or an
     `include!` in exec would compile another file under exec's table; in door
-    and shell, such a file compiles under the forbid;
+    and shell, such a file compiles under the forbid. The read misses a build
+    script or a proc macro of a dependency, a linked library, and code that
+    only a build the gate does not make compiles, such as one without `fakes`;
   - exactly four `Cargo.toml` files lie under this directory, and each equals
     its golden text in the same file, less blank lines and comment lines
     (`the_manifests_are_the_golden_ones`). A new member brings its golden in
