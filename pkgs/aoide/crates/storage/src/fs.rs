@@ -2507,13 +2507,16 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// 879f7b78: a temp left at the private name by a write killed between
-    /// create and rename keeps its wider mode through `O_TRUNC`, and a rename
-    /// would publish it. The leftover is removed and the temp created fresh at
-    /// `0600`, so the file over the private name is never `0644`.
+    /// 879f7b78: a temp left under the private name by a write killed between
+    /// create and rename keeps its wider mode through `O_TRUNC`. `write_temp_file`
+    /// removes such a leftover before it creates the temp, so the temp is `0600`
+    /// and the rename that follows publishes `0600`. The leftover reaches a name
+    /// a later write uses only through pid reuse: a dead writer's temp, under a
+    /// pid another process takes. The guard in `write_temp_file` is what covers
+    /// that collision.
     #[cfg(unix)]
     #[test]
-    fn a_private_write_never_publishes_a_leftover_temps_wider_mode() {
+    fn write_temp_file_never_keeps_a_leftovers_wider_mode() {
         use std::os::unix::fs::PermissionsExt;
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let dir = std::env::temp_dir().join(format!("aoide-leftover-temp-{}", std::process::id()));
@@ -3029,14 +3032,13 @@ mod tests {
     /// leaves its temp behind at whatever mode it was made with. A later
     /// process that reuses that pid, at the same counter value, writes to the
     /// same name, and `O_TRUNC` keeps the leftover's mode rather than applying
-    /// `0600` again, so the rename would publish a wider file as the private
-    /// one. This test plants a `0644` leftover at the name a write by our own
-    /// pid takes (the reuse case, without a dead process to stage it), then
-    /// writes through the one temp creator and requires the file renamed over
-    /// the private name to come out `0600` with the new bytes.
+    /// `0600` again. This test plants a `0644` leftover at the name a write by
+    /// our own pid takes (the reuse case, without a dead process to stage it),
+    /// then calls `write_temp_file` and renames the temp over the private name
+    /// itself, and requires the result to come out `0600` with the new bytes.
     #[cfg(unix)]
     #[test]
-    fn a_wider_leftover_temp_under_the_private_name_is_never_published() {
+    fn write_temp_file_never_keeps_a_wider_leftover_for_a_later_rename() {
         use std::os::unix::fs::PermissionsExt;
         let dir = std::env::temp_dir().join(format!("aoide-stale-private-temp-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
@@ -3051,6 +3053,31 @@ mod tests {
         assert_private_file(&path);
         assert_eq!(std::fs::read(&path).unwrap(), b"fresh");
 
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// `atomic_write_private` publishes `0600` even in a wide directory beside
+    /// a `0644` file. The directory's `0777` is set explicitly, so the umask
+    /// does not narrow it. A private write that passed no mode would publish
+    /// the umask-default `0644` here.
+    #[cfg(unix)]
+    #[test]
+    fn atomic_write_private_publishes_0600_beside_a_wide_file() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("aoide-private-beside-wide-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o777)).unwrap();
+        let neighbour = dir.join("neighbour.json");
+        std::fs::write(&neighbour, b"wide").unwrap();
+        std::fs::set_permissions(&neighbour, std::fs::Permissions::from_mode(0o644)).unwrap();
+        let target = dir.join("ed25519.key");
+
+        atomic_write_private(&target, b"private seed bytes").unwrap();
+
+        assert_private_file(&target);
+        assert_eq!(std::fs::read(&target).unwrap(), b"private seed bytes");
+        assert_eq!(unix_mode(&neighbour), 0o644, "the neighbour's mode must not change");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -4215,7 +4242,9 @@ mod tests {
         let calls = new_calls();
         let _spy = spy_on(&path, &calls);
 
-        assert!(super::atomic_write(&path, "x").is_err());
+        let err = super::atomic_write(&path, "x").unwrap_err();
+        #[cfg(unix)]
+        assert_eq!(err.kind(), std::io::ErrorKind::FilenameTooLong, "the create fails on the name, not elsewhere: {err}");
 
         assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 0);
         let _ = std::fs::remove_dir_all(&dir);
