@@ -147,6 +147,7 @@ impl Drop for Cleanup {
 /// door's audit line comes from (`cli/src/dispatch.rs`).
 #[test]
 fn a_plain_command_dispatches_and_audits_door_daemon() {
+    let _guard = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
     let (stream, socket_path, events_path) = start_daemon("plain");
     let mut writer = stream.try_clone().unwrap();
     let mut reader = BufReader::new(stream);
@@ -229,6 +230,7 @@ fn a_cli_only_secrets_admin_command_refuses_with_the_door_hint_and_mutates_nothi
 /// always marks it — admission stays the user's, on every door.
 #[test]
 fn a_gated_command_returns_gated_true() {
+    let _guard = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
     let (stream, socket_path, events_path) = start_daemon("gated");
     let mut writer = stream.try_clone().unwrap();
     let mut reader = BufReader::new(stream);
@@ -636,6 +638,7 @@ fn a_wire_supplied_door_pid_is_discarded_not_walked() {
 /// handler runs (`run_cli`'s launch path is the only place it blocks).
 #[test]
 fn mcp_serve_and_a2a_serve_answer_the_daemon_door_as_they_always_did() {
+    let _guard = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
     let (stream, socket_path, events_path) = start_daemon("servers");
     let mut writer = stream.try_clone().unwrap();
     let mut reader = BufReader::new(stream);
