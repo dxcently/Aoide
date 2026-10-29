@@ -381,7 +381,8 @@ fn only_the_roots_clippy_config_is_read() {
 /// accepted: `.cargo/config.toml` at `$NIX_BUILD_TOP`, the name the pinned
 /// nixpkgs' cargo setup hook writes, which points cargo at the vendored crates.
 /// It is accepted only when its text, with every store path and the vendor
-/// directory `$NIX_BUILD_TOP/cargo-vendor-dir` replaced by a placeholder,
+/// directory `cargo-vendor-dir` (the relative value the pinned hook writes,
+/// which cargo resolves against the build top) replaced by a placeholder,
 /// equals the golden template in `tests/fixtures/nix-cargo-config.toml`. The
 /// golden fixes the linker line too. Outside nix, `NIX_BUILD_TOP` is unset or
 /// holds no such file, and nothing is accepted. The cargo home is
@@ -389,14 +390,14 @@ fn only_the_roots_clippy_config_is_read() {
 #[test]
 fn no_cargo_config_applies_to_the_workspace() {
     let build_top = std::env::var_os("NIX_BUILD_TOP").and_then(|top| fs::canonicalize(top).ok());
-    let vendor = build_top.as_ref().map(|top| format!("{}/cargo-vendor-dir", top.display())).unwrap_or_default();
+    let vendor = "cargo-vendor-dir";
     let mut dir = fs::canonicalize(root()).expect("the root is read");
     loop {
         for name in [".cargo/config", ".cargo/config.toml"] {
             let path = dir.join(name);
             if build_top.as_ref() == Some(&dir) && name == ".cargo/config.toml" && path.exists() {
                 let text = fs::read_to_string(&path).expect("the nix build's cargo config is read");
-                let found = normalize_nix_config(&text, &vendor);
+                let found = normalize_nix_config(&text, vendor);
                 let golden = fs::read_to_string(root().join(NIX_CONFIG_GOLDEN)).unwrap_or_default();
                 assert!(
                     found == golden,

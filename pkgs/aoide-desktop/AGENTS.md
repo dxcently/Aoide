@@ -88,8 +88,9 @@ and each crate's own invariants are in its AGENTS.md (`crates/door/AGENTS.md`,
     file only when its text equals
     `crates/shell/tests/fixtures/nix-cargo-config.toml` once every store path
     (a `/nix/store/` hash and name, in nix's base-32) and the vendor directory
-    `$NIX_BUILD_TOP/cargo-vendor-dir` are placeholders. The golden fixes the
-    linker line too (`no_cargo_config_applies_to_the_workspace`);
+    `cargo-vendor-dir`, the relative value the hook writes, are placeholders.
+    The golden fixes the linker line too
+    (`no_cargo_config_applies_to_the_workspace`);
   - exec's only `.rs` file is `src/lib.rs`, because cargo makes a target of any
     `.rs` under `src/bin`, `tests`, `examples` or `benches`, and exec's table
     allows the lints in each (`the_exec_crate_has_one_source_file`);
