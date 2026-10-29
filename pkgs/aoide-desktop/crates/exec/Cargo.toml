@@ -4,6 +4,10 @@ version = "0.1.0"
 edition = "2021"
 publish = false
 
+[lib]
+# A doctest is a separate crate that no clippy run lints; no member runs them.
+doctest = false
+
 [features]
 # The fakes the door and shell tests run on: `test_doors` and `make_fifo`.
 fakes = []

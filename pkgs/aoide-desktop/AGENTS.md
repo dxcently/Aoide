@@ -25,6 +25,10 @@ and each crate's own invariants are in its AGENTS.md (`crates/door/AGENTS.md`,
   `fakes`, so those tests run with `--all-features`.
 - The token, client and exec tests create directories under `TMPDIR`, so run
   them with `TMPDIR` set to a directory the tests may write.
+- No member runs doctests: each member's manifest sets `[lib] doctest = false`.
+  A doctest is a separate crate that no clippy run lints, so a doctest that
+  starts a process would pass the gate's clippy runs (the golden manifests
+  hold the line; `the_manifests_are_the_golden_ones`).
 - No test sets a process-wide environment variable. A test that needs a path
   passes it as a parameter.
 

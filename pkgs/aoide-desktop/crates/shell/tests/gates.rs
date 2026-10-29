@@ -39,6 +39,8 @@ name = "aoide-desktop-door"
 version = "0.1.0"
 edition = "2021"
 publish = false
+[lib]
+doctest = false
 [features]
 fake = []
 [dependencies]
@@ -53,6 +55,8 @@ name = "aoide-desktop-exec"
 version = "0.1.0"
 edition = "2021"
 publish = false
+[lib]
+doctest = false
 [features]
 fakes = []
 [dependencies]
@@ -71,6 +75,8 @@ name = "aoide-desktop-shell"
 version = "0.1.0"
 edition = "2021"
 publish = false
+[lib]
+doctest = false
 [features]
 fakes = ["aoide-desktop-door/fake", "aoide-desktop-exec/fakes"]
 [[bin]]
