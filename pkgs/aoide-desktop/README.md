@@ -19,3 +19,15 @@ GUI-free libraries; the window is a later crate.
 The window crate will call the shell. The shell sits on the door and exec
 crates. The door depends on nothing else in this directory, and exec depends
 on nothing else in it either.
+
+## The gate
+
+The deciding run has two parts. `nix flake check`'s `pkg-aoide-desktop` builds
+this directory from the committed tree, lints it with clippy, and runs every
+test of its workspace except the names listed in `checkFlags` in
+`default.nix`; those tests fail in the sandbox, so the lane's gate, `dk.sh`,
+runs them. The config test accepts one cargo config, the file nixpkgs' cargo
+setup hook writes at the build's top directory to point cargo at the vendored
+crates, and only when its text equals a golden template once store paths and
+the vendor directory are replaced. A `dk.sh` run is a pre-check: it may read a
+stale dep-info file and proves nothing about the commit.

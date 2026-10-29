@@ -3,6 +3,10 @@ use std::path::{Path, PathBuf};
 
 const EXEC: &str = "crates/exec/src/lib.rs";
 
+/// The golden template of the cargo config a nix build writes; the config
+/// test reads it.
+const NIX_CONFIG_GOLDEN: &str = "crates/shell/tests/fixtures/nix-cargo-config.toml";
+
 /// Words no source in the desktop workspace may hold. A tripwire for a slip: it
 /// reads the raw text, so a split spelling passes it. The lints are the guard.
 const EVERYWHERE: [&str; 6] = [
@@ -139,6 +143,57 @@ fn golden_lines(text: &str) -> Vec<&str> {
         .collect()
 }
 
+/// The nix build's cargo config with every store path and the vendor directory
+/// replaced by a fixed placeholder, so the golden template is the same text on
+/// every build.
+fn normalize_nix_config(text: &str) -> String {
+    text.lines()
+        .map(|line| {
+            let body = line.trim_start();
+            if body.starts_with("directory =") {
+                format!("{}directory = \"<vendor-dir>\"\n", &line[..line.len() - body.len()])
+            } else {
+                format!("{}\n", replace_store_paths(line))
+            }
+        })
+        .collect()
+}
+
+fn replace_store_paths(line: &str) -> String {
+    const STORE: &str = "/nix/store/";
+    let mut out = String::new();
+    let mut rest = line;
+    while let Some(at) = rest.find(STORE) {
+        out.push_str(&rest[..at]);
+        out.push_str("<store-path>");
+        let after = &rest[at + STORE.len()..];
+        let end = after.find(|c: char| matches!(c, '/' | '"' | '\'') || c.is_whitespace());
+        rest = &after[end.unwrap_or(after.len())..];
+    }
+    out.push_str(rest);
+    out
+}
+
+/// Where two texts first differ: the line number, and both lines there.
+fn first_difference(found: &str, golden: &str) -> String {
+    let (mut found, mut golden) = (found.lines(), golden.lines());
+    let mut n = 0;
+    loop {
+        n += 1;
+        match (found.next(), golden.next()) {
+            (None, None) => return String::from("the final newline"),
+            (a, b) if a != b => {
+                return format!(
+                    "line {n}: found `{}`, golden `{}`",
+                    a.unwrap_or("<end of file>"),
+                    b.unwrap_or("<end of file>")
+                );
+            }
+            _ => {}
+        }
+    }
+}
+
 #[test]
 fn the_scan_reads_the_sources() {
     let found = sources();
@@ -239,14 +294,33 @@ fn only_the_roots_clippy_config_is_read() {
 
 /// No cargo config applies to the workspace: none in the root, in any ancestor
 /// up to `/` (a git root does not stop the walk), or in `$CARGO_HOME` when
-/// that is set.
+/// that is set. One is accepted: the config that nixpkgs' cargo setup hook
+/// writes at `$NIX_BUILD_TOP/.cargo/config.toml` (`config` in an older
+/// nixpkgs), which points cargo at the vendored crates. It is accepted only
+/// when its text, with every store path and the vendor directory replaced by
+/// a placeholder, equals the golden template in
+/// `tests/fixtures/nix-cargo-config.toml`. Outside nix, `NIX_BUILD_TOP` is
+/// unset or holds no such file, and nothing is accepted.
 #[test]
 fn no_cargo_config_applies_to_the_workspace() {
+    let build_top = std::env::var_os("NIX_BUILD_TOP").and_then(|top| fs::canonicalize(top).ok());
     let mut dir = fs::canonicalize(root()).expect("the root is read");
     loop {
         for name in [".cargo/config", ".cargo/config.toml"] {
             let path = dir.join(name);
-            assert!(!path.exists(), "{} would configure the gate's build", path.display());
+            if build_top.as_ref() == Some(&dir) && path.exists() {
+                let text = fs::read_to_string(&path).expect("the nix build's cargo config is read");
+                let found = normalize_nix_config(&text);
+                let golden = fs::read_to_string(root().join(NIX_CONFIG_GOLDEN)).unwrap_or_default();
+                assert!(
+                    found == golden,
+                    "{} differs from the golden template at {}\n--- normalized config ---\n{found}",
+                    path.display(),
+                    first_difference(&found, &golden)
+                );
+            } else {
+                assert!(!path.exists(), "{} would configure the gate's build", path.display());
+            }
         }
         if !dir.pop() {
             break;

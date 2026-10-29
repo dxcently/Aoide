@@ -55,7 +55,7 @@ fn env_keys(call: &Value) -> Vec<String> {
 }
 
 #[test]
-fn text_that_starts_with_dashes_or_holds_equals_or_newlines_stays_positional() {
+fn spawned_text_that_starts_with_dashes_or_holds_equals_or_newlines_stays_positional() {
     let (exec, record) = load("positional", &[]);
     exec.call(&["send"], &[], &["--yes", "a=b", "one\ntwo"], None).expect("the call runs");
     let last = records(&record).pop().expect("the send is recorded");
