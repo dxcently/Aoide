@@ -19,6 +19,12 @@ evf() {
     "path:$here#homeConfigurations.$1.$2" 2>&1
 }
 
+# evn <host> <attr>: a NixOS host's own attribute, as JSON; its stderr is kept.
+evn() {
+  nix eval --json --no-write-lock-file --override-input aoide "$aoide" \
+    "path:$here#nixosConfigurations.$1.config.$2" 2>&1
+}
+
 check() {
   local name=$1 want=$2 got=$3
   if [ "$got" = "$want" ]; then
@@ -101,6 +107,20 @@ else
   echo "FAIL a host that writes strillix.runtime.nixos: refusal not seen: ${got:0:200}"
   fails=$((fails + 1))
 fi
+# (h) a NixOS host whose user imports homeModules.nucleus: readOnly counts every definition
+# before priority filtering, so the forwarded mkDefault and the home's plain false collide
+# and are refused by name. The control host (no import) evaluates, so the refusal is the
+# import's doing. This guards that refusal if the forward ever changes.
+got=$(evn collide home-manager.users.fixture.strillix.runtime.nixos)
+if echo "$got" | grep -q "strillix.runtime.nixos' is read-only"; then
+  echo "ok   a NixOS host whose user imports homeModules.nucleus is refused by name"
+else
+  echo "FAIL a NixOS host whose user imports homeModules.nucleus: refusal not seen: ${got:0:300}"
+  fails=$((fails + 1))
+fi
+check "a NixOS host without the import evaluates its home's mark" "false" \
+  "$(nix eval --json --no-write-lock-file --override-input aoide "$aoide" \
+    "path:$here#nixosConfigurations.clean.config.home-manager.users.fixture.strillix.runtime.nixos" 2>/dev/null)"
 # (e) no hostConfig: the constructor refuses with the taught assertion.
 got=$(evf unset activationPackage.drvPath)
 if echo "$got" | grep -q "strillix.hostConfig is not set"; then

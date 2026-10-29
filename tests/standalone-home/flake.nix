@@ -3,7 +3,9 @@
 # The point: Strillix's paint runtime installs on a plain `homeManagerConfiguration`
 # through `homeModules.nucleus` and habit's `mkHome`. Nothing here names a system
 # half: no NixOS host, no `users.users`, no polkit. What the user gets instead is
-# written down in the host module (hosts/standalone.nix).
+# written down in the host module (hosts/standalone.nix). The two `nixosConfigurations`
+# at the bottom exist only for the one collision `homeModules.nucleus` can make with a
+# NixOS host, and are read by run.sh's negative check.
 #
 # Like tests/consumer, this file is applied to the ref under test by the harness,
 # so the tree it evaluates is the commit's own.
@@ -123,8 +125,41 @@
             ];
           };
         };
+      # A NixOS host with home-manager: its user either imports `homeModules.nucleus`
+      # (`collide`) or does not (`clean`, the control). readOnly counts every definition
+      # before priority filtering, so the forwarded mkDefault and the home's plain false
+      # are two definitions and `collide` fails eval naming strillix.runtime.nixos. The
+      # check guards that refusal if the forward ever changes.
+      nixosHost =
+        userModules:
+        lib.nixosSystem {
+          inherit system;
+          modules = [
+            aoide.nixosModules.nucleus
+            home-manager.nixosModules.home-manager
+            {
+              nixpkgs.hostPlatform = system;
+              networking.hostName = "fixture";
+              boot.loader.grub.enable = false;
+              fileSystems."/" = {
+                device = "none";
+                fsType = "tmpfs";
+              };
+              home-manager.users.fixture = {
+                imports = userModules;
+                home.username = "fixture";
+                home.homeDirectory = "/home/fixture";
+                home.stateVersion = "25.11";
+              };
+            }
+          ];
+        };
     in
     {
       homeConfigurations = homes;
+      nixosConfigurations = {
+        clean = nixosHost [ ];
+        collide = nixosHost [ aoide.homeModules.nucleus ];
+      };
     };
 }

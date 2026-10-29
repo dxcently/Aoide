@@ -286,7 +286,8 @@ runtime from `runtime-home.nix` alone. It needs three things the NixOS host give
 - **`aoide.homeModules.nucleus` in the constructor's `extraModules`.** It carries
   the option contract and the module arguments (`aoideInputs`, `ricesRoot`). Without
   it the home refuses with the message that names it. The check reads the option
-  declarations, since a module argument cannot default without recursing.
+  declarations, since a module argument cannot default without recursing. It is for
+  standalone homes only: a NixOS host whose user also imports it fails eval, naming `strillix.runtime.nixos`.
 - **`strillix.hostConfig`.** The host file path, e.g.
   `strillix.hostConfig = "${config.home.homeDirectory}/.config/strillix/host.nix";`.
   The assertion names it when it is unset.
