@@ -319,6 +319,19 @@ other crate in this workspace sits above.
   entry points through this seam, never `inquire` directly ("wrap, don't
   scatter"; the DAG-leaf invariant below still holds, since `inquire` is
   a third-party crate, not an `aoide-*` one).
+- `peercred` — the kernel-truth identity of a connected peer: `peer_cred`
+  (`SO_PEERCRED` on Linux/Android, the peer's token user on native Windows,
+  `None` elsewhere), the `PeerCred` it returns, the `PeerUser` a gate compares
+  (a uid on Unix, a SID on Windows, never one derived from the other), and
+  `own_user`, this process's side of the comparison. The one copy every
+  identity gate in the workspace reads through.
+- `shellbridge` — the socket framework every bridge socket runs: `run_on`
+  binds and listens, `serve` accepts behind the cross-uid floor
+  (`cross_uid_gate`), and each connection offers a line to the socket's
+  `front` hook first, then to its `Verb` table by `cmd`, then drops it
+  audited as `unparseable`. The verbs and the core commands are the caller's;
+  this module holds only the loop, so a socket owner that links only this
+  crate and `aoide-storage` serves one too.
 - `model`, `policy` — model context ceilings, and the daemon's
   `Gate`/`Subscription` policy types.
 

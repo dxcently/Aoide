@@ -418,7 +418,7 @@ mod tests {
         std::env::set_var("XDG_RUNTIME_DIR", &runtime);
 
         let listener = std::os::unix::net::UnixListener::bind(crate::shellbridge::socket_path()).unwrap();
-        std::thread::spawn(move || crate::shellbridge::serve(&listener, &crate::shellbridge::CORE)); // not joined
+        std::thread::spawn(move || aoide_protocol::shellbridge::serve(&listener, &crate::shellbridge::CORE)); // not joined
 
         publish(&notif("no-desktop", "")).expect("core's socket takes the push");
         let path = root.join("notifications.json");

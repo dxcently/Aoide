@@ -33,8 +33,11 @@ pub mod win_proc;
 #[cfg(windows)]
 pub mod win_unix;
 pub mod pick;
+pub mod peercred;
 pub mod policy;
 pub mod registry;
+/// The shellbridge socket framework: the loop every bridge socket runs, and its cross-uid floor.
+pub mod shellbridge;
 pub mod state;
 pub mod style;
 pub mod suggest;

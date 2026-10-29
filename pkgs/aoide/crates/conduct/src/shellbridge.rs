@@ -1,34 +1,25 @@
-//! shellbridge's socket loop: the unix socket that widgets send newline-delimited
-//! JSON commands to (concepts/shellbridge).
+//! aoided's shellbridge socket: [`CORE`], the core arms that run on it, and the commands
+//! behind them. The socket loop every bridge socket shares (the accept, the cross-uid floor,
+//! the verb table and the drop) is `aoide_protocol::shellbridge`.
 //!
-//! Two sockets, one loop, routed by command name in ShellBridge.qml. [`CORE`] is
-//! aoided's `aoide/shellbridge.sock`: the session and project actions, the read-only
-//! trace query, the notification ledger, and the usage and session refreshes. A desktop
-//! process serves its own socket with [`run_on`] and a [`Socket`] of its verbs, and no
-//! core arm: core state is written through aoided. A line no table claims is
-//! audited to that socket's log as `unparseable` and dropped. Only the core socket answers
-//! a malformed `sessiontrace` line, whose caller is parked, with a refusal instead of silence.
+//! [`CORE`] is aoided's `aoide/shellbridge.sock`: the session and project actions, the read-only
+//! trace query, the notification ledger, and the usage and session refreshes. Its `front` hook is
+//! [`core_front`]. A desktop process serves its own socket with `aoide_protocol::shellbridge::run_on`
+//! and a `Socket` of its verbs, and no core arm: core state is written through aoided. A line no
+//! table claims is audited to that socket's log as `unparseable` and dropped. Only the core socket
+//! answers a malformed `sessiontrace` line, whose caller is parked, with a refusal instead of silence.
 //!
 //! [`seed_core_stage`] seeds the stage files and [`run_core`] serves [`CORE`]. A
 //! malformed line, an unknown command, or a dropped connection is logged and
 //! skipped; nothing ever kills the service.
 //!
-//! Moved here from root `src/shellbridge.rs` (Phase 3b restructure,
-//! docs/architecture/PACKAGE-LAYOUT.md); the stage-file FS substrate (`stage_dir`,
-//! `atomic_write`, `with_stage_lock`, …) lives in `aoide-storage`.
+//! The stage-file FS substrate (`stage_dir`, `atomic_write`, `with_stage_lock`, …) lives in
+//! `aoide-storage`.
 
 use aoide_protocol as daemon;
+use aoide_protocol::shellbridge::{drop_unparsed, run_on, wire_cmd, Flow, Socket, UnixStream};
 use aoide_storage::fs::{conducting_stage_dir, seed_if_absent};
 use serde_json::{json, Value};
-use std::io::{BufRead, BufReader};
-#[cfg(unix)]
-use std::os::unix::net::UnixListener;
-#[cfg(unix)]
-pub use std::os::unix::net::UnixStream;
-#[cfg(windows)]
-use aoide_protocol::win_unix::UnixListener;
-#[cfg(windows)]
-pub use aoide_protocol::win_unix::UnixStream;
 use std::path::{Path, PathBuf};
 
 /// aoided's shellbridge socket — **contract**: not computed independently.
@@ -67,33 +58,10 @@ const READ_CHUNKS: usize = 4;
 /// the CLI's own bounds (`--tail` window × clip) can produce.
 const MAX_ANSWER_BYTES: u64 = 4 * 1024 * 1024;
 
-/// What a verb tells the connection loop: keep reading (`Next`), or the line took the
-/// connection's one reply channel and the connection is done (`Answered`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Flow {
-    Next,
-    Answered,
-}
-
-/// One verb a binary registers on the shellbridge socket: the wire `cmd` word it
-/// claims, and the handler that serves a line naming it. Core consults the table
-/// only for a line its own parser does not claim.
-pub struct Verb {
-    pub cmd: &'static str,
-    pub serve: fn(&str, &mut Option<UnixStream>) -> Flow,
-}
-
-/// What one shellbridge socket serves: the core arms (`core`), the desktop verbs it
-/// registers, and the audit log its drops and refusals land in. A socket with
-/// `core: false` does not parse a core command, so no core arm runs in a desktop process.
-pub struct Socket {
-    pub core: bool,
-    pub verbs: &'static [Verb],
-    pub log: fn() -> PathBuf,
-}
-
-/// aoided's socket: the core arms, no desktop verbs, the core audit log.
-pub static CORE: Socket = Socket { core: true, verbs: &[], log: daemon::default_audit_log };
+/// aoided's socket: the core arms through [`core_front`], the core audit log. The core socket
+/// registers no table verbs, so [`core_front`] runs before an empty table and the order is
+/// unobservable: a line the front declines is dropped by the loop, never by a verb.
+pub static CORE: Socket = Socket { verbs: &[], log: daemon::default_audit_log, front: Some(core_front) };
 
 /// One parsed core command from the socket wire (newline-delimited JSON). The wire
 /// shape is defined by ShellBridge.qml. A desktop verb is parsed by the binary that
@@ -727,17 +695,6 @@ pub fn run_bin_bounded(
     ))
 }
 
-/// The `cmd` word a wire line names, when it parses as one JSON object. Total:
-/// malformed JSON names nothing. A verb whose caller is parked on a reply reads
-/// it to recognise its own line after `parse_command` has dropped that line.
-pub fn wire_cmd(line: &str) -> Option<String> {
-    serde_json::from_str::<Value>(line.trim())
-        .ok()?
-        .get("cmd")?
-        .as_str()
-        .map(str::to_string)
-}
-
 /// Does this raw wire line name `cmd`? The core arm of `handle_conn` asks it of an
 /// unparseable line: a `sessiontrace` that failed its own gate is answered on the core
 /// socket alone, and every other unknown line keeps its plain drop-and-audit.
@@ -745,23 +702,9 @@ fn wire_names(line: &str, cmd: &str) -> bool {
     wire_cmd(line).as_deref() == Some(cmd)
 }
 
-/// What a line no verb served leaves behind on any socket: the `unparseable` audit (a
-/// byte count, never the payload). Every dropped line is audited alike, and it answers
-/// nothing: the core socket's refusal of a malformed `sessiontrace` is [`refuse_bad_trace`].
-pub fn drop_unparsed(log: &Path, line: &str) {
-    let _ = daemon::audit(
-        log,
-        daemon::Door::Daemon,
-        daemon::EventClass::Audit,
-        "shellbridge",
-        "unparseable",
-        &format!("dropped one unparseable or unknown command line ({} bytes)", line.len()),
-    );
-}
-
 /// The core socket's answer to a malformed `sessiontrace`: the `unparseable` audit, then,
 /// while the connection still holds its reply channel, the refusal its parked caller is
-/// owed. Only aoided serves the trace query, so only the core arm of `handle_conn` calls this.
+/// owed. Only aoided's socket answers the trace query, so only [`core_front`] calls this.
 fn refuse_bad_trace(log: &Path, line: &str, reply: &mut Option<UnixStream>) -> Flow {
     drop_unparsed(log, line);
     let Some(mut reply) = reply.take() else {
@@ -1518,53 +1461,6 @@ pub fn run_core() {
     run_on(&socket_path(), &CORE);
 }
 
-/// Serve `socket` on `path` until the listener closes. A stale socket from an unclean
-/// shutdown would make the bind fail with EADDRINUSE, so it is unlinked first (the path
-/// is single-owner per user). A bind failure is audited to the socket's log and reported
-/// in the returned status; nothing here panics.
-pub fn run_on(path: &Path, socket: &'static Socket) -> Value {
-    let log = (socket.log)();
-    if let Some(parent) = path.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    let _ = std::fs::remove_file(path);
-    let listener = match UnixListener::bind(path) {
-        Ok(l) => l,
-        Err(e) => {
-            let _ = daemon::audit(
-                &log,
-                daemon::Door::Daemon,
-                daemon::EventClass::Audit,
-                "shellbridge",
-                "bind-failed",
-                &format!("could not bind {}: {e}", path.display()),
-            );
-            return json!({
-                "process": "shellbridge",
-                "state": "error",
-                "error": format!("bind {}: {e}", path.display()),
-                "socket": path.to_string_lossy(),
-            });
-        }
-    };
-
-    let _ = daemon::audit(
-        &log,
-        daemon::Door::Daemon,
-        daemon::EventClass::Audit,
-        "shellbridge",
-        "started",
-        &format!("shellbridge online; listening on {}", path.display()),
-    );
-
-    // Serve forever. `serve` never returns and never panics on client input.
-    serve(&listener, socket);
-
-    // Reached when `incoming()` ends (listener closed) — a clean stop, so systemd's
-    // `Restart=on-failure` can bring us back.
-    json!({ "process": "shellbridge", "state": "stopped", "socket": path.to_string_lossy() })
-}
-
 // ── the notifications ledger ─────────────────────────────────────────────────────
 
 /// Read `stage/notifications.json`, apply `f`, write it back atomically.
@@ -1685,230 +1581,135 @@ pub fn send_line(line: &str) -> std::io::Result<()> {
     stream.flush()
 }
 
-/// LANE IDENTITY P-ID3 (G7) — the shellbridge socket's CROSS-USER floor, pure
-/// and unit-tested without a real different-user connection (same shape
-/// `aoide_secrets::broker::admin_gate` already holds: a peer credential in, an
-/// `Option<String>` refusal reason out). `None` (admitted) only when the
-/// peer's kernel-attested user equals THIS process's own — a uid on Unix, this
-/// token's user SID on native Windows (`graph::identity::own_user`, ONE seam
-/// for both sides of the comparison). shellbridge always runs as the
-/// operator's own user, the SAME user every legitimate connector already runs
-/// as (the QML notifications/bar widgets, `strx notifications push` off dunst's script
-/// hook, `session permit` raising its own summons — every one of them
-/// same-user, none of them a DIFFERENT one). An unidentified peer — no
-/// peer-credential mechanism, a failed read, or a peer whose pid was reused
-/// mid-read — is refused the same fail-closed way a mismatched user is, never
-/// treated as benign.
-///
-/// **This closes a CROSS-uid gap only — it does NOT stop a same-uid
-/// attacker.** Under OQ1-A (LANE IDENTITY's thesis) every legitimate
-/// connector above already shares this exact uid with anything hostile a
-/// prompt-injected agent could run, so a same-uid process forging
-/// `{"cmd":"notificationsverdict",...}` is an OQ1-A-INHERENT residual this floor
-/// does not close — see `CONTRACTS.md`'s identity section for the honest
-/// statement of what remains open on the verdict door specifically.
-fn cross_uid_gate(peer: Option<crate::graph::identity::PeerCred>) -> Option<String> {
-    let own = crate::graph::identity::own_user();
-    match (peer.and_then(|p| p.user()), own) {
-        (Some(peer), Some(own)) if peer == own => None,
-        (Some(peer), Some(own)) => Some(format!(
-            "shellbridge connection refused: peer {} does not match this process's own {}",
-            peer.label(),
-            own.label()
-        )),
-        (_, None) => Some(
-            "shellbridge connection refused: this process's own user could not be determined"
-                .to_string(),
-        ),
-        (None, _) => Some(
-            "shellbridge connection refused: the peer's user could not be determined (the kernel \
-             identity read failed)"
-                .to_string(),
-        ),
-    }
-}
-
-/// Accept connections forever, one thread per connection, behind the cross-uid
-/// gate. `socket` names the arms it serves and the log its refusals land in.
-pub fn serve(listener: &UnixListener, socket: &'static Socket) {
-    for conn in listener.incoming() {
-        match conn {
-            Ok(stream) => {
-                let peer = crate::graph::identity::peer_cred(&stream);
-                if let Some(reason) = cross_uid_gate(peer) {
-                    let _ = daemon::audit(
-                        &(socket.log)(),
-                        daemon::Door::Daemon,
-                        daemon::EventClass::Audit,
-                        "shellbridge",
-                        "peercred-refused",
-                        &reason,
-                    );
-                    continue; // Dropped, unconditionally — never reaches `handle_conn`.
-                }
-                std::thread::spawn(move || handle_conn(stream, socket));
-            }
-            Err(e) => eprintln!("[aoide/shellbridge] accept error (continuing): {e}"),
+/// aoided's socket hook: the core arms, offered each non-empty line before the verb table
+/// (which this socket leaves empty). A core command runs here, and the arms that have a reply
+/// to give answer on the connection and end it. A malformed `sessiontrace` is refused here,
+/// because only aoided's socket answers a trace query. Every other line is `None`, so the
+/// shared loop drops it.
+fn core_front(line: &str, reply: &mut Option<UnixStream>) -> Option<Flow> {
+    let Some(command) = parse_command(line) else {
+        return wire_names(line, "sessiontrace").then(|| refuse_bad_trace(&(CORE.log)(), line, reply));
+    };
+    match command {
+        BridgeCommand::SessionAction { session_id, action, fields } => {
+            // The connection is dedicated to this one action and its reply clone is
+            // the only channel the acknowledgement has. Without it the action would
+            // run unacknowledged — a kill firing while the caller is told nothing
+            // happened — so it does not run at all.
+            let Some(mut reply) = reply.take() else {
+                let _ = daemon::audit(
+                    &daemon::default_audit_log(),
+                    daemon::Door::Daemon,
+                    daemon::EventClass::Audit,
+                    "shellbridge",
+                    "sessionaction-noreply",
+                    &format!("session action {action}: no reply channel; not dispatched"),
+                );
+                return Some(Flow::Answered);
+            };
+            std::thread::spawn(move || {
+                use std::io::Write;
+                let subject = ActionSubject::Session(&session_id);
+                let _ = writeln!(reply, "{}", dispatch_session_action(subject, &action, &fields));
+            });
+            Some(Flow::Answered)
         }
-    }
-}
 
-/// Handle ONE client connection, on its OWN thread (`serve` spawns one per accepted
-/// connection): read newline-delimited JSON lines and act on each. A core verb is
-/// acted on here; any other line is offered to the registered table, and a line no
-/// table claims is audited and dropped. Containment is per-connection: a panic dies
-/// with its own thread, and a slow or idle connection never starves another. A read
-/// error (a dropped connection) ends only THIS connection. No read timeout is set on
-/// the accepted stream: a client may idle between commands, and idleness was never
-/// the fault; serial accept was.
-fn handle_conn(stream: UnixStream, socket: &'static Socket) {
-    let mut reply = stream.try_clone().ok();
-    let reader = BufReader::new(stream);
-    for line in reader.lines() {
-        let line = match line {
-            Ok(l) => l,
-            // Dropped connection / read error: done with this connection only.
-            Err(_) => break,
-        };
-        if line.trim().is_empty() {
-            continue;
+        BridgeCommand::ProjectAction { name, action, fields } => {
+            // Same one-shot-connection discipline as `SessionAction`
+            // above: no reply channel means the action does not run.
+            let Some(mut reply) = reply.take() else {
+                let _ = daemon::audit(
+                    &daemon::default_audit_log(),
+                    daemon::Door::Daemon,
+                    daemon::EventClass::Audit,
+                    "shellbridge",
+                    "projectaction-noreply",
+                    &format!("project action {action}: no reply channel; not dispatched"),
+                );
+                return Some(Flow::Answered);
+            };
+            std::thread::spawn(move || {
+                use std::io::Write;
+                let subject = ActionSubject::Project(&name);
+                let _ = writeln!(reply, "{}", dispatch_session_action(subject, &action, &fields));
+            });
+            Some(Flow::Answered)
         }
-        // A socket that serves no core arms does not parse one; its lines go to its table.
-        let parsed = if socket.core { parse_command(&line) } else { None };
-        match parsed {
-            Some(BridgeCommand::SessionAction { session_id, action, fields }) => {
-                // The connection is dedicated to this one action and its reply clone is
-                // the only channel the acknowledgement has. Without it the action would
-                // run unacknowledged — a kill firing while the caller is told nothing
-                // happened — so it does not run at all.
-                let Some(mut reply) = reply.take() else {
+
+        // Fire-and-forget: dispatch_usage_refresh audits its OWN outcome from
+        // a detached thread (the re-exec's live fetch is ≤15s, too long to
+        // block the accept loop inline — see the function).
+        BridgeCommand::RefreshUsage => {
+            dispatch_usage_refresh();
+            Some(Flow::Next)
+        }
+
+        // Fire-and-forget, same posture: dispatch_recheck_sessions re-execs
+        // `aoide session reap` on a detached thread and audits its own outcome
+        // (a pass that must never block the accept loop). The gadgets refresh off
+        // the resulting stage writes.
+        BridgeCommand::RecheckSessions => {
+            dispatch_recheck_sessions();
+            Some(Flow::Next)
+        }
+
+        // The ledger writes are inline: they are a read-modify-write of one
+        // small local file. Concurrent pushes from different connections'
+        // threads are serialised by `edit_ledger`'s own `with_stage_lock`.
+        BridgeCommand::NotificationsPush { notification } => {
+            dispatch_notifications_push(*notification);
+            Some(Flow::Next)
+        }
+
+        BridgeCommand::NotificationsDismiss { id } => {
+            dispatch_notifications_dismiss(id);
+            Some(Flow::Next)
+        }
+
+        // Detached, like the other two fire-and-forget arms: this one walks
+        // the stage files and writes to a session's control socket.
+        BridgeCommand::NotificationsVerdict { id, verdict } => {
+            dispatch_notifications_verdict(id, verdict);
+            Some(Flow::Next)
+        }
+
+        BridgeCommand::SessionTrace { session_id, lines, clip } => {
+            let Some(mut reply) = reply.take() else {
+                let _ = daemon::audit(
+                    &daemon::default_audit_log(),
+                    daemon::Door::Daemon,
+                    daemon::EventClass::Audit,
+                    "shellbridge",
+                    "sessiontrace-noreply",
+                    "trace query: no reply channel; not dispatched",
+                );
+                return Some(Flow::Answered);
+            };
+            // A polled READ answers on the connection and audits only its
+            // REFUSALS: one line per second per card is not a human
+            // gesture, and the log's job is to hold what was refused (and
+            // why), never a tick-by-tick echo of what was looked at.
+            std::thread::spawn(move || {
+                use std::io::Write;
+                let answer = dispatch_session_trace(&session_id, lines, &clip);
+                if answer.get("ok").and_then(Value::as_bool) != Some(true) {
+                    let reason = answer
+                        .get("reason")
+                        .and_then(Value::as_str)
+                        .unwrap_or("failed");
                     let _ = daemon::audit(
                         &daemon::default_audit_log(),
                         daemon::Door::Daemon,
                         daemon::EventClass::Audit,
                         "shellbridge",
-                        "sessionaction-noreply",
-                        &format!("session action {action}: no reply channel; not dispatched"),
+                        "sessiontrace-refused",
+                        &format!("trace query clip={clip} lines={lines} refused: {reason}"),
                     );
-                    return;
-                };
-                std::thread::spawn(move || {
-                    use std::io::Write;
-                    let subject = ActionSubject::Session(&session_id);
-                    let _ = writeln!(reply, "{}", dispatch_session_action(subject, &action, &fields));
-                });
-                return;
-            }
-
-            Some(BridgeCommand::ProjectAction { name, action, fields }) => {
-                // Same one-shot-connection discipline as `SessionAction`
-                // above: no reply channel means the action does not run.
-                let Some(mut reply) = reply.take() else {
-                    let _ = daemon::audit(
-                        &daemon::default_audit_log(),
-                        daemon::Door::Daemon,
-                        daemon::EventClass::Audit,
-                        "shellbridge",
-                        "projectaction-noreply",
-                        &format!("project action {action}: no reply channel; not dispatched"),
-                    );
-                    return;
-                };
-                std::thread::spawn(move || {
-                    use std::io::Write;
-                    let subject = ActionSubject::Project(&name);
-                    let _ = writeln!(reply, "{}", dispatch_session_action(subject, &action, &fields));
-                });
-                return;
-            }
-
-            // Fire-and-forget: dispatch_usage_refresh audits its OWN outcome from
-            // a detached thread (the re-exec's live fetch is ≤15s, too long to
-            // block the accept loop inline — see the function). Nothing to match
-            // on here, unlike the arms above.
-            Some(BridgeCommand::RefreshUsage) => dispatch_usage_refresh(),
-
-            // Fire-and-forget, same posture: dispatch_recheck_sessions re-execs
-            // `aoide session reap` on a detached thread and audits its own outcome
-            // (a pass that must never block the accept loop). The gadgets refresh off
-            // the resulting stage writes.
-            Some(BridgeCommand::RecheckSessions) => dispatch_recheck_sessions(),
-
-            // The ledger writes are inline: they are a read-modify-write of one
-            // small local file. Concurrent pushes from different connections'
-            // threads (§3b) are serialised by `edit_ledger`'s own
-            // `with_stage_lock`, not by the accept loop.
-            Some(BridgeCommand::NotificationsPush { notification }) => {
-                dispatch_notifications_push(*notification)
-            }
-
-            Some(BridgeCommand::NotificationsDismiss { id }) => dispatch_notifications_dismiss(id),
-
-            // Detached, like the other two fire-and-forget arms: this one walks
-            // the stage files and writes to a session's control socket.
-            Some(BridgeCommand::NotificationsVerdict { id, verdict }) => {
-                dispatch_notifications_verdict(id, verdict)
-            }
-
-            // The read-only trace query: answered on this connection like
-            // `sessionaction` (the caller reads one line back), and run on its
-            // OWN thread because it re-execs the CLI — a bounded child
-            // ([`run_core_bounded`]) must never sit between the accept loop and
-            // the next connection. No reply channel means the query does not
-            // run at all, the same discipline the two action arms hold.
-            Some(BridgeCommand::SessionTrace { session_id, lines, clip }) => {
-                let Some(mut reply) = reply.take() else {
-                    let _ = daemon::audit(
-                        &daemon::default_audit_log(),
-                        daemon::Door::Daemon,
-                        daemon::EventClass::Audit,
-                        "shellbridge",
-                        "sessiontrace-noreply",
-                        "trace query: no reply channel; not dispatched",
-                    );
-                    return;
-                };
-                // A polled READ answers on the connection and audits only its
-                // REFUSALS: one line per second per card is not a human
-                // gesture, and the log's job is to hold what was refused (and
-                // why), never a tick-by-tick echo of what was looked at.
-                std::thread::spawn(move || {
-                    use std::io::Write;
-                    let answer = dispatch_session_trace(&session_id, lines, &clip);
-                    if answer.get("ok").and_then(Value::as_bool) != Some(true) {
-                        let reason = answer
-                            .get("reason")
-                            .and_then(Value::as_str)
-                            .unwrap_or("failed");
-                        let _ = daemon::audit(
-                            &daemon::default_audit_log(),
-                            daemon::Door::Daemon,
-                            daemon::EventClass::Audit,
-                            "shellbridge",
-                            "sessiontrace-refused",
-                            &format!("trace query clip={clip} lines={lines} refused: {reason}"),
-                        );
-                    }
-                    let _ = writeln!(reply, "{answer}");
-                });
-                return;
-            }
-
-            None => {
-                let flow = match wire_cmd(&line).and_then(|cmd| socket.verbs.iter().find(|v| v.cmd == cmd)) {
-                    Some(verb) => (verb.serve)(&line, &mut reply),
-                    None if socket.core && wire_names(&line, "sessiontrace") => {
-                        refuse_bad_trace(&(socket.log)(), &line, &mut reply)
-                    }
-                    None => {
-                        drop_unparsed(&(socket.log)(), &line);
-                        Flow::Next
-                    }
-                };
-                if flow == Flow::Answered {
-                    return;
                 }
-            }
+                let _ = writeln!(reply, "{answer}");
+            });
+            Some(Flow::Answered)
         }
     }
 }
@@ -1918,49 +1719,19 @@ fn handle_conn(stream: UnixStream, socket: &'static Socket) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aoide_protocol::shellbridge::serve;
     use aoide_test_support::sv;
+    use std::io::{BufRead, BufReader};
+    #[cfg(unix)]
+    use std::os::unix::net::UnixListener;
+    #[cfg(windows)]
+    use aoide_protocol::win_unix::UnixListener;
 
-    // ── cross_uid_gate (LANE IDENTITY P-ID3, G7) ────────────────────────
-
+    /// The core socket registers no table verbs: `core_front` runs before the table, and
+    /// that order is only unobservable while the table is empty.
     #[test]
-    fn cross_uid_gate_admits_a_matching_user() {
-        let own = crate::graph::identity::own_user().expect("this process's own user");
-        let peer = crate::graph::identity::PeerCred::for_user(&own);
-        assert_eq!(cross_uid_gate(Some(peer)), None);
-    }
-
-    #[test]
-    fn cross_uid_gate_refuses_a_mismatched_user() {
-        let other = match crate::graph::identity::own_user().expect("this process's own user") {
-            crate::graph::identity::PeerUser::Uid(uid) => crate::graph::identity::PeerUser::Uid(uid + 1),
-            crate::graph::identity::PeerUser::Sid(sid) => {
-                crate::graph::identity::PeerUser::Sid(format!("{sid}-not-this-user"))
-            }
-        };
-        let peer = crate::graph::identity::PeerCred::for_user(&other);
-        assert!(cross_uid_gate(Some(peer)).is_some());
-    }
-
-    #[test]
-    fn cross_uid_gate_refuses_an_unidentified_peer() {
-        // Fail-closed, never a benign default — the same posture
-        // `admin_gate` holds for a peer-identity read that failed.
-        assert!(cross_uid_gate(None).is_some());
-    }
-
-    /// End-to-end against a REAL socketpair (mirrors `identity.rs`'s own
-    /// `peer_cred_on_a_scratch_socketpair_matches_this_processs_own_identity`):
-    /// a connection entirely local to this process reports THIS process's
-    /// own user, which `cross_uid_gate` then admits — proving the floor
-    /// does not refuse the legitimate same-user caller (the desktop QML, the
-    /// dunst hook, `session permit`'s own raise — every real connector Phase
-    /// 0 identified) it must never touch. Both hosts run this one: the
-    /// socketpair is the socket-type seam, the identity is the peer-cred seam.
-    #[test]
-    fn a_real_same_process_socketpair_is_admitted() {
-        let (a, _b) = UnixStream::pair().expect("socketpair");
-        let peer = crate::graph::identity::peer_cred(&a);
-        assert_eq!(cross_uid_gate(peer), None);
+    fn the_core_socket_registers_no_table_verbs() {
+        assert!(CORE.verbs.is_empty());
     }
 
     #[test]

@@ -464,7 +464,7 @@ are core `aoide` identity, root `AGENTS.md`).
 
 `strillix shellbridge --run` is the desktop process. It serves its own socket,
 `$XDG_RUNTIME_DIR/strillix/bridge.sock`, through
-`aoide_conduct::shellbridge::run_on(&socket_path(), &SOCKET)`. `SOCKET` carries the
+`aoide_protocol::shellbridge::run_on(&socket_path(), &SOCKET)`. `SOCKET` carries the
 nine desktop verbs (`bridge::VERBS`) and no core arm: the core verbs and the stage
 seeding are aoided's, on `aoide/shellbridge.sock`, and ShellBridge.qml routes each
 cmd to one of the two. The desktop's drops, refusals and verb outcomes land in

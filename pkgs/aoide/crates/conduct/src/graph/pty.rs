@@ -1561,7 +1561,7 @@ impl Inbox {
                     if self.conns.len() >= MAX_INJECTION_CONNS {
                         continue; // a bound, not a queue (module note).
                     }
-                    let self_injection = super::identity::peer_cred(&stream)
+                    let self_injection = aoide_protocol::peercred::peer_cred(&stream)
                         .map(|cred| refused_self_injection(cred.pid, &self.id))
                         .unwrap_or(false);
                     if self_injection {
@@ -1683,7 +1683,7 @@ impl Inbox {
                         if self.conns.len() >= MAX_INJECTION_CONNS {
                             continue; // the same bound the Unix arm keeps.
                         }
-                        let self_injection = super::identity::peer_cred(&stream)
+                        let self_injection = aoide_protocol::peercred::peer_cred(&stream)
                             .map(|cred| refused_self_injection(cred.pid, &self.id))
                             .unwrap_or(false);
                         if self_injection {

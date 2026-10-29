@@ -246,6 +246,20 @@
   (`EINPROGRESS`) has no test: a Linux unix connect never returns
   `EINPROGRESS`, so only other unix targets reach that branch.
 
+- **The shellbridge loop is generic and has one floor.** `shellbridge::serve`
+  refuses every connection whose peer is not this process's own user
+  (`cross_uid_gate`, fail-closed on an unidentified peer) before it reads a
+  line, and `handle_conn` offers each non-empty line to the socket's `front`
+  hook, then to its verb table, then drops it. The loop names no core command.
+  Only aoided's socket sets `front` (its core arms, `conduct::shellbridge::
+  core_front`); a desktop socket sets `front: None` and serves only its table.
+  A `front` that claims a line answers it on the connection itself and returns
+  `Flow::Answered` to end the connection, or `Flow::Next` to read on.
+- **There is one peer-credential implementation, here.** `peercred::peer_cred`,
+  `PeerCred`, `PeerUser` and `own_user` are not copied into a consumer. A
+  consumer that needs a display helper beside them (a username, a process
+  name) keeps that helper in its own crate and imports the identity types.
+
 ## Extension points
 
 - **A new door-shared type or macro** (something every domain crate would
@@ -284,6 +298,10 @@
   keeps ONE spelling per host, never a `cfg` in the consumer. The rule cuts
   both ways: a new primitive with ONE consumer stays private to that
   consumer.
+- **A new bridge socket is a `Socket` of verbs in its own binary.** It names
+  its `log`, lists its `Verb`s and leaves `front: None`. A socket that needs a
+  hook before its table is the core socket's pattern (`front: Some(...)`), and
+  its hook lives beside the commands it runs, never in this crate.
 - **A Windows arm keeps the Unix contract or refuses by name.** A missing
   capability is never an `Ok(())`, a `true`, or an empty collection — the
   `0o640` feed refusal and `feed_windows`'s validate-before-write are the

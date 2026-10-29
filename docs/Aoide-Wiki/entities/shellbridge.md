@@ -41,7 +41,7 @@ shapes and keeps them current as sessions come and go.
 
 The socket accept loop binds the contract socket and accepts newline-JSON
 commands, reading the connector's kernel-truth uid/pid (`SO_PEERCRED`,
-`graph::identity::peer_cred`) on every accept and refusing a cross-uid
+`aoide_protocol::peercred::peer_cred`) on every accept and refusing a cross-uid
 connection outright — fail-closed like the secrets broker's admin gate; a
 cross-uid floor, not a same-uid guarantee (identity lane P-ID3,
 [[Session-Graph]]'s accounting). A `{cmd:"focuswindow", address}` line calls `focus_window`

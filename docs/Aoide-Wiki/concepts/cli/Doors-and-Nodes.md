@@ -21,7 +21,7 @@ Handlers are spread across
 domain), `pkgs/aoide/crates/client/src/{commands,adapter,node,wire}.rs`
 (the outbound half), `pkgs/aoide/crates/conductor/src/` (the TUI), and
 `pkgs/aoide/crates/strillix/src/commands/shellbridge.rs` (over the loop in
-`pkgs/aoide/crates/conduct/src/shellbridge.rs`); `mcp serve`'s registration
+`pkgs/aoide/crates/protocol/src/shellbridge.rs`); `mcp serve`'s registration
 stays in `pkgs/aoide/crates/cli/src/commands/infra.rs`. The long-running
 launches (`mcp serve --stdio`, `a2a serve`, `conductor`) are special-cased in
 `pkgs/aoide/crates/cli/src/lib.rs::run_cli`.

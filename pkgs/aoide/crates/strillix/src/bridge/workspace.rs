@@ -178,7 +178,7 @@ mod tests {
     use super::*;
     use crate::bridge::testutil::env_lock;
     use crate::bridge::testutil::short_sock;
-    use aoide_conduct::shellbridge::serve;
+    use aoide_protocol::shellbridge::serve;
     use crate::bridge::SOCKET;
     use crate::bridge::testutil::{stub_workspace_core};
     use aoide_test_support::sv;

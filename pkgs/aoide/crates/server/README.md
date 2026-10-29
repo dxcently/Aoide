@@ -196,8 +196,7 @@ terminal's rights to its remote callers.
   and refuses one whose peer uid doesn't match this daemon's own euid,
   fail-closed on an unidentified peer — the same `admin_gate` shape the
   secrets broker already holds, restated here for this THIRD socket
-  (`daemon::cross_uid_gate`, `shellbridge::cross_uid_gate` in
-  `aoide-conduct`). Cross-uid only: every legitimate connector already
+  (`daemon::cross_uid_gate`, `aoide_protocol::shellbridge::cross_uid_gate`). Cross-uid only: every legitimate connector already
   shares the daemon's own uid under OQ1-A. Separately,
   `invocation_from_dispatch_request` stamps an absent `from` flag
   explicit-empty so a `send` handler running INSIDE this process (a

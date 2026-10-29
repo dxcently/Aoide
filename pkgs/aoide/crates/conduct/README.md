@@ -1014,15 +1014,17 @@ blank one is refused too.
   with no roots for a host uses `add` instead, so a host with nothing to
   replace keeps its existing roots rather than being wiped); `removehost`
   runs `project remove <name> --host <host>` and requires exactly one host.
-  Two sockets, one loop (`serve(listener, &'static Socket)`). A `Socket` names
-  its core arms (`core`), its verb table and the audit log its drops land in.
-  `seed_core_stage` (called by aoided's run loop after its own locks, before the
-  watcher's baseline) seeds the stage files; `run_core` serves `CORE` on
-  `aoide/shellbridge.sock`. `run_on(path, socket)`
-  serves a binary's own socket; `strillix shellbridge --run` passes its `SOCKET`
-  (`core: false`), so no core arm runs in the desktop process. A line that
-  no arm or table claims goes to `drop_unparsed(log, …)`, which audits it to
-  that socket's log and drops it, and answers nothing. Only the core socket
+  The socket loop is `aoide_protocol::shellbridge` (`serve`, `run_on`, `Socket`,
+  `Verb`, `Flow`, `drop_unparsed`): the accept, the cross-uid floor, the line
+  routing and the drop. A `Socket` names its verb table, the audit log its drops
+  land in, and an optional `front` hook. This crate owns `CORE` and its `front`,
+  `core_front`, which runs the core arms. `seed_core_stage` (called by aoided's
+  run loop after its own locks, before the watcher's baseline) seeds the stage
+  files; `run_core` serves `CORE` on `aoide/shellbridge.sock`. A desktop binary
+  serves its own socket with `aoide_protocol::shellbridge::run_on`; `strillix
+  shellbridge --run` passes its `SOCKET` (`front: None`), so no core arm runs in
+  the desktop process. A line that no hook or table claims is audited to that
+  socket's log and dropped, and answers nothing. Only the core socket
   answers a malformed `sessiontrace` with a `bad-request` refusal; the desktop
   socket drops it like any line no verb serves.
   The desktop's wire, replies and audit lines are in
@@ -1438,10 +1440,9 @@ blank one is refused too.
   — a fresh `ping` round trip, never cached, never a file; that channel is
   only as trustworthy as the daemon socket's same-uid exclusivity, which has
   the open hole (`AOIDED.md` "Socket") — P-ID3's job to floor, stated
-  honestly in `CONTRACTS.md` rather than oversold here); `peer_cred` reads
-  `SO_PEERCRED` off an accepted `UnixStream` (a local
-  reimplementation of `aoide_secrets::peercred`'s own shape — no new
-  cross-crate edge for one struct+fn). **That mechanism is Linux/Android
+  honestly in `CONTRACTS.md` rather than oversold here); `peer_cred` (in
+  `aoide_protocol::peercred`, the one copy every identity gate shares) reads
+  `SO_PEERCRED` off an accepted `UnixStream`. **That mechanism is Linux/Android
   only, and deliberately NOT ported**: any other host gets the same
   UNIDENTIFIED `None` an unreadable creds read gives — a named refusal,
   never a pid-less `getpeereid` substitute, which could not fill the
@@ -1511,16 +1512,13 @@ blank one is refused too.
   `SessionRecord::set_parent_session` drops it whenever the edge moves. The
   residuals are listed in `CONTRACTS.md`.
 - **The remaining two sockets get a peercred floor (LANE IDENTITY P-ID3).**
-  `identity::peer_cred`/`PeerCred` widened `pub(crate)` (was `pub(in
-  crate::graph)`) so `shellbridge.rs` — a sibling module of `graph`, not a
-  descendant — reuses the SAME primitive rather than a second `SO_PEERCRED`
-  read. `shellbridge::serve`'s accept loop (and `aoide-server`'s own
-  `accept_loop`, over `aoide_secrets::peercred` — already `pub`, already a
-  dependency, so no widening needed there) now refuses any connection whose
-  peer uid doesn't match the process's own euid, fail-closed on an
-  unidentified peer exactly like the secrets broker's `admin_gate`
-  precedent (`shellbridge::cross_uid_gate`/`daemon::cross_uid_gate`, pure
-  and unit-tested without a real different-uid connection). **This is a
+  The identity primitive is `aoide_protocol::peercred`, shared by this crate's
+  `graph` and by `aoide-secrets`. The bridge's accept loop,
+  `aoide_protocol::shellbridge::serve`, and `aoide-server`'s own `accept_loop`
+  both refuse any connection whose peer uid doesn't match the process's own
+  euid, fail-closed on an unidentified peer exactly like the secrets broker's
+  `admin_gate` precedent (`aoide_protocol::shellbridge::cross_uid_gate`/`daemon::cross_uid_gate`,
+  pure and unit-tested without a real different-uid connection). **This is a
   CROSS-uid floor only** — under OQ1-A every legitimate connector on both
   sockets (the QML notifications/bar widgets, `strx notifications push`, `session
   permit`'s own raise, the CLI's `daemon_dispatch` proxy) already shares

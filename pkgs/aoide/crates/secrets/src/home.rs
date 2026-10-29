@@ -122,14 +122,7 @@ pub fn effective_uid() -> u32 {
 /// failed), which every comparison reads as "cannot match", the same
 /// fail-closed answer an unidentified peer gets.
 pub fn effective_user() -> Option<PeerUser> {
-    #[cfg(unix)]
-    {
-        Some(PeerUser::Uid(effective_uid()))
-    }
-    #[cfg(windows)]
-    {
-        aoide_protocol::win_proc::current_user_sid().ok().map(PeerUser::Sid)
-    }
+    aoide_protocol::peercred::own_user()
 }
 
 /// Is this process the host's super-user — the one identity for which the

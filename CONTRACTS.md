@@ -3745,18 +3745,15 @@ every one of them the OPERATOR's own uid, none of them the daemon's;
 `aoided`'s dispatch socket serves the CLI's own `daemon_dispatch` proxy (a
 session-write handler trying the resident daemon before its direct
 stage-write fallback) and any other same-uid caller of `aoide` itself.
-`aoide_conduct::shellbridge::serve` and `aoide_server::daemon::accept_loop`
-both now read `SO_PEERCRED` on accept (`aoide_conduct::graph::
-identity::peer_cred`, widened `pub(crate)` from `pub(in crate::graph)` so
-`shellbridge.rs` — a sibling of `graph`, not a descendant — reuses it
-rather than a second reimplementation; `aoide-server` reuses
-`aoide_secrets::peercred` instead, already `pub`, already a dependency, so
-no widening needed there) and refuse a connection outright — never
-forwarded — whose peer uid does not match the process's own euid,
-fail-closed exactly like the secrets broker's `admin_gate` on an
-unidentified peer (`cross_uid_gate`, restated identically in both files,
-pure and unit-tested without a real different-uid connection). **This is a
-CROSS-uid floor, not a same-uid guarantee** — under OQ1-A every legitimate
+`aoide_protocol::shellbridge::serve` and `aoide_server::daemon::accept_loop`
+both read `SO_PEERCRED` on accept through `aoide_protocol::peercred::
+peer_cred`, the one copy every identity gate shares (`aoide-secrets`
+re-exports it). Both refuse a connection outright, never forwarded, whose
+peer uid does not match the process's own euid, fail-closed exactly like the
+secrets broker's `admin_gate` on an unidentified peer. The bridge's floor is
+`aoide_protocol::shellbridge::cross_uid_gate`, pure and unit-tested without a
+real different-uid connection; `aoide-server` keeps its own gate in
+`daemon.rs`. **This is a CROSS-uid floor, not a same-uid guarantee** — under OQ1-A every legitimate
 connector named above already runs as the SAME uid a prompt-injected agent
 would, so a same-uid process forging `{"cmd":"notificationsverdict",...}` on
 shellbridge's socket, or a raw `{"op":"dispatch","path":["send"],...}` on
@@ -7289,7 +7286,7 @@ below for the separate, orthogonal fact it DOES add.
 
 **Peer identity (`SO_PEERCRED`, task #73).** Every accepted connection's
 kernel-truth `uid`/`gid`/`pid` is read once, at connection start, via
-`SO_PEERCRED` (`crates/secrets/src/peercred.rs`) — the connecting
+`SO_PEERCRED` (`crates/protocol/src/peercred.rs`) — the connecting
 process's REAL uid, verified by the kernel, independent of anything the
 wire request itself claims. A read failure is an UNIDENTIFIED connection
 (`None`), never a panic, never a fabricated uid; every decision keyed on it

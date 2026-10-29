@@ -426,7 +426,7 @@ value" apart from every other denial.
 
 Every `handle_conn`-served connection reads its own kernel-truth caller
 identity ONCE, at connection start, via `SO_PEERCRED`
-(`peercred::peer_cred` — hand-rolled over `libc::getsockopt`, since `std`'s
+(`aoide_protocol::peercred::peer_cred` — hand-rolled over `libc::getsockopt`, since `std`'s
 own `UnixStream::peer_cred` accessor is unstable) — the connecting
 process's real `uid`/`gid`/`pid`, verified by the kernel, independent of
 anything the wire request itself claims. A read failure (a non-`AF_UNIX`
@@ -439,7 +439,7 @@ peer-credential API at all, and the BSD alternative (`getpeereid(3)`) reports
 euid/egid with **no pid** — it cannot fill `PeerCred.pid`, the field the
 sealed-session origin gate walks as the kernel's own ancestry fact
 (`aoide_storage::attest`'s `attested_session`). Swapping the syscall would
-therefore weaken that gate rather than port it, so `peercred::peer_cred` is
+therefore weaken that gate rather than port it, so `aoide_protocol::peercred::peer_cred` is
 `#[cfg]`-gated to Linux/Android and answers the SAME `None` (unidentified) on
 every other host: there, the fail-closed paths below are what runs —
 `dismiss` cannot match an absent peer uid, and `admin` refuses outright.

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### The bridge socket loop lives in aoide-protocol
+
+- The shellbridge socket loop (the accept, the cross-uid floor, the line routing and the drop) moves from `aoide-conduct` to `aoide-protocol::shellbridge`, and peer credentials move to `aoide-protocol::peercred` (one copy, shared with `aoide-secrets`). Core's commands stay in conduct as the core socket's `front` hook. Wire behaviour, reply bytes and audit records are unchanged.
+
 ### Desktop socket drops a misrouted sessiontrace
 
 - The desktop socket (`strillix shellbridge --run`) no longer answers a malformed `sessiontrace` line: it is audited `unparseable` and dropped like any line no verb serves. Only aoided's socket answers one, with the `bad-request` refusal.

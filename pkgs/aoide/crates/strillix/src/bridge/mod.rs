@@ -1,9 +1,10 @@
 //! The desktop verbs of the desktop's own shellbridge socket. `strillix shellbridge --run` serves
-//! [`SOCKET`] (`$XDG_RUNTIME_DIR/strillix/bridge.sock`) through `aoide_conduct::shellbridge::run_on`.
+//! [`SOCKET`] (`$XDG_RUNTIME_DIR/strillix/bridge.sock`) through `aoide_protocol::shellbridge::run_on`.
 //! Core's verbs are aoided's, on `aoide/shellbridge.sock`, and this process serves none of them. A line naming one of these verbs is parsed here ([`parse_command`]) and served here
 //! ([`serve_line`]).
 
-use aoide_conduct::shellbridge::{audit_bridge_action, drop_unparsed, wire_cmd, Flow, Socket, UnixStream, Verb};
+use aoide_conduct::shellbridge::audit_bridge_action;
+use aoide_protocol::shellbridge::{drop_unparsed, wire_cmd, Flow, Socket, UnixStream, Verb};
 use aoide_protocol as daemon;
 use serde_json::{json, Value};
 
@@ -34,7 +35,7 @@ pub fn audit_log() -> std::path::PathBuf {
 }
 
 /// The desktop socket's rules: the desktop verbs and no core arm, logged to the desktop's trail.
-pub static SOCKET: Socket = Socket { core: false, verbs: VERBS, log: audit_log };
+pub static SOCKET: Socket = Socket { verbs: VERBS, log: audit_log, front: None };
 
 /// The verbs `strillix shellbridge --run` registers on its socket. Each is served by
 /// [`serve_line`]; no core verb is among them.
@@ -511,7 +512,7 @@ mod tests {
     #[test]
     fn a_desktop_socket_drops_a_sessiontrace_silently_and_still_refuses_a_bad_workspaceaction() {
         use crate::bridge::testutil::{env_lock, short_sock};
-        use aoide_conduct::shellbridge::serve;
+        use aoide_protocol::shellbridge::serve;
         use std::io::{BufRead, BufReader, Write};
         use std::os::unix::net::UnixListener;
 

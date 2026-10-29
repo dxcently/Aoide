@@ -188,7 +188,7 @@
 - **`SO_PEERCRED` (task #73) gives kernel-truth CALLER identity — it does
   NOT authenticate the wire's `consumer` field, which stays self-asserted
   exactly as the ruling above states.** `handle_conn` reads `SO_PEERCRED`
-  (`peercred::peer_cred`, hand-rolled over `libc::getsockopt` since `std`'s
+  (`aoide_protocol::peercred::peer_cred`, hand-rolled over `libc::getsockopt` since `std`'s
   own accessor is unstable) ONCE per connection, at connection start, and
   threads the same value into every op that connection sends — never
   re-read per line. A read failure is an UNIDENTIFIED connection (`None`),
@@ -214,7 +214,7 @@
   process is claiming); don't wire `SO_PEERCRED`'s uid into
   `automation.consumers`/policy `consumers[]` matching as if it were an
   authenticated consumer name — it isn't one. **And it is a Linux/Android
-  capability, deliberately not a portable one**: `peercred::peer_cred` is
+  capability, deliberately not a portable one**: `aoide_protocol::peercred::peer_cred` is
   `#[cfg]`-gated to those hosts and returns the SAME `None` (unidentified ⇒
   refuse) everywhere else. Don't add a second mechanism there —
   `getpeereid(3)` carries no pid, so it cannot feed the ancestry-based origin
@@ -306,7 +306,7 @@
   calls, again for `watch`'s log-tail (`File`/`stat`), socket calls
   (`client::pending`/`approve`/`dismiss`, reused, never duplicated), and
   `SIGINT` handling (`libc::signal`), and again at task #73 for
-  `peercred::peer_cred`'s `getsockopt(2)` call — the boundary moves as new
+  `aoide_protocol::peercred::peer_cred`'s `getsockopt(2)` call — the boundary moves as new
   I/O concerns earn their own named module, it does not disappear. `peercred`
   itself never writes anything or touches the secrets home at all — it is
   a pure READ of one already-open connection's kernel-stamped identity,

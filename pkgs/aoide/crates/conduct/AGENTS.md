@@ -2969,25 +2969,20 @@ in the message.
   `aoide-storage::attest`, never regrow one in a delegate here.
   `graph/send.rs`'s gate and `graph/conduct.rs`'s accept loop are the two
   consumers in this crate — see each file's own module doc.
-- **`identity::peer_cred`/`PeerCred` are `pub(crate)`, not `pub(in
-  crate::graph)` (LANE IDENTITY P-ID3) — `shellbridge.rs` reuses them
-  directly.** Widened once, for exactly the reason `graph.rs`'s own `mod
-  identity` doc comment gives: a sibling module reusing the SAME kernel-truth
-  primitive beats a second `SO_PEERCRED` read in this crate. **That primitive is
+- **The peer credential is `aoide_protocol::peercred::peer_cred`, not a copy in
+  this crate (LANE IDENTITY P-ID3).** Every gate here reads it from the one
+  shared module. **That primitive is
   a Linux/Android capability, never a portable one: every other host takes the
   SAME UNIDENTIFIED `None` an unreadable creds read gives — a named `cfg`
   refusal, never a substitute (`getpeereid` reports no pid, so it could not fill
   the `PeerCred.pid` these gates walk).** Both callers keep their posture:
-  `shellbridge`'s accept-time `cross_uid_gate` REFUSES an unidentified peer, and
+  the bridge's accept-time `cross_uid_gate` REFUSES an unidentified peer, and
   the control socket's self-injection check reads it as not-self (that narrow
   guard refuses only true self-injection). Do not widen further to plain `pub`
   "for convenience" — this stays an internal primitive, never crossing the
   `aoide-conduct` -> `aoide` crate boundary root's shim re-exports onward;
-  `aoide-server` reuses `aoide_secrets:: peercred` instead (already `pub`,
-  already a dependency) rather than reaching into this crate for it, the same
-  "small local reimplementation over a one-fn cross-crate edge" discipline
-  `identity.rs`'s own module doc states for its relationship to
-  `aoide-secrets::peercred`. **The cross-uid floor on shellbridge/`aoided`
+  `aoide-server` keeps its own gate over `aoide_secrets::peercred`, a re-export of
+  the same module. **The cross-uid floor on shellbridge/`aoided`
   (`cross_uid_gate` in each file, pure, unit-tested without a real different-uid
   connection) does NOT stop a same-uid attacker** — every legitimate connector
   on both sockets already shares the operator's own uid under OQ1-A. Do not add
