@@ -9,11 +9,10 @@ providers, never through the `strillix` entry.
 ```
 modules/dendrites/strillix/
 ├── default.nix        the catalogue entry: the rice renderer (below)
-├── runtime.nix        the strillix runtime, system half: builds the QML tree,
-│                      deploys it, watches it; publishes its home half as
-│                      `strillix.home`
-├── runtime-home.nix   the runtime's home half: the shell lane's home half
-│                      plus `strillix.home`, read through `osConfig`
+├── runtime.nix        the strillix runtime, system half: NixOS only; its
+│                      NixOS-only settings are gated on `strillix.runtime.nixos`
+├── runtime-home.nix   the runtime's home half: a plain home module, the same
+│                      body under NixOS (Home Manager) and a standalone home
 ├── shellbridge.nix    the bidirectional bridge (socket + stage files)
 ├── package.nix        the installed strillix: the core binary with its shipped rices named
 └── bar.nix  launcher.nix  powermenu.nix  notifications.nix
@@ -107,7 +106,7 @@ stay the runtime's own. `runtime.nix` publishes the filled slots as
   seeds the declared rice into both stage twins, reasserts the paint on every
   activation, brings the staged or drafted rice back (below), runs the
   healthcheck timer, and installs the strillix binary (`package.nix`, the wrapper over
-  `pkgs.aoide.strillix`) as the `strillix.enable` fact. It also owns what "built in"
+  the aoide input's `strillix` output) as the `strillix.enable` fact. It also owns what "built in"
   means at the byte level: the deployed `manifest.json`/`registry.json` cover
   the built-in rices only, `pkgs.strillix-rices` is overridden to ship just those
   folders plus `builtin.json` (`{ declared, rices, packages }`), and
@@ -141,14 +140,23 @@ stay the runtime's own. `runtime.nix` publishes the filled slots as
   `$aoide_lock_*` variables at the plain look, `source` of the declared then
   the staged dress (CONTRACTS.md §4), then the widgets that read them, by
   paint keys only. A user's own `~/.config/hypr/hyprlock.conf` wins over it.
+  All of this is the NixOS system half. A standalone home writes none of it: no
+  PAM services, no `/etc/xdg` file, no hyprlock package and no user
+  `hyprlock.conf`. The standalone user installs hyprlock and the PAM service
+  `aoide-lock` themselves; the declared dress still reaches `$STRILLIX_ROOT`
+  from the home half, so hyprlock can read it through a `source` line of its own.
 - **`shellbridge.nix` — the bridge.** The bidirectional seam between the daemon
   / agents and the live desktop: OUT as atomic JSON under `state/stage/`, IN as
   unix-socket commands, and the only consumer of Hyprland's IPC (QML never
   speaks an agent protocol). Gated on `strillix.enable`; `aoide.enable` decides whether its units carry `AOIDE_CORE_BIN`:
   strillix owns the bridge, and its `ExecStart` execs the installed strillix
-  (`package.nix`), a wrapper over `pkgs.aoide.strillix`, a separate droppable output.
-  The unit also spells `STRILLIX_TEMPLATES` in its own `Environment`.
-- **`package.nix` — the installed strillix.** `pkgs.aoide.strillix` wrapped with
+  (`package.nix`), a wrapper over the aoide input's `strillix` output, a separate droppable output.
+  The unit also spells `STRILLIX_TEMPLATES` in its own `Environment`. A standalone home
+  loses its polkit rule (`shellbridge.nix`, the powermenu's reboot, power-off, suspend and
+  hibernate): those four actions fall through to polkit's password prompt. Core's `aoided`
+  unit is NixOS-only too (`pkgs/aoide/module`), so a standalone home runs no daemon, doors
+  or secrets dialog.
+- **`package.nix` — the installed strillix.** The aoide input's `strillix` output wrapped with
   `makeWrapper --set-default STRILLIX_TEMPLATES` pointing at `pkgs.strillix-rices`'
   shipped rices, and `strx` linked beside it. The default applies while the environment leaves the variable unset. `runtime.nix` puts the wrapper on the system
   PATH in place of the bare binary, and the runtime's units and activation exec it.
@@ -269,3 +277,26 @@ rice. QML is a render surface: state, policy, IPC and
 system access live behind bridges reachable with only a shell (CONTRACTS.md §0's
 paint test), so deleting every `.qml` leaves every capability reachable from a
 terminal.
+
+## Standalone home
+
+A standalone home (`homeConfigurations`, built with habit's `mkHome`) gets the
+runtime from `runtime-home.nix` alone. It needs three things the NixOS host gives for free:
+
+- **`aoide.homeModules.nucleus` in the constructor's `extraModules`.** It carries
+  the option contract and the module arguments (`aoideInputs`, `ricesRoot`). Without
+  it the home refuses with the message that names it. The check reads the option
+  declarations, since a module argument cannot default without recursing.
+- **`strillix.hostConfig`.** The host file path, e.g.
+  `strillix.hostConfig = "${config.home.homeDirectory}/.config/strillix/host.nix";`.
+  The assertion names it when it is unset.
+- **The rice and the slot providers.** `habit.rice.declared` names the rice. The
+  rice's home half names only the renderer, so the slot providers (`bar`, `dock`, ...)
+  are named by the host, as `habit.dendrites.<slot>.provider`.
+
+The home defaults `aoide.user` to `home.username` and the two roots to
+`home.homeDirectory` (`.aoide`, `.strillix`); a value the user sets wins. `strillix.enable`
+is set by the home half and must not be written by the host (mkFact refuses it).
+Nothing the NixOS system half does is written: no PAM service, no `/etc/xdg`
+hyprlock config, no hyprlock package. The user installs hyprlock and a PAM service
+for `aoide-lock` themselves.

@@ -32,7 +32,7 @@ aggregation is the part any host can.
   str) }`, keyed by component slot — which each slot's chosen provider writes
   for itself; it is a contract option rather than the strillix runtime's because
   a consumer's own provider writes it on a host with no runtime. The dendrite that owns a fact sets it
-  `true`. A host write that takes effect fails eval (`options.nix`'s `mkFact`:
+  `true`. A host write that takes effect fails eval (`lib/facts.nix`'s `mkFact`:
   a plain or `mkForce` write, or any write with no owner selected); a
   `mkDefault` the owner outranks is dropped, not refused. Every reader — a member
   dendrite or another lane — reads the FACT and never the owning lane's own option. The CORE half (`enable`, `root`, `checkout`,

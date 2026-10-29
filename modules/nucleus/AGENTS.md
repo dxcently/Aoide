@@ -34,13 +34,23 @@ covers only what's specific to the contract.
   `strillix.quickshell.config`, defaulting `null`, and `strillix.wallpaper.provider` —
   the active provider's own name, defaulting `"quickshell"`) are declared here;
   the dendrite that owns one sets it `true`, and no host writes it. The owner is
-  the file Aoide's own catalogue names for it (`options.nix`'s `mkFact`), so a
+  the file Aoide's own catalogue names for it (`lib/facts.nix`'s `mkFact`), so a
   consumer that maps `quickshell`, `stylix` or `strillix` to a file of its own is
   refused until that lookup takes the consumer's catalogue. A member dendrite or an assertion that needs to know "is there a
   shell / a session here" reads the fact — never `aoide.<name>.enable`, never a
   lane's own option. `aoide.sessionTarget` is the same rule from the other
   side: it is core-declared (`pkgs/aoide/module/options.nix`) and a painting
   lane sets it, so the unit that anchors on it need not know which lane did.
+- **`strillix.runtime.nixos` is `readOnly` and internal; `strillix.quickshell.nixos`
+  is a plain internal bool.** Neither is a fact. `runtime.nixos` has exactly one
+  definition per level: the NixOS nucleus module sets it from the `strillix.enable`
+  fact, and a standalone home's `standaloneNucleus` sets `false`. `readOnly` refuses
+  a host's second write by name (a default would count as one, so there is none).
+  `quickshell.nixos` is set `true` by `dendrites/quickshell/system.nix` on NixOS and
+  nothing else does. Both are forwarded to Home Manager like any shared option, so
+  the home half leaves the packages and units to the system half. A fact would refuse
+  the forward, because mkFact accepts only its owner's own write. A host must not
+  write either flag.
 - **An option a member reads is declared in that member.**
   `aoide.config.settings` is declared in `aoide-config.nix`, `aoide.a2a.*` in
   `aoided.nix`, `aoide.secrets.members` in `aoide-secrets.nix`. The option exists

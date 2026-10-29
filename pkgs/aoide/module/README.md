@@ -48,9 +48,10 @@ package build from the same one-line input.
 
 One line pulls in the option contract, the `aoided` unit, and the
 overlay together — no separate `nixpkgs.overlays` entry, no second
-`aoide.*` declaration to keep in sync. `modules/nucleus/options.nix`
-is this repo's own consumer: it imports the same line rather than
-declaring the seven options itself.
+`aoide.*` declaration to keep in sync. `modules/nucleus/options.nix` is this repo's own consumer. A standalone Home
+Manager user imports the same file through `homeModules.nucleus`, which reads it
+by input path (`${inputs.aoide}/module/options.nix`), not through a flake output:
+`module/` is outside the aoide package's source, so the package does not move.
 
 A stranger outside this repo pins the same five lines — no `modules/`
 import, no `inputs.quickshell`/`hyprland`/`nvf`:

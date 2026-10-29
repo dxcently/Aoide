@@ -39,32 +39,7 @@ let
   # write at its priority. A host write the owner outranks (a `mkDefault`
   # against the owner's plain `true`) never reaches the merge: it is dropped and
   # cannot change the value.
-  inherit (import ../default.nix) catalogue;
-  mkFact =
-    name:
-    let
-      owner = toString catalogue.${name};
-    in
-    types.bool
-    // {
-      merge =
-        loc: defs:
-        let
-          # The owner is the file the catalogue names for `name`, or any file
-          # under it when the entry is a directory (`strillix = ./dendrites/strillix;`):
-          # a lane may import the owner's files by path, and the fact it sets
-          # is still written from the owner's directory.
-          fromOwnerOrDecl =
-            d:
-            toString d.file == owner
-            || lib.hasPrefix (owner + "/") (toString d.file)
-            || lib.hasSuffix "/modules/nucleus/options.nix" (toString d.file);
-        in
-        if lib.length defs == 1 && fromOwnerOrDecl (lib.head defs) then
-          (lib.head defs).value
-        else
-          throw "The option `${lib.showOption loc}' is a read-only fact, set only by the dendrite that owns it. Read it, never set it.";
-    };
+  inherit (import ../../lib/facts.nix { inherit lib; }) mkFact;
 
   # ── Component override submodules ─────────────────────────────────────────
   # v0 component tier: bar.* / notif.* / window.*. Each field is optional and
@@ -459,13 +434,12 @@ let
 
 in
 {
-  # The core's own module (`pkgs/aoide/module`, `nixosModules.default` of the
-  # `aoide` input) is imported by the nucleus module that closes over this flake's
-  # inputs — `lib/strillix.nix`'s `nucleusModule` — and not here: an `imports`
-  # list cannot read a module argument that `_module.args` supplies (the module
-  # list is what `config` is assembled from, so the read is a cycle), and this
-  # file must keep evaluating when a bare `evalModules` imports it without any
-  # lane around it (`lib/options.nix` reads the option declarations that way).
+  # One declaration, two evaluations: NixOS imports this file through
+  # `modules/nucleus`, and Home Manager through `homeModules.nucleus`
+  # (lib/strillix.nix). The key stops one evaluation taking it twice. Nothing here
+  # reads `networking` or any other NixOS-only value: a value that needs one is set
+  # by the NixOS system half (lib/strillix.nix), and a standalone host sets its own.
+  key = "strillix/nucleus/options";
   options.strillix = {
     # ── Rice runtime root and host file (moved here from the core module) ──
     # Both name Strillix's own state. The core module (`pkgs/aoide/module`) owns
@@ -485,9 +459,10 @@ in
       '';
     };
 
+    # No default here: the NixOS system half (lib/strillix.nix) sets the value, and
+    # a standalone home sets its own. `defaultText` documents that NixOS default.
     hostConfig = mkOption {
       type = types.str;
-      default = "${config.aoide.checkout}/hosts/${config.networking.hostName}/default.nix";
       defaultText = literalExpression ''"''${config.aoide.checkout}/hosts/''${config.networking.hostName}/default.nix"'';
       description = ''
         This machine's host config file — the module holding its one
@@ -824,6 +799,19 @@ in
     # paint lane is headless. `strillix.enable` below, declared beside the
     # package it installs, is the third fact in this family.
     quickshell = {
+      # The same mark for the shell, set by `dendrites/quickshell/system.nix`.
+      nixos = mkOption {
+        type = types.bool;
+        default = false;
+        internal = true;
+        description = ''
+          True on a NixOS host whose shell is the system half
+          (`dendrites/quickshell/system.nix`). Read by the home half, which
+          then leaves the quickshell package to the system placement. Set only
+          by that file; read it, never set it.
+        '';
+      };
+
       enable = mkOption {
         type = mkFact "quickshell";
         default = false;
@@ -890,6 +878,26 @@ in
         it to the CLI and the QML as `$STRILLIX_ROOT/stage/wallpaper-provider`
         (CONTRACTS.md §4), and anything else that must know who paints reads
         the same file.
+      '';
+    };
+
+    # The system half's own mark: set `true` only by `dendrites/strillix/runtime.nix`,
+    # and forwarded to Home Manager so the home half installs its packages and units
+    # only where the system half did not (lib/strillix.nix). Not a mkFact: a forwarded
+    # value must reach Home Manager from the constructor's file, which mkFact refuses.
+    # No default: `readOnly` counts a default as a definition, so every level defines
+    # it exactly once — the NixOS nucleus module from the fact, a standalone home as false.
+    runtime.nixos = mkOption {
+      type = types.bool;
+      readOnly = true;
+      internal = true;
+      description = ''
+        True on a NixOS host whose strillix runtime is the system half
+        (`dendrites/strillix/runtime.nix`), false on a standalone home. The home
+        half reads it to leave the packages and the shellbridge unit to the
+        system placement. Exactly one definition exists per level: the NixOS nucleus
+        module's (`lib/strillix.nix`, from the fact), or a standalone home's own
+        (`standaloneNucleus`). `readOnly` refuses a second one by name; read it, never set it.
       '';
     };
 

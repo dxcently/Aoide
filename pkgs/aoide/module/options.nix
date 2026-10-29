@@ -10,6 +10,7 @@ let
     ;
 in
 {
+  key = "aoide/module/options";
   options.aoide = {
     enable = mkEnableOption "the Aoide agent-wearable desktop framework";
 

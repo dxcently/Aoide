@@ -9,10 +9,16 @@
 # NAMES the layout. The fact's value stays `"quickshell"`, the name the
 # runtime, the CLI and the QML already read (README.md).
 { lib, ... }:
+let
+  claim = {
+    components.wallpaper.provider = "strillix";
+    surfaces.wallpaper.owner = "quickshell";
+    wallpaper.provider = lib.mkDefault "quickshell";
+  };
+in
 {
   imports = [ ../strillix/runtime.nix ];
+  habit.home.strillix = claim;
   habit.home.imports = [ ../strillix/runtime-home.nix ];
-  strillix.components.wallpaper.provider = "strillix";
-  strillix.surfaces.wallpaper.owner = "quickshell";
-  strillix.wallpaper.provider = lib.mkDefault "quickshell";
+  strillix = claim;
 }

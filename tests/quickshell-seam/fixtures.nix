@@ -144,13 +144,12 @@ in
 
   # Two component slots, each bringing the strillix runtime by path: what is read
   # is that the runtime landed ONCE — one shell unit, one bridge, one home half
-  # (`strillix.home` declared by one file), an environment no second copy
-  # doubled — and that both components were recorded.
+  # (its migrate activation, which a second import would collide with), an
+  # environment no second copy doubled — and that both components were recorded.
   twoComponents =
     let
       two = hostWith riceArgs "test-two-components";
       cfg = two.config;
-      opts = two.options;
       home = cfg.home-manager.users.${cfg.aoide.user};
       userUnits = home.systemd.user.services or { };
       env = userUnits.aoide-quickshell.Service.Environment or [ ];
@@ -163,7 +162,9 @@ in
         lib.filter (lib.hasInfix "shellbridge") (builtins.attrNames cfg.systemd.user.services)
       );
       envDuplicates = builtins.length env - builtins.length (lib.unique env);
-      homeDeclarations = builtins.length opts.strillix.home.declarations;
+      homeActivation = builtins.length (
+        lib.filter (n: n == "aoideMigrateRoots") (builtins.attrNames (home.home.activation or { }))
+      );
       components = builtins.attrNames cfg.strillix.components;
       strillix = cfg.strillix.enable;
       quickshell = cfg.strillix.quickshell.enable;

@@ -47,6 +47,13 @@ let
   # templates path — and every session variable and unit `Environment` that
   # interpolates it.
   ricesRoot = ../rices;
+
+  # The option files both levels declare, once: NixOS reaches them through modules/nucleus
+  # and the core module, Home Manager through homeNucleus. The forward reads this list too.
+  levelNeutral = [
+    ../modules/nucleus/options.nix
+    ../pkgs/aoide/module/options.nix
+  ];
   rices = import ./rices.nix {
     inherit lib ricesRoot;
   };
@@ -113,22 +120,101 @@ let
   # module-application time: a guard forced in the top-level attrset asks the
   # same question the wrong way (the error above). A host that never imports
   # home-manager's NixOS module gets no option named that from here.
+  # The option contract as Home Manager reads it: the same options.nix the system
+  # half imports, and the core's `aoide.*` options. Declared once per evaluation;
+  # a standalone home imports it (`homeModules.nucleus`), a NixOS host gets it
+  # through `sharedModules` below.
+  homeNucleus = {
+    key = "strillix/homeNucleus";
+    imports = levelNeutral;
+    # The module arguments the home half reads, closed over here: a standalone
+    # home has no NixOS nucleus to set them, and a NixOS host gets the same values.
+    config._module.args = {
+      aoideInputs = inputs;
+      inherit ricesRoot;
+    };
+  };
+
+  # A standalone home has no system half, so it alone defines the runtime's own mark:
+  # false. Plain, so a host's write is a second definition, and `strillix.runtime.nixos`
+  # (readOnly, nucleus/options.nix) refuses it by name. NixOS never imports this: its
+  # forward carries the system half's value instead.
+  standaloneNucleus = {
+    key = "strillix/standaloneNucleus";
+    imports = [ homeNucleus ];
+    config.strillix.runtime.nixos = false;
+  };
+
   nucleusModule =
-    { options, ... }:
+    { options, config, ... }:
     let
       imports = [
         ../modules/nucleus
         inputs.aoide.nixosModules.default
       ]
       ++ lib.optional (inputs ? stylix) inputs.stylix.nixosModules.stylix;
+
+      # What the home half reads from the system config, forwarded by value: every
+      # option the two level-neutral files declare (modules/nucleus/options.nix and
+      # the core's module/options.nix), minus facts. A fact is never forwarded:
+      # mkFact refuses a forwarded write, and each owner sets its fact at both
+      # levels. Derived from the declarations, so a new option needs no line here.
+      sharedFiles = map toString levelNeutral;
+      sharedPaths =
+        prefix: tree:
+        lib.concatLists (
+          lib.mapAttrsToList (
+            name: node:
+            let
+              path = prefix ++ [ name ];
+            in
+            if node ? _type then
+              if
+                !(lib.any (f: lib.elem f sharedFiles) (node.declarations or [ ])) || (node.type.isFact or false)
+              then
+                [ ]
+              # An attrsOf option merges per key: a forwarded mkDefault of the whole
+              # value is dropped beside a home definition, so each key goes alone.
+              else if (node.type.name or "") == "attrsOf" then
+                map (key: path ++ [ key ]) (lib.attrNames (lib.getAttrFromPath path config))
+              else
+                [ path ]
+            else
+              sharedPaths path node
+          ) tree
+        );
+      forwarded =
+        lib.recursiveUpdate
+          (lib.foldl' lib.recursiveUpdate { } (
+            map (path: lib.setAttrByPath path (lib.mkDefault (lib.getAttrFromPath path config))) (
+              sharedPaths [ ] (lib.getAttrs [ "aoide" "strillix" ] options)
+            )
+          ))
+          {
+            # A module argument, not an option: the Home Manager half reads it (runtime-home.nix).
+            _module.args.riceDirs = config._module.args.riceDirs;
+          };
     in
     {
       inherit imports;
       config = {
         _module.args.aoideInputs = inputs;
+        # The NixOS system half's value for the host file (the option has no default of its own).
+        strillix.hostConfig = lib.mkDefault "${config.aoide.checkout}/hosts/${config.networking.hostName}/default.nix";
+        # The system half's one definition of the runtime mark: true exactly when the runtime
+        # is in the host (the fact runtime.nix sets). Always defined here, so a host without
+        # the dendrite still has its one value; the home half receives it by the forward.
+        strillix.runtime.nixos = config.strillix.enable;
       }
       // lib.optionalAttrs (options ? home-manager) {
-        home-manager.extraSpecialArgs.aoideInputs = inputs;
+        home-manager.extraSpecialArgs = {
+          aoideInputs = inputs;
+          inherit ricesRoot;
+        };
+        home-manager.sharedModules = [
+          homeNucleus
+          { config = forwarded; }
+        ];
       };
     };
 in
@@ -137,7 +223,7 @@ in
 
   # The nucleus module as a consumer takes it — the same module value
   # `nixosModules.nucleus` exports (see the let-block above).
-  inherit nucleusModule;
+  inherit nucleusModule homeNucleus standaloneNucleus;
 
   mkHost =
     name:
