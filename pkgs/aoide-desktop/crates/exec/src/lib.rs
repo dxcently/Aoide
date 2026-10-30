@@ -693,7 +693,7 @@ fn spawn_held(program: &Pinned, args: &[OsString], env: &[(OsString, OsString)])
     let pidfd = match open_pidfd(child.id()) {
         Ok(fd) => fd,
         Err(e) => {
-            let _ = terminate(child.id());
+            drop(retire_unreaped(child));
             return Err(ExecError::Io(e));
         }
     };
@@ -707,6 +707,30 @@ fn spawn_held(program: &Pinned, args: &[OsString], env: &[(OsString, OsString)])
     let (err_tx, stderr_rx) = mpsc::channel();
     thread::spawn(move || err_tx.send(capture(stderr)));
     Ok(Follow { child: Some(child), pidfd, lines, stderr: stderr_rx })
+}
+
+/// Ends a child this process started and has not reaped, after its pidfd would not
+/// open. Nothing has reaped it, so its pid is still its own, and this is the one
+/// pid signal outside `run`. The child is reaped on a thread. The handle gives its
+/// exit status.
+fn retire_unreaped(child: std::process::Child) -> thread::JoinHandle<io::Result<ExitStatus>> {
+    let mut child = child;
+    let _ = signal_unreaped(child.id(), libc::SIGINT);
+    thread::spawn(move || child.wait())
+}
+
+/// Sends `signal` to `pid`, an unreaped child this process started. Only
+/// `retire_unreaped` calls it, with SIGINT. It refuses the pids `terminate` refuses.
+fn signal_unreaped(pid: u32, signal: libc::c_int) -> io::Result<()> {
+    let pid = signal_target(pid).ok_or_else(|| {
+        io::Error::new(io::ErrorKind::InvalidInput, "a pid to signal is 2 to i32::MAX, and not this process")
+    })?;
+    // SAFETY: a plain syscall taking a pid and a signal number; no memory is passed.
+    if unsafe { libc::kill(pid, signal) } == 0 {
+        Ok(())
+    } else {
+        Err(io::Error::last_os_error())
+    }
 }
 
 /// Splits `pipe` into lines and sends each on `out`. A line past `LINE_CAP` is
@@ -1317,6 +1341,13 @@ mod tests {
             }
         }
         assert!(argv(aoide, &schema, &["config"], &[], &["x"]).is_ok(), "a positional naming no path is fine");
+    }
+
+    #[test]
+    fn an_unreaped_child_whose_pidfd_will_not_open_is_interrupted_and_reaped() {
+        let child = std::process::Command::new("sleep").arg("30").spawn().expect("sleep starts");
+        let status = retire_unreaped(child).join().expect("the reaper ends").expect("the child is reaped");
+        assert_eq!(status.signal(), Some(libc::SIGINT), "{status:?}");
     }
 
     #[test]

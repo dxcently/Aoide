@@ -129,6 +129,10 @@ are in README.md.
   refuses the same pids. Its one production caller is `run`, on the child it has
   not reaped, so the pid is that child's. The door tests reach it through
   `test_doors::terminate`.
+- `retire_unreaped` is the one pid signal outside `run`. It sends SIGINT, never
+  SIGTERM, to a child `spawn_held` could not give a pidfd, because the child is
+  unreaped and its pid cannot be reused. It reaps the child on a thread. It
+  refuses the pids `terminate` refuses, through `signal_unreaped`.
 - A non-zero exit is not an error. `call` returns the child's status and its
   stderr, verbatim, for the caller to show.
 

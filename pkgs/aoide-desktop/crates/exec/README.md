@@ -28,7 +28,9 @@ reaches aoide-protocol only through here, and of it only `untrusted`.
 - The door helpers the shell's door code calls, all `pub`: `euid`,
   `open_pidfd`, `terminate_pidfd`, `pidfd_exited`, `stat_of` (with its `Stat`)
   and `Arrived`. `terminate` stays crate-private: `run` is its one production
-  caller.
+  caller. The one pid signal outside `run` is `retire_unreaped`, which sends
+  SIGINT to a child that `spawn_held` could not give a pidfd, and reaps it on a
+  thread. The child is unreaped, so its pid is still its own.
 - Behind `fakes`, `make_fifo` makes the FIFO the token test puts at the token
   path. `test_doors` starts a door (`spawn`), signals one (`terminate`), copies
   a program through a child (`copy_program`), makes a zombie (`zombie`), and
@@ -135,6 +137,8 @@ Drop for Follow              SIGINT through the pidfd; reaps on a thread
 
 - `terminate` sends SIGTERM to a pid. Its one production caller is `run`, on a
   child it has not reaped. Its refusals are in AGENTS.md.
+- `retire_unreaped` sends SIGINT to a pid, in `spawn_held`'s pidfd-failure path
+  only, and reaps the child on a thread. It is the one pid signal outside `run`.
 
 ## Tests
 
