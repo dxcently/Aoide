@@ -75,6 +75,6 @@ pub fn register(r: &mut Registry) {
             "job runs --name=nightly --json",
         ],
         brief: "Show the runs of local jobs from the journal.",
-        kind: "job", verb: "show",
+        kind: "job", verb: "list",
     ));
 }
