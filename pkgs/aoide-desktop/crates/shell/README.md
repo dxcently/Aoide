@@ -145,8 +145,10 @@ doors.rs    Doors::open(exec, root, runtime, out)
   idle turn sets `closing` and shuts its stream. SIGTERM goes through the
   pidfd; a signal that fails, but for a door already gone, clears `closing` and
   returns its error, and the record, the watch and the mark stay. The exit is
-  awaited for 10 s. An exit detaches the watch (2 s bound) and removes the
-  record: `Exited`. A door still live clears `closing`, withdraws an armed mark,
+  awaited for 10 s. An exit removes the record from the store, then detaches
+  the watch (2 s bound): `Exited`. A store write that fails on an exit keeps
+  the record and the watch, clears `closing`, and returns the error, with the
+  mark as it was. A door still live clears `closing`, withdraws an armed mark,
   and keeps its record and its watch: `StillLive`. The wait never escalates.
 - While `closing` stands, the watch takes its stream's end as the close's: it
   neither drops the door nor reconnects. Once `closing` clears, a stream that
@@ -159,8 +161,12 @@ doors.rs    Doors::open(exec, root, runtime, out)
   stands; a turn still running keeps the mark (`StaysArmed`), and any other
   answer leaves the mark as the close left it. A close whose door outlives its
   signal withdraws the mark, whichever call made the close,
-  `close_after_turn`'s idle arm included; a close that fails with an error
-  leaves it, and the next turn end tries again. `revoke` withdraws a mark.
+  `close_after_turn`'s idle arm included. A close that fails with an error on
+  an idle door leaves no mark: this call arms none, and the caller gets the
+  error and may retry. A mark armed before the call stays armed. `revoke`
+  withdraws a mark.
+  A turn that starts between `close_after_turn`'s idle read and its close
+  arms the mark (`Armed`) rather than being refused.
 - A stream that ends withdraws an armed mark, and the watch sends
   `Event::Revoked { launch_id, why }`, with `why` through `visible`. A close
   holds the mark while it ends its own stream, and a door that is gone sends
@@ -213,7 +219,7 @@ asks.rs     Doors::prepare_answer(launch, ask, label)
   KiB or 60 lines the dialog is capped. A same-id ask that the door sends again
   replaces the stored one; a change to any of those fields gives it a new
   digest, so a yes confirmed on the earlier text is refused.
-- A yes binds the call that was shown, under ruling 163. The residual: a door
+- A yes binds the call that was shown. The residual: a door
   that changes its pending ask after the check in `send_answer` and before the
   answer lands applies the yes to the change. The shell cannot see that change,
   so only Eidolon can close it.

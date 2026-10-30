@@ -858,6 +858,43 @@ fn a_close_after_turn_that_leaves_the_door_live_withdraws_the_mark() {
     assert_eq!(world.count("SIGTERM"), 1, "the door was signalled once");
 }
 
+#[test]
+fn a_turn_that_starts_after_the_idle_read_is_armed_not_refused() {
+    let world = World::new("race-idle");
+    let (tx, rx) = mpsc::sync_channel(EVENTS_BOUND);
+    let mut doors = world.open(tx);
+    let id = world.launch(&mut doors);
+    let pid = world.pid(&id);
+    world.command("idle");
+    assert!(until(Duration::from_secs(5), || doors.turn(&id).unwrap() == TurnState::Idle));
+    doors.race_turn_between_locks(TurnState::Running);
+    assert_eq!(doors.close_after_turn(&id).unwrap(), Close::Armed, "the turn that started is armed, not refused");
+    assert_eq!(world.count("SIGTERM"), 0, "nothing is signalled while the turn runs");
+    assert!(alive(pid), "the door lives");
+    world.command("running");
+    thread::sleep(Duration::from_millis(500));
+    world.command("idle");
+    event_where(&rx, |e| matches!(e, Event::CloseDue { .. }));
+    assert!(matches!(doors.close_due(&id).unwrap(), Close::Exited { .. }), "the armed close runs once the turn ends");
+    assert_eq!(world.count("SIGTERM"), 1, "one signal, after the turn ended");
+}
+
+#[test]
+fn a_close_whose_store_write_fails_keeps_its_watch_and_its_record() {
+    let world = World::new("store-write");
+    let (tx, rx) = mpsc::sync_channel(EVENTS_BOUND);
+    let mut doors = world.open(tx);
+    let id = world.launch(&mut doors);
+    world.command("idle");
+    assert!(until(Duration::from_secs(5), || doors.turn(&id).unwrap() == TurnState::Idle));
+    let store = world.root().join("state/desktop/doors.json");
+    fs::remove_file(&store).expect("the record file is removed");
+    fs::create_dir(&store).expect("a directory takes the record file's place");
+    assert!(doors.close_after_turn(&id).is_err(), "the store write fails, so the close errors");
+    assert!(doors.launch_ids().contains(&id), "the watch is kept after the failed write");
+    event_where(&rx, |e| matches!(e, Event::Gone { .. }));
+}
+
 /// Leaves a watch held in `deliver` on a one-slot channel, and returns its doors,
 /// the receiver and the launch id. Each step makes the next one certain. Taking
 /// events through the stream's `CaughtUp` empties the slot the replay filled.
@@ -1686,4 +1723,18 @@ fn a_close_due_for_a_door_idle_while_the_channel_is_full_still_arrives() {
     thread::sleep(Duration::from_millis(200));
     let seen = events_through(&rx, |e| matches!(e, Event::CloseDue { .. }));
     assert!(matches!(seen.last(), Some(Event::CloseDue { launch_id }) if *launch_id == id), "{seen:?}");
+}
+
+#[test]
+fn a_turn_that_is_unknown_at_the_lock_is_busy_and_arms_nothing() {
+    let world = World::new("race-unknown");
+    let (tx, _rx) = mpsc::sync_channel(EVENTS_BOUND);
+    let mut doors = world.open(tx);
+    let id = world.launch(&mut doors);
+    world.command("idle");
+    assert!(until(Duration::from_secs(5), || doors.turn(&id).unwrap() == TurnState::Idle));
+    doors.race_turn_between_locks(TurnState::Unknown);
+    assert_eq!(doors.close_after_turn(&id).unwrap(), Close::Busy, "an unknown turn at the lock is busy, not armed");
+    assert_eq!(world.count("SIGTERM"), 0, "nothing is signalled");
+    assert_eq!(doors.close_due(&id).unwrap(), Close::Revoked, "no mark stands");
 }

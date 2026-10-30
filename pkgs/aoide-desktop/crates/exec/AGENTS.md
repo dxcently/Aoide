@@ -7,17 +7,26 @@ are in README.md.
 
 - This crate's lints table allows `unsafe_code`, `disallowed_methods` and
   `disallowed_types`. Every other member takes the workspace table, which
-  forbids the three, so this is the one crate where `unsafe`, a process start
-  or a signal can appear.
+  forbids the three, so this is the one crate of this workspace where `unsafe`,
+  a process start or a signal can appear. Its path dependency aoide-protocol
+  starts processes too (its dialog and host shell do), outside this workspace's
+  lints; door and shell reach it only through exec's `untrusted` re-export.
 - Every file this crate compiles lies inside that boundary. The gate holds the
   crate to one source file, `src/lib.rs`: cargo makes a target of any `.rs`
   file under `src/bin`, `tests`, `examples` or `benches`, and this table allows
   the three lints in each (`the_exec_crate_has_one_source_file`). A `#[path]`
-  module or an `include!` would compile another file under this table, so the
+  module or an `include!` would compile another file under this table (protocol,
+  exec's path dependency, has one: `feed.rs:62`, under protocol's own table), so
+  the
   gate also reads the dep-info rustc writes for this crate and refuses any file
-  in it but `src/lib.rs`, the root's `clippy.toml` and the two manifests
-  (`the_exec_crate_compiles_only_its_lib_rs`). A second file in this crate
-  changes both tests, in the same commit.
+  in it but `src/lib.rs`, the root's `clippy.toml` and the two manifests, and
+  it refuses any dep-info line that is not a target, a `<file>:` or an
+  `# env-dep:` line, and each dep-info file must list `src/lib.rs`
+  (`the_exec_crate_compiles_only_its_lib_rs`). The read sees
+  only the dep-info files beside the test binary: a build script or a proc
+  macro of a dependency, a linked library, and code that only a build the gate
+  does not make (a build without `fakes`) are outside it. A second file in this
+  crate changes both tests, in the same commit.
 
 ## The API
 
@@ -165,7 +174,7 @@ are in README.md.
 ## Residuals
 
 - A same-uid process can re-point a path it owns between `check_pin` and the
-  exec. The pin is checked before the exec, not at it (ruling 29).
+  exec. The pin is checked before the exec, not at it.
 - A child that ignores SIGTERM for 5 s is left running and unreaped. The call
   is refused all the same.
 

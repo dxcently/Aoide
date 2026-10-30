@@ -65,9 +65,11 @@ are in README.md.
 - A stream's end withdraws an armed mark and sends `Event::Revoked`, unless a
   close holds `closing` or the door is gone. A close whose door outlives its
   signal (`StillLive`) withdraws an armed mark, whichever call made the close,
-  so the door is not asked again. A close that fails with an error leaves the
-  mark, and the next turn end tries again. A stop now that sees no turn end, or
-  whose close finds `Busy`, leaves the mark: the turn it was set for still runs.
+  so the door is not asked again. A close that fails with an error on an idle
+  door leaves no mark: this call arms none, and the caller gets the error and
+  may retry. A mark armed before the call stays armed. A stop now that sees no
+  turn end, or whose close finds `Busy`, leaves the mark: the turn it was set
+  for still runs.
 - A watch that ended is not watched. `launch_ids` leaves it out, and `watch`
   refuses it, so its calls send nothing.
 - A drop or a forget whose store write fails keeps its record. The next open
@@ -81,7 +83,9 @@ are in README.md.
   SIGTERM goes through the pidfd; a signal that fails, but for a door already
   gone, clears `closing` and returns its error, and the record, the watch and
   the mark stay. The exit is awaited for `EXIT_BOUND` (10 s). An exit detaches
-  the watch (2 s bound) and removes the record: `Exited`. A door still live
+  the watch (2 s bound) and removes the record: `Exited`. A store write that
+  fails on an exit keeps the record and the watch, clears `closing`, and
+  returns the error, with the mark as it was. A door still live
   clears `closing`, withdraws an armed mark, and keeps its record and its watch:
   `StillLive`. The wait never escalates.
 - While `closing` stands, the watch takes its stream's end as the close's. It
@@ -111,7 +115,11 @@ are in README.md.
   launch bounds above. A watch's reopen is bounded the same way (`CONNECT` +
   `IO`, 35 s).
 - The turn state is known only from frames. `close_after_turn` refuses an
-  `Unknown` turn. A stop now takes the cancel's own answer: 409 means idle, and
+  `Unknown` turn. Its idle arm re-reads the turn under the lock: a turn that
+  started since the read arms the mark (`Armed`), so no request is refused for a
+  turn that is running. The fakes-only `race_turn_between_locks` is the test
+  seam for that window. A stop now takes the cancel's own answer: 409 means
+  idle, and
   204 waits up to 10 s for the frames that say the turn ended. If none come,
   the result is `NoTurnEnd`, and the door keeps running, its record stays, and
   nothing is signalled. After a reconnect the turn is `Unknown`, so a turn that

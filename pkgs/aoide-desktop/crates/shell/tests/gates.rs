@@ -18,6 +18,11 @@ const EVERYWHERE: [&str; 6] = [
     concat!("SIG", "KILL"),
 ];
 
+/// Words no door or shell source may hold: each one opens foreign code that the
+/// lints do not see. Exec is the one member that allows unsafe code, so it is
+/// not scanned for them.
+const NO_FOREIGN: [&str; 2] = [concat!("ext", "ern"), concat!("#[", "link")];
+
 /// Each manifest's golden text. The test compares its lines less the blank and
 /// comment lines, so a change to a manifest moves its golden in the same commit.
 const ROOT_MANIFEST: &str = r##"[workspace]
@@ -39,6 +44,8 @@ name = "aoide-desktop-door"
 version = "0.1.0"
 edition = "2021"
 publish = false
+[lib]
+doctest = false
 [features]
 fake = []
 [dependencies]
@@ -53,6 +60,8 @@ name = "aoide-desktop-exec"
 version = "0.1.0"
 edition = "2021"
 publish = false
+[lib]
+doctest = false
 [features]
 fakes = []
 [dependencies]
@@ -71,6 +80,8 @@ name = "aoide-desktop-shell"
 version = "0.1.0"
 edition = "2021"
 publish = false
+[lib]
+doctest = false
 [features]
 fakes = ["aoide-desktop-door/fake", "aoide-desktop-exec/fakes"]
 [[bin]]
@@ -90,6 +101,21 @@ serde_json.workspace = true
 sha2.workspace = true
 [lints]
 workspace = true
+"##;
+
+/// The root `clippy.toml`'s golden text, compared as the manifests' are.
+const CLIPPY_CONFIG: &str = r##"# The desktop gate's clippy run. A call through an alias of any path below
+# fails it. The exec crate's lints table allows these lints, and every other
+# member forbids them.
+disallowed-types = [
+    { path = "std::process::Command", reason = "only the exec crate starts a process" },
+]
+disallowed-methods = [
+    { path = "std::process::Command::new", reason = "only the exec crate starts a process" },
+    { path = "std::os::unix::process::CommandExt::pre_exec", reason = "only the exec crate runs code between fork and exec" },
+    { path = "std::os::unix::process::CommandExt::exec", reason = "only the exec crate replaces a process image" },
+    { path = "std::process::Child::kill", reason = "it sends the uncatchable signal; a child is signalled through the exec crate" },
+]
 "##;
 
 fn root() -> PathBuf {
@@ -146,11 +172,12 @@ fn golden_lines(text: &str) -> Vec<&str> {
 /// The nix build's cargo config with every store path and the vendor directory
 /// replaced by a fixed placeholder, so the golden template is the same text on
 /// every build.
-fn normalize_nix_config(text: &str) -> String {
+fn normalize_nix_config(text: &str, vendor: &str) -> String {
     text.lines()
         .map(|line| {
             let body = line.trim_start();
-            if body.starts_with("directory =") {
+            let value = body.strip_prefix("directory =").map(|value| value.trim().trim_matches('"'));
+            if value == Some(vendor) {
                 format!("{}directory = \"<vendor-dir>\"\n", &line[..line.len() - body.len()])
             } else {
                 format!("{}\n", replace_store_paths(line))
@@ -165,13 +192,34 @@ fn replace_store_paths(line: &str) -> String {
     let mut rest = line;
     while let Some(at) = rest.find(STORE) {
         out.push_str(&rest[..at]);
-        out.push_str("<store-path>");
         let after = &rest[at + STORE.len()..];
-        let end = after.find(|c: char| matches!(c, '/' | '"' | '\'') || c.is_whitespace());
-        rest = &after[end.unwrap_or(after.len())..];
+        match store_path_len(after) {
+            Some(len) => {
+                out.push_str("<store-path>");
+                rest = &after[len..];
+            }
+            None => {
+                out.push_str(STORE);
+                rest = after;
+            }
+        }
     }
     out.push_str(rest);
     out
+}
+
+/// The length of the store path at the start of `after` (the text past
+/// `/nix/store/`): nix's 32 base-32 characters, `-`, and a name up to the next
+/// `/`, `"` or the end. Anything else is no store path.
+fn store_path_len(after: &str) -> Option<usize> {
+    const BASE32: &str = "0123456789abcdfghijklmnpqrsvwxyz";
+    let hash = after.get(..32)?;
+    if !hash.chars().all(|c| BASE32.contains(c)) || after.as_bytes().get(32) != Some(&b'-') {
+        return None;
+    }
+    let name = &after[33..];
+    let end = name.find(|c: char| !(c.is_ascii_alphanumeric() || "+._?=-".contains(c))).unwrap_or(name.len());
+    (end > 0 && name[end..].starts_with(['/', '"'])).then_some(33 + end)
 }
 
 /// Where two texts first differ: the line number, and both lines there.
@@ -210,6 +258,20 @@ fn no_source_holds_an_everywhere_word() {
 }
 
 #[test]
+fn no_door_or_shell_source_holds_a_foreign_word() {
+    for member in ["crates/door", "crates/shell"] {
+        let mut files = Vec::new();
+        walk(&root().join(member).join("src"), &mut files);
+        for path in files {
+            let text = String::from_utf8_lossy(&fs::read(&path).expect("a source is read")).into_owned();
+            for word in NO_FOREIGN {
+                assert!(!text.contains(word), "{} holds `{word}`", path.display());
+            }
+        }
+    }
+}
+
+#[test]
 fn no_member_has_a_build_script() {
     let mut files = Vec::new();
     walk(&root(), &mut files);
@@ -237,18 +299,22 @@ fn the_exec_crate_has_one_source_file() {
     );
 }
 
-/// The files rustc read to build exec are its `src/lib.rs`, the root's
-/// `clippy.toml`, the root's `Cargo.toml` and exec's `Cargo.toml`: clippy's
-/// check builds list the last three. rustc lists every file it read in the
-/// dep-info file beside the test binary, one `file:` line each, with `\ ` for
-/// a space. A `#[path]` module or an `include!` in exec would compile another
-/// file under exec's table, and this test names it.
+/// The files rustc read to build exec, as its dep-info files name them: each
+/// file lies in `src/lib.rs`, the root's `clippy.toml` or `Cargo.toml`, or
+/// exec's `Cargo.toml`, and every dep-info file lists `src/lib.rs`. Rustc writes
+/// one file in a dep-info file per line: a target line, `<target>: <files>`,
+/// whose target lies in the deps directory; a `<file>:` line; or a
+/// `# env-dep:` line. A `#[path]` module or an `include!` in exec would compile
+/// another file under exec's table, and this test names it. Any other line
+/// reds, naming the file and the line.
 #[test]
 fn the_exec_crate_compiles_only_its_lib_rs() {
     let root = fs::canonicalize(root()).expect("the root is read");
     let deps = std::env::current_exe().expect("the test binary is known");
     let deps = deps.parent().expect("the test binary lies in a directory").to_path_buf();
-    let allowed: Vec<PathBuf> = ["crates/exec/src/lib.rs", "clippy.toml", "Cargo.toml", "crates/exec/Cargo.toml"]
+    let deps_canonical = fs::canonicalize(&deps).expect("the deps directory is read");
+    let lib = fs::canonicalize(root.join(EXEC)).expect("exec's lib.rs is read");
+    let allowed: Vec<PathBuf> = [EXEC, "clippy.toml", "Cargo.toml", "crates/exec/Cargo.toml"]
         .iter()
         .map(|rel| fs::canonicalize(root.join(rel)).unwrap_or_else(|_| root.join(rel)))
         .collect();
@@ -261,19 +327,61 @@ fn the_exec_crate_compiles_only_its_lib_rs() {
         }
         found += 1;
         let text = fs::read_to_string(&dep_info).expect("a dep-info file is read");
-        for line in text.lines().filter(|line| !line.starts_with('#')) {
-            let Some(read) = line.strip_suffix(':') else { continue };
-            let joined = root.join(read.replace("\\ ", " "));
-            let read = fs::canonicalize(&joined).unwrap_or(joined);
-            assert!(
-                allowed.contains(&read),
-                "{} lists {}, which rustc read to build exec and which is not one of its four allowed files",
-                dep_info.display(),
-                read.display()
-            );
+        let mut lists_lib = false;
+        for line in text.lines() {
+            if line.trim().is_empty() || line.starts_with("# env-dep:") {
+                continue;
+            }
+            let shown = format!("{} line `{line}`", dep_info.display());
+            let Some((listed, rest)) = line.split_once(':') else {
+                panic!("{shown} is not a target, a file or an env-dep line");
+            };
+            let files = if rest.trim().is_empty() {
+                vec![unescape(listed)]
+            } else {
+                let target = fs::canonicalize(root.join(unescape(listed))).ok();
+                let in_deps = target.and_then(|t| t.parent().map(|p| p == deps_canonical));
+                assert!(in_deps == Some(true), "{shown} is a target outside the deps directory");
+                dep_files(rest)
+            };
+            for file in files {
+                let joined = root.join(&file);
+                let read = fs::canonicalize(&joined).unwrap_or(joined);
+                assert!(
+                    allowed.contains(&read),
+                    "{shown} lists {}, which rustc read to build exec and which is not one of its allowed files",
+                    read.display()
+                );
+                lists_lib |= read == lib;
+            }
         }
+        assert!(lists_lib, "{} lists no src/lib.rs, so it read nothing of exec", dep_info.display());
     }
     assert!(found > 0, "no aoide_desktop_exec-*.d dep-info file lies in {}", deps.display());
+}
+
+/// A name in a dep-info file: `\ ` is a space.
+fn unescape(name: &str) -> String {
+    name.replace("\\ ", " ")
+}
+
+/// The files a dep-info line lists after its colon: spaces part them, and `\ `
+/// is a space within a name.
+fn dep_files(list: &str) -> Vec<String> {
+    let mut files = vec![String::new()];
+    let mut chars = list.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '\\' if chars.peek() == Some(&' ') => {
+                chars.next();
+                files.last_mut().expect("a file is open").push(' ');
+            }
+            ' ' => files.push(String::new()),
+            c => files.last_mut().expect("a file is open").push(c),
+        }
+    }
+    files.retain(|file| !file.is_empty());
+    files
 }
 
 #[test]
@@ -283,34 +391,38 @@ fn only_the_roots_clippy_config_is_read() {
     walk(&root, &mut files);
     for path in files {
         let name = path.file_name().and_then(|name| name.to_str()).unwrap_or_default();
-        let config = name == "clippy.toml" || name == ".clippy.toml";
+        let hidden = name == ".clippy.toml";
+        let stray = name == "clippy.toml" && path.parent() != Some(root.as_path());
         assert!(
-            !config || path.parent() == Some(root.as_path()),
-            "{} is a clippy config that is not the root's",
+            !hidden && !stray,
+            "{} is a clippy config, and the root's clippy.toml is the only one allowed",
             path.display()
         );
     }
 }
 
 /// No cargo config applies to the workspace: none in the root, in any ancestor
-/// up to `/` (a git root does not stop the walk), or in `$CARGO_HOME` when
-/// that is set. One is accepted: the config that nixpkgs' cargo setup hook
-/// writes at `$NIX_BUILD_TOP/.cargo/config.toml` (`config` in an older
-/// nixpkgs), which points cargo at the vendored crates. It is accepted only
-/// when its text, with every store path and the vendor directory replaced by
-/// a placeholder, equals the golden template in
-/// `tests/fixtures/nix-cargo-config.toml`. Outside nix, `NIX_BUILD_TOP` is
-/// unset or holds no such file, and nothing is accepted.
+/// up to `/` (a git root does not stop the walk), or in the cargo home. One is
+/// accepted: `.cargo/config.toml` at `$NIX_BUILD_TOP`, the name the pinned
+/// nixpkgs' cargo setup hook writes, which points cargo at the vendored crates.
+/// It is accepted only when its text, with every store path and the vendor
+/// directory `cargo-vendor-dir` (the relative value the pinned hook writes,
+/// which cargo resolves against the build top) replaced by a placeholder,
+/// equals the golden template in `tests/fixtures/nix-cargo-config.toml`. The
+/// golden fixes the linker line too. Outside nix, `NIX_BUILD_TOP` is unset or
+/// holds no such file, and nothing is accepted. The cargo home is
+/// `$CARGO_HOME`, or `$HOME/.cargo` when that is unset.
 #[test]
 fn no_cargo_config_applies_to_the_workspace() {
     let build_top = std::env::var_os("NIX_BUILD_TOP").and_then(|top| fs::canonicalize(top).ok());
+    let vendor = "cargo-vendor-dir";
     let mut dir = fs::canonicalize(root()).expect("the root is read");
     loop {
         for name in [".cargo/config", ".cargo/config.toml"] {
             let path = dir.join(name);
-            if build_top.as_ref() == Some(&dir) && path.exists() {
+            if build_top.as_ref() == Some(&dir) && name == ".cargo/config.toml" && path.exists() {
                 let text = fs::read_to_string(&path).expect("the nix build's cargo config is read");
-                let found = normalize_nix_config(&text);
+                let found = normalize_nix_config(&text, vendor);
                 let golden = fs::read_to_string(root().join(NIX_CONFIG_GOLDEN)).unwrap_or_default();
                 assert!(
                     found == golden,
@@ -326,11 +438,13 @@ fn no_cargo_config_applies_to_the_workspace() {
             break;
         }
     }
-    if let Some(home) = std::env::var_os("CARGO_HOME") {
-        for name in ["config", "config.toml"] {
-            let path = Path::new(&home).join(name);
-            assert!(!path.exists(), "{} would configure every build", path.display());
-        }
+    let home = std::env::var_os("CARGO_HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|home| Path::new(&home).join(".cargo")))
+        .expect("CARGO_HOME or HOME names the cargo home");
+    for name in ["config", "config.toml"] {
+        let path = home.join(name);
+        assert!(!path.exists(), "{} would configure every build", path.display());
     }
 }
 
@@ -362,5 +476,48 @@ fn the_manifests_are_the_golden_ones() {
             golden_lines(golden),
             "{path} differs from its golden text; its golden moves with it, in the same commit"
         );
+    }
+    let clippy = root.join("clippy.toml");
+    assert!(
+        fs::symlink_metadata(&clippy).is_ok_and(|meta| meta.is_file()),
+        "{} is not a file; the gate's clippy run reads no config without it",
+        clippy.display()
+    );
+    let text = fs::read_to_string(&clippy).expect("clippy.toml is read");
+    assert_eq!(
+        golden_lines(&text),
+        golden_lines(CLIPPY_CONFIG),
+        "clippy.toml differs from its golden text; its golden moves with it, in the same commit"
+    );
+}
+
+/// The normalizer is pinned by a table: the accepted lines normalize to the
+/// golden text, and each refused line does not, so the golden compare reds on it.
+#[test]
+fn the_config_normalizer_is_pinned_by_a_table_of_known_bad_paths() {
+    let vendor = "cargo-vendor-dir";
+    let hash = "0123456789abcdfghijklmnpqrsvwxyz";
+    let linker = "\"linker\" = \"<store-path>/bin/cc\"";
+    let dir = "directory = \"<vendor-dir>\"";
+    let accepted = [
+        (format!("\"linker\" = \"/nix/store/{hash}-cc/bin/cc\""), linker),
+        (format!("    \"linker\" = \"/nix/store/{hash}-cc/bin/cc\""), "    \"linker\" = \"<store-path>/bin/cc\""),
+        ("directory = \"cargo-vendor-dir\"".to_string(), dir),
+    ];
+    for (line, golden) in &accepted {
+        assert_eq!(normalize_nix_config(line, vendor), format!("{golden}\n"), "{line} is accepted");
+    }
+    let refused = [
+        ("\"linker\" = \"/nix/store/../bin/cc\"".to_string(), linker),
+        (format!("\"linker\" = \"/nix/store/{}-cc/bin/cc\"", &hash[..31]), linker),
+        (format!("\"linker\" = \"/nix/store/e{}-cc/bin/cc\"", &hash[1..]), linker),
+        (format!("\"linker\" = \"/nix/store/{hash}-cc\"/bin/cc"), linker),
+        (format!("\"linker\" = \"/nix/store/{hash}-cc/bin/cc/extra\""), linker),
+        (format!("\"linker\" = \"/nix/store/{hash}-c c/bin/cc\""), linker),
+        ("directory = \"cargo-vendor-dir2\"".to_string(), dir),
+        ("directory = \"cargo-vendor-di\"".to_string(), dir),
+    ];
+    for (line, golden) in &refused {
+        assert_ne!(normalize_nix_config(line, vendor), format!("{golden}\n"), "{line} is refused");
     }
 }

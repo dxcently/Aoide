@@ -4,6 +4,10 @@ version = "0.1.0"
 edition = "2021"
 publish = false
 
+[lib]
+# A doctest is a separate crate that no clippy run lints; no member runs them.
+doctest = false
+
 [features]
 # The fake `aoide` and fake `eidolon` (src/bin), for this crate's tests only,
 # and the fakes of the door and exec crates they run on.
