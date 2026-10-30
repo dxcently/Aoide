@@ -49,8 +49,9 @@ fn a_send_child_loses_its_session_and_both_autogate_switches() {
     let mut base = base();
     base.push((OsString::from("AOIDE_CONDUCT_AUTOGATE"), OsString::from("1")));
     base.push((OsString::from("AOIDE_CONDUCT_SIBLING_AUTOGATE"), OsString::from("1")));
+    base.push((OsString::from("AOIDE_SESSION_ORIGIN"), OsString::from("node-7")));
     let env = child_env(Child::Aoide, "send", &base, Ok(keys().as_slice())).expect("the env builds");
-    assert_eq!(names(&env), ["PATH", "HOME", "AOIDE_ROOT"]);
+    assert_eq!(names(&env), ["PATH", "HOME", "AOIDE_ROOT"], "a person's send is never node-originated");
 }
 
 #[test]

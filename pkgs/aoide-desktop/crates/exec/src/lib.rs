@@ -406,13 +406,17 @@ pub fn child_env(
 
 /// Whether a child's environment drops `name`. Names compare as bytes, so a name
 /// that is not UTF-8 is scrubbed by the same rules. A `send` child drops the
-/// session id and the two autogate switches: a send the person types is approved
-/// by its own `--yes`, and the child must not carry a way to approve another.
+/// session id, the two autogate switches and the session origin: a send the
+/// person types is approved by its own `--yes`, is never node-originated, and the
+/// child must not carry a way to approve another.
 fn scrubbed(child: Child, melete: bool, send: bool, name: &OsStr, keys: &[String]) -> bool {
     let name = name.as_bytes();
     let melete_var = name.starts_with(b"AOIDE_MELETE_") && !melete;
     let session = name == b"AOIDE_SESSION_ID" && (child == Child::Eidolon || send);
-    let autogate = send && (name == b"AOIDE_CONDUCT_AUTOGATE" || name == b"AOIDE_CONDUCT_SIBLING_AUTOGATE");
+    let autogate = send
+        && (name == b"AOIDE_CONDUCT_AUTOGATE"
+            || name == b"AOIDE_CONDUCT_SIBLING_AUTOGATE"
+            || name == b"AOIDE_SESSION_ORIGIN");
     melete_var || session || autogate || keys.iter().any(|key| key.as_bytes() == name)
 }
 
