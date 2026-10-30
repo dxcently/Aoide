@@ -65,8 +65,8 @@ are in README.md.
 - A stream's end withdraws an armed mark and sends `Event::Revoked`, unless a
   close holds `closing` or the door is gone. A close whose door outlives its
   signal (`StillLive`) withdraws an armed mark, whichever call made the close,
-  so the door is not asked again. A close that fails with an error leaves the
-  mark, and the next turn end tries again. A stop now that sees no turn end, or
+  so the door is not asked again. A close that fails with an error on an idle
+  door keeps an armed mark, so the close is tried again at the next turn end. A stop now that sees no turn end, or
   whose close finds `Busy`, leaves the mark: the turn it was set for still runs.
 - A watch that ended is not watched. `launch_ids` leaves it out, and `watch`
   refuses it, so its calls send nothing.
