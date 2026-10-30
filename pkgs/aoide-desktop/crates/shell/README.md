@@ -18,6 +18,14 @@ sha2 (a dialog's digest), the door crate, and the exec crate.
   door. Its watch threads send on a bounded channel of `EVENTS_BOUND` (64)
   events; `Doors::open` takes the sending half.
 - `asks.rs`: `prepare_answer`, `send_answer`, and the `Dialog` a yes shows.
+- `palette.rs`: `palette` lists the commands the main window offers, from
+  `schema --json`, and `check` decides one call. `call` runs a checked call
+  through `Exec::call`. `MAIN_GRANTS` is the window's grant set: `config`,
+  `graph` and `session find`, and nothing else. `FLOOR` lists the named classes
+  the floor refuses. A command is offered only when it is granted and the floor
+  does not hold it, and the floor is checked on every call, granted or not.
+- `blocking.rs`: `PATHS`, the six paths that never end on their own. They run
+  only as held children, never through `palette::call`.
 - `chat/`: `say` sends to a session, and `follow` opens its stream as a `Chat`
   whose `next` yields a `Push`. `chat/cases.rs` holds the follow cases, one
   entry each. `chat/record.rs` is the one place a stream line is parsed.
@@ -221,6 +229,24 @@ asks.rs     Doors::prepare_answer(launch, ask, label)
   and a 401 or any other status is a `DoorError`. None of them removes the ask.
 - Between streams the last stream's asks stay listed, so an answer to one the
   door settled in the gap comes back 409.
+
+## How the palette decides a call
+
+```
+palette::call(exec, grants, words, flags, positionals)
+  check(exec.schema(), grants, words, flags)
+    1. blocking::is_blocking(words)          -> Refusal::Blocking
+    2. a --node or --typed flag              -> Refusal::Floored
+    3. schema.command(words) is None         -> Refusal::Unknown
+    4. the floor: a schema mark (approves,
+       launches, internal, or not
+       implemented), then FLOOR's prefixes   -> Refusal::Floored
+    5. words not in grants                   -> Refusal::NotGranted
+  exec.call(words, flags, positionals)       only when check passed
+```
+
+The grant set is the list of paths the window holds. A granted command that
+the floor holds is refused, so a grant can never name a floored command.
 
 ## How a chat is followed
 

@@ -3,6 +3,8 @@
 //! `exec`.
 
 pub mod asks;
+pub mod blocking;
 pub mod chat;
 pub mod doors;
+pub mod palette;
 pub use aoide_desktop_exec as exec;

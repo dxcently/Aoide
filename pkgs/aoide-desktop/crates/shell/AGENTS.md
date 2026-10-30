@@ -241,8 +241,24 @@ are in README.md.
 - A record write that fails before the record is written, which refuses the
   launch: no seam makes the rename fail in a directory the test's uid owns.
 
+## The palette and the floor (palette.rs, blocking.rs)
+
+- A call from the palette goes through `palette::call`, which runs `check`
+  before `Exec::call`. A refused call starts no child. Each check in
+  `check`'s order is one line of its doc comment.
+- The floor is `floor_reason`: the schema's marks first, then the named classes
+  in `FLOOR`. A new floored class is one entry in `FLOOR`, and its test in
+  `tests/palette.rs` names a path it covers.
+- `MAIN_GRANTS` is the window's grant set. Widening it is a decision for the
+  User, and it is stated in README.md with the grant set.
+- `blocking::PATHS` is pinned until the kinds lane marks watch verbs in the
+  schema. That list is deleted when the marks land, and `palette::check`'s
+  blocking arm goes with it. A test pins the six paths.
+
 ## Extension points
 
+- A palette floor class is one entry in `FLOOR` (`palette.rs`), and a blocking
+  path is one entry in `PATHS` (`blocking.rs`) until the kinds lane deletes it.
 - A follow case is one entry in `CASES` (`chat/cases.rs`), and its verb must
   be declared by the schema. Adding one changes `chat/cases.rs` and the
   README's "How a chat is followed" list, in one commit. `every_case_runs_a_verb_the_schema_declares`
