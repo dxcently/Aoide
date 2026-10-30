@@ -250,6 +250,9 @@ The grant set is the list of paths the window holds: `main_grants(schema)` for
 the main window, every declared path, and a frame's own list. A granted command
 that the floor holds is refused, so a grant can never name a floored command.
 
+`palette::call` runs no confirm. A confirm before a palette run belongs to the
+window that shows the palette (Part C); `call` is the check and the spawn only.
+
 ## How a chat is followed
 
 ```
@@ -269,7 +272,7 @@ chat::follow(exec, id)                    cases::CASES, in order
 Chat::next(wait)  -> record::line(text)
                        a JSON object: Push::Record, strings spelled
                        any other text: Push::Other, spelled
-                     Dropped(n) for a line past the exec crate's cap
+                     Dropped(n) for a line past the exec crate's cap, n bytes
 Chat::close()     -> SIGINT through the held child; the events after it
 ```
 

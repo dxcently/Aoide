@@ -263,8 +263,9 @@ are in README.md.
   path is one entry in `PATHS` (`blocking.rs`) until the kinds lane deletes it.
 - A follow case is one entry in `CASES` (`chat/cases.rs`), and its verb must
   be declared by the schema. Adding one changes `chat/cases.rs` and the
-  README's "How a chat is followed" list, in one commit. `every_case_runs_a_verb_the_schema_declares`
-  fails for an entry whose verb the schema does not declare.
+  README's "How a chat is followed" list, in one commit.
+  `every_case_runs_a_verb_the_schema_declares` fails for an entry whose verb
+  the schema does not declare.
 - A chat record shape is parsed only in `chat/record.rs`. A new kind of
   line goes there, as one arm of `line`, and its test goes in `tests/chat.rs`.
 - A new aoide command needs no code. Its path, flags and arguments come from
