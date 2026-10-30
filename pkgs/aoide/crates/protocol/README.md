@@ -29,8 +29,10 @@ other crate in this workspace sits above.
   `Command` also carries the marks `approves` and `launches`, which the
   desktop app's floor reads through `schema --json`; `Command::check` never
   reads them. `Command` declares `kind` (the object a command is about) and
-  `verb` (`list`, `show`, `watch`, `act`, or `none`), each checked against
-  `KINDS`/`VERBS`. A new kind is one name in `KINDS`, then the commands that
+  `verb` (`list`, `show`, `watch`, `act`, `serve`, or `none`), each checked
+  against `KINDS`/`VERBS`. `serve` marks a command that runs until something
+  ends it and is not a stream a person reads (a stream is `watch`); a new
+  long-runner declares it. A new kind is one name in `KINDS`, then the commands that
   carry it, and the core golden in cli/src/registry.rs moves with them.
   `Command::check` enforces the declarations (the door gate first, then the
   argument rules with defaults applied) and `Command::invoke` is

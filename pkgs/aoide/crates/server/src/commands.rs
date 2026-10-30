@@ -89,7 +89,7 @@ pub fn register_infra(r: &mut Registry) {
         implemented: true,
         handler: handle_daemon,
         brief: "Run aoided: policy, lint, gate and the single audit log.",
-        kind: "none", verb: "none",
+        kind: "none", verb: "serve",
     ));
 }
 
@@ -136,7 +136,7 @@ pub fn register_a2a_serve(r: &mut Registry) {
         handler: handle_a2a_serve,
         brief: "Serve conducted sessions over A2A (Agent2Agent).",
         launches: true,
-        kind: "none", verb: "none",
+        kind: "none", verb: "serve",
     ));
 }
 
@@ -152,7 +152,7 @@ pub fn register_mail_serve(r: &mut Registry) {
         gated: false,
         implemented: true,
         handler: handle_mail_serve,
-        kind: "none", verb: "none",
+        kind: "none", verb: "serve",
     ));
 }
 

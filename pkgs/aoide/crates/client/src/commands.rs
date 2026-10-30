@@ -4925,7 +4925,7 @@ pub fn register_post_graph(r: &mut Registry) {
         implemented: true,
         handler: handle_adapter_melete,
         brief: "Feed the neutral event stream to Melete (default-deny per class).",
-        kind: "none", verb: "none",
+        kind: "none", verb: "serve",
     ));
 }
 
