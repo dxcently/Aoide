@@ -929,7 +929,8 @@ fn watch_remote_with(
             .with_data(serde_json::to_value(&first).unwrap_or_default());
     }
 
-    follow_remote(cmd, node, remote_id, first, tail, json_mode, fetch)
+    let mut stdout = std::io::stdout().lock();
+    follow_remote(cmd, node, remote_id, first, tail, json_mode, &mut stdout, fetch)
 }
 
 /// The wire fetch a remote watch performs: the far frame's JSON, deserialized
@@ -1006,26 +1007,23 @@ fn follow_remote(
     first: Frame,
     tail: usize,
     json_mode: bool,
+    out: &mut dyn std::io::Write,
     fetch: impl Fn(&aoide_storage::node_store::Node, &str, usize) -> Result<Frame, FrameReadError>,
 ) -> Outcome {
-    use std::io::Write as _;
     unsafe {
         libc::signal(libc::SIGINT, on_sigint as *const () as libc::sighandler_t);
     }
     let label = format!("{}/{}", node.name, remote_id);
     let mut printed_lines = 0usize;
-    let emit = |frame: &Frame, printed: &mut usize| {
-        if json_mode {
-            emit(true, "frame", Vec::new(), serde_json::to_value(frame).unwrap_or_default());
+    let emit_frame = |out: &mut dyn std::io::Write, frame: &Frame, printed: &mut usize| {
+        let (text, data) = if json_mode {
+            (Vec::new(), serde_json::to_value(frame).unwrap_or_default())
         } else {
-            for line in render_from(frame, Some(&node.name)) {
-                println!("{line}");
-                *printed += 1;
-            }
-        }
-        let _ = std::io::stdout().flush();
+            (render_from(frame, Some(&node.name)), json!({}))
+        };
+        *printed += write_event(out, json_mode, "frame", text, data);
     };
-    emit(&first, &mut printed_lines);
+    emit_frame(&mut *out, &first, &mut printed_lines);
     let mut last = first;
 
     while !INTERRUPTED.load(Ordering::SeqCst) {
@@ -1055,7 +1053,7 @@ fn follow_remote(
         };
         frame.clamp_untrusted(&node.name, tail);
         if frame != last {
-            emit(&frame, &mut printed_lines);
+            emit_frame(&mut *out, &frame, &mut printed_lines);
         }
         let running = frame.presence == "running";
         last = frame;
@@ -1072,13 +1070,30 @@ fn follow_remote(
     // `--json` gets no prose: its stream is JSON lines and the envelope, and a
     // bare `status` line in the middle of it is not a frame.
     if !json_mode {
-        println!("{}", last.status);
-        println!("report: {}", last.report);
+        let _ = writeln!(out, "{}", last.status);
+        let _ = writeln!(out, "report: {}", last.report);
     }
-    let _ = std::io::stdout().flush();
+    let _ = out.flush();
     Outcome::ok(cmd, format!("stopped watching {label}")).with_data(json!({
         "sessionId": remote_id, "node": node.name, "followed": true, "printed": printed_lines,
     }))
+}
+
+/// One follow event written to `out`: the lines [`stream_lines`] chooses, each
+/// on its own line. The count is what the caller's `printed` tallies.
+fn write_event(
+    out: &mut dyn std::io::Write,
+    json_mode: bool,
+    kind: &str,
+    text: Vec<String>,
+    data: serde_json::Value,
+) -> usize {
+    use std::io::Write as _;
+    let lines = stream_lines(json_mode, kind, text, data);
+    for line in &lines {
+        let _ = writeln!(out, "{line}");
+    }
+    lines.len()
 }
 
 /// The live rail's cursor-free delta reader: every letter for `slug` that has
@@ -2432,6 +2447,7 @@ mod tests {
             opening,
             50,
             false,
+            &mut Vec::new(),
             |_, _, _| {
                 let n = calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 match n {
@@ -2473,6 +2489,7 @@ mod tests {
             wire_frame(),
             50,
             false,
+            &mut Vec::new(),
             |_, _, _| {
                 if calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0 {
                     Ok(wire_frame())
