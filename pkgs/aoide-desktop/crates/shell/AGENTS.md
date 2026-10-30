@@ -81,7 +81,9 @@ are in README.md.
   SIGTERM goes through the pidfd; a signal that fails, but for a door already
   gone, clears `closing` and returns its error, and the record, the watch and
   the mark stay. The exit is awaited for `EXIT_BOUND` (10 s). An exit detaches
-  the watch (2 s bound) and removes the record: `Exited`. A door still live
+  the watch (2 s bound) and removes the record: `Exited`. A store write that
+  fails on an exit keeps the record and the watch, clears `closing`, and
+  returns the error, with the mark as it was. A door still live
   clears `closing`, withdraws an armed mark, and keeps its record and its watch:
   `StillLive`. The wait never escalates.
 - While `closing` stands, the watch takes its stream's end as the close's. It

@@ -651,8 +651,10 @@ impl Doors {
     /// idle turn sets `closing` and shuts its stream, so the door can drain.
     /// SIGTERM goes through the pidfd; a signal that fails, but for a door already gone,
     /// clears `closing` and returns its error, keeping the mark. The exit is
-    /// awaited for `EXIT_BOUND`. An exit removes the record and the watch. A
-    /// door still live clears `closing` and withdraws an armed mark, and keeps
+    /// awaited for `EXIT_BOUND`. An exit writes the store without the record,
+    /// then drops the watch. A store write that fails keeps the record and the
+    /// watch, clears `closing`, and returns the error, with the mark as it was.
+    /// A door still live clears `closing` and withdraws an armed mark, and keeps
     /// its record and its watch.
     fn close_now(&mut self, id: &str, arm_on_busy: bool) -> Result<Close, DoorsError> {
         let (entry, link, pidfd) = {
@@ -704,13 +706,21 @@ impl Doors {
     /// Ends one watch, and removes its record. Reports whether its thread ended
     /// within `WATCH_BOUND`.
     fn drop_watch(&mut self, id: &str) -> Result<bool, DoorsError> {
+        let link = self
+            .watches
+            .get(id)
+            .ok_or_else(|| DoorsError::Unknown(format!("no watched door has launch id {id}")))?
+            .link
+            .clone();
+        if let Err(e) = self.store.update(|es| es.retain(|e| e.launch_id != id)) {
+            clear_closing(&link);
+            return Err(e);
+        }
         let mut watch = self
             .watches
             .remove(id)
             .ok_or_else(|| DoorsError::Unknown(format!("no watched door has launch id {id}")))?;
-        let joined = watch.detach();
-        self.store.update(|es| es.retain(|e| e.launch_id != id))?;
-        Ok(joined)
+        Ok(watch.detach())
     }
 
     /// Re-attaches one record: its checks, then its stream, then its watch. A

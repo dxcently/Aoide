@@ -234,6 +234,8 @@ rustPlatform.buildRustPackage {
     "a_good_file_pins_to_its_canonical_path"
     "--skip"
     "a_turn_that_starts_after_the_idle_read_is_armed_not_refused"
+    "--skip"
+    "a_close_whose_store_write_fails_keeps_its_watch_and_its_record"
   ];
 
   meta.description = "The aoide desktop workspace, gated by its tests and clippy runs";

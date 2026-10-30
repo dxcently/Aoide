@@ -858,11 +858,6 @@ fn a_close_after_turn_that_leaves_the_door_live_withdraws_the_mark() {
     assert_eq!(world.count("SIGTERM"), 1, "the door was signalled once");
 }
 
-/// Leaves a watch held in `deliver` on a one-slot channel, and returns its doors,
-/// the receiver and the launch id. Each step makes the next one certain. Taking
-/// events through the stream's `CaughtUp` empties the slot the replay filled.
-/// `running` puts the turn frame in the empty slot. The ask after it is then read,
-/// and the watch waits in `deliver` for the slot to free.
 #[test]
 fn a_turn_that_starts_after_the_idle_read_is_armed_not_refused() {
     let world = World::new("race-idle");
@@ -884,6 +879,27 @@ fn a_turn_that_starts_after_the_idle_read_is_armed_not_refused() {
     assert_eq!(world.count("SIGTERM"), 1, "one signal, after the turn ended");
 }
 
+#[test]
+fn a_close_whose_store_write_fails_keeps_its_watch_and_its_record() {
+    let world = World::new("store-write");
+    let (tx, rx) = mpsc::sync_channel(EVENTS_BOUND);
+    let mut doors = world.open(tx);
+    let id = world.launch(&mut doors);
+    world.command("idle");
+    assert!(until(Duration::from_secs(5), || doors.turn(&id).unwrap() == TurnState::Idle));
+    let store = world.root().join("state/desktop/doors.json");
+    fs::remove_file(&store).expect("the record file is removed");
+    fs::create_dir(&store).expect("a directory takes the record file's place");
+    assert!(doors.close_after_turn(&id).is_err(), "the store write fails, so the close errors");
+    assert!(doors.launch_ids().contains(&id), "the watch is kept after the failed write");
+    event_where(&rx, |e| matches!(e, Event::Gone { .. }));
+}
+
+/// Leaves a watch held in `deliver` on a one-slot channel, and returns its doors,
+/// the receiver and the launch id. Each step makes the next one certain. Taking
+/// events through the stream's `CaughtUp` empties the slot the replay filled.
+/// `running` puts the turn frame in the empty slot. The ask after it is then read,
+/// and the watch waits in `deliver` for the slot to free.
 fn held_watch(world: &World) -> (Doors, Receiver<Event>, String) {
     let (tx, rx) = mpsc::sync_channel(1);
     let mut doors = world.open(tx);
