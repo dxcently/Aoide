@@ -319,6 +319,15 @@ blank one is refused too.
   refuses a target that is a shell wrap (`shell: true`) or a wrap of another
   agent, as `not-that-harness`, audited, nothing typed. The check runs before the
   gate, so `--yes` does not pass it. A harness's own wrap is unchanged.
+- **A native send (chat-core, commit 8)** — a target whose profile names a
+  `native_send` (eidolon) is delivered through that CLI, `eidolon send --from
+  aoide --wake [--operator] <id> -` with the text on stdin
+  (`send.rs::native_deliver`), not through the control socket. The gate, the
+  pending queue and the audit run first, as for every send. `--operator` is set
+  only when this process has no `AOIDE_SESSION_ID` (the person's send); an
+  agent's send goes as a peer. Dropped by the native call: the attributed
+  sender's session (it names only in the audit line) and the provenance prefix.
+  A claude wrap still takes the socket.
 - **`send.rs::write_delivery`** is the one place a delivered payload actually
   reaches a target's control socket (task #124): the text write, then — on
   `--submit` — a SEPARATE, later write of the target's own submit keystroke,

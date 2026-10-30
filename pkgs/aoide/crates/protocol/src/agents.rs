@@ -305,7 +305,9 @@ pub struct AgentProfile {
     /// - the child's exit 0 means the message was ACCEPTED (queued or
     ///   delivered), never that the recipient has processed or even seen
     ///   it — there is no synchronous "consumed" signal on this transport.
-    pub native_send: Option<fn(to: &str) -> Vec<String>>,
+    /// The argv that sends to `to` through the harness's own CLI, with the
+    /// text on stdin. `operator` adds `--operator`: the person is the sender.
+    pub native_send: Option<fn(to: &str, operator: bool) -> Vec<String>>,
     /// What must be true before anything is typed into a process of this
     /// harness ([`Readiness`]).
     pub readiness: Readiness,
@@ -2962,15 +2964,14 @@ fn eidolon_find_subagent(_dir: &Path, _tuid: &str) -> Option<PathBuf> {
 ///   answering; it will read it on recovery` (`api.rs:199-204`) — both are
 ///   ACCEPTED, neither is a read receipt; there is no id to correlate a
 ///   later reply against (`inbox.rs:15-40`'s `Envelope` carries none).
-fn eidolon_native_send(to: &str) -> Vec<String> {
-    vec![
-        "send".to_string(),
-        "--from".to_string(),
-        "aoide".to_string(),
-        "--wake".to_string(),
-        to.to_string(),
-        "-".to_string(),
-    ]
+fn eidolon_native_send(to: &str, operator: bool) -> Vec<String> {
+    let mut argv = vec!["send".to_string(), "--from".to_string(), "aoide".to_string(), "--wake".to_string()];
+    if operator {
+        argv.push("--operator".to_string());
+    }
+    argv.push(to.to_string());
+    argv.push("-".to_string());
+    argv
 }
 
 /// `eidolon tui --session <PATH>` reopens the session whose journal is PATH
@@ -4239,8 +4240,12 @@ mod tests {
         assert!(PI_PROFILE.native_send.is_none());
         let send = EIDOLON_PROFILE.native_send.expect("eidolon has a native transport");
         assert_eq!(
-            send("fixture-target-1"),
+            send("fixture-target-1", false),
             vec!["send", "--from", "aoide", "--wake", "fixture-target-1", "-"]
+        );
+        assert_eq!(
+            send("fixture-target-1", true),
+            vec!["send", "--from", "aoide", "--wake", "--operator", "fixture-target-1", "-"]
         );
     }
 

@@ -1243,6 +1243,32 @@ fn deliver_local(inv: &Invocation, id: &str) -> Outcome {
     deliver_local_with(inv, id, real_attested_sender)
 }
 
+/// Runs a harness's native send (`eidolon send … -`) with `message` on stdin.
+/// Exit 0 is accepted; anything else is its stderr, as the refusal.
+fn native_deliver(argv: &[String], message: &str) -> Result<(), String> {
+    use std::io::Write as _;
+    use std::process::{Command, Stdio};
+    let mut child = Command::new("eidolon")
+        .args(argv)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("cannot run eidolon: {e}"))?;
+    child
+        .stdin
+        .take()
+        .expect("piped stdin")
+        .write_all(message.as_bytes())
+        .map_err(|e| e.to_string())?;
+    let out = child.wait_with_output().map_err(|e| e.to_string())?;
+    if out.status.success() {
+        Ok(())
+    } else {
+        Err(String::from_utf8_lossy(&out.stderr).trim().to_string())
+    }
+}
+
 /// Write `payload` to `stream`, then — when `submit` is set — a SEPARATE,
 /// LATER write of `submit_key` alone, sleeping `delay` in between (task
 /// #124; see [`SUBMIT_KEYSTROKE_DELAY`]'s doc comment for why this must be
@@ -1590,22 +1616,36 @@ pub(in crate::graph) fn deliver_local_with(
     if let Some(prefix) = provenance_prefix(prefix_sender.as_deref(), &text) {
         payload = format!("{prefix}{payload}");
     }
-    match UnixStream::connect(&socket) {
-        Ok(mut stream) => {
-            if let Err(e) =
-                write_delivery(&mut stream, payload.as_bytes(), submit, submit_key, SUBMIT_KEYSTROKE_DELAY)
-            {
-                let out = Outcome::error(cmd, format!("failed to inject into `{id}`: {e}"))
-                    .with_data(json!({ "reason": "socket-write-failed", "id": id, "socket": socket }));
+    // A harness with a native send (eidolon) takes the text through its own CLI,
+    // on stdin, never the socket. The attributed sender rides only in the audit
+    // line: the native call names the sender `aoide`, and `--operator` marks a
+    // send by the person (no `AOIDE_SESSION_ID` in this process).
+    if let Some(native) = agent_profile(&rec.agent).and_then(|p| p.native_send) {
+        let operator = std::env::var_os("AOIDE_SESSION_ID").is_none();
+        if let Err(e) = native_deliver(&native(&id, operator), &text) {
+            let out = Outcome::error(cmd, format!("native send to `{id}` failed: {e}"))
+                .with_data(json!({ "reason": "native-send-failed", "id": id, "agent": rec.agent }));
+            audit_send(inv, "error", &out.message, &text);
+            return out;
+        }
+    } else {
+        match UnixStream::connect(&socket) {
+            Ok(mut stream) => {
+                if let Err(e) =
+                    write_delivery(&mut stream, payload.as_bytes(), submit, submit_key, SUBMIT_KEYSTROKE_DELAY)
+                {
+                    let out = Outcome::error(cmd, format!("failed to inject into `{id}`: {e}"))
+                        .with_data(json!({ "reason": "socket-write-failed", "id": id, "socket": socket }));
+                    audit_send(inv, "error", &out.message, &text);
+                    return out;
+                }
+            }
+            Err(e) => {
+                let out = Outcome::error(cmd, format!("control socket for `{id}` unreachable: {e}"))
+                    .with_data(json!({ "reason": "socket-unreachable", "id": id, "socket": socket }));
                 audit_send(inv, "error", &out.message, &text);
                 return out;
             }
-        }
-        Err(e) => {
-            let out = Outcome::error(cmd, format!("control socket for `{id}` unreachable: {e}"))
-                .with_data(json!({ "reason": "socket-unreachable", "id": id, "socket": socket }));
-            audit_send(inv, "error", &out.message, &text);
-            return out;
         }
     }
 
@@ -4669,6 +4709,89 @@ mod tests {
         assert_ne!(out.data.as_ref().and_then(|d| d["reason"].as_str()), Some("not-that-harness"), "{}", out.message);
         assert!(!nothing_connected(&listener), "a harness wrap takes the delivery: {}", out.message);
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A fake `eidolon` on a private PATH that records its argv and its stdin
+    /// into `record.argv` and `record.stdin` in its own directory.
+    fn fake_eidolon(tag: &str) -> std::path::PathBuf {
+        let dir = unique_stage(&format!("fake-eidolon-{tag}"));
+        std::fs::create_dir_all(&dir).unwrap();
+        let script = dir.join("eidolon");
+        let rec = dir.display().to_string();
+        std::fs::write(
+            &script,
+            format!("#!/bin/sh\nprintf '%s\\n' \"$@\" > '{rec}/record.argv'\ncat > '{rec}/record.stdin'\necho 'delivered to x'\n"),
+        )
+        .unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        dir
+    }
+
+    /// Runs `f` with the fake `eidolon` first on PATH, restoring PATH after.
+    fn with_fake_eidolon(dir: &std::path::Path, f: impl FnOnce()) {
+        let old = std::env::var("PATH").unwrap_or_default();
+        std::env::set_var("PATH", format!("{}:{old}", dir.display()));
+        f();
+        std::env::set_var("PATH", old);
+    }
+
+    #[test]
+    fn an_eidolon_send_goes_through_its_native_send_with_the_text_on_stdin() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (root, id, listener) = door_fixture("eidolon-native", None);
+        set_wrap(&id, |r| r.agent = "eidolon".into());
+        let bin = fake_eidolon("native");
+        let out = {
+            let mut out = None;
+            with_fake_eidolon(&bin, || {
+                out = Some(session_send(&send_on(Door::Cli, &["hello there"], &[("id", &id), ("yes", "true")])));
+            });
+            out.unwrap()
+        };
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "{}", out.message);
+        // The operator's send (no AOIDE_SESSION_ID): `--operator` is on the native call.
+        assert_eq!(
+            std::fs::read_to_string(bin.join("record.argv")).unwrap(),
+            format!("send\n--from\naoide\n--wake\n--operator\n{id}\n-\n")
+        );
+        assert_eq!(std::fs::read_to_string(bin.join("record.stdin")).unwrap(), "hello there");
+        assert!(nothing_connected(&listener), "an eidolon send takes the native path, not the socket");
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&bin);
+    }
+
+    #[test]
+    fn an_eidolon_send_from_an_agent_session_goes_as_a_peer() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (root, id, _listener) = door_fixture("eidolon-peer", None);
+        set_wrap(&id, |r| r.agent = "eidolon".into());
+        let bin = fake_eidolon("peer");
+        std::env::set_var("AOIDE_SESSION_ID", "agent-7");
+        with_fake_eidolon(&bin, || {
+            let out = session_send(&send_on(Door::Cli, &["ping"], &[("id", &id), ("yes", "true")]));
+            assert_eq!(out.status, aoide_protocol::output::Status::Ok, "{}", out.message);
+        });
+        std::env::remove_var("AOIDE_SESSION_ID");
+        let argv = std::fs::read_to_string(bin.join("record.argv")).unwrap();
+        assert!(!argv.contains("--operator"), "an agent's send goes as a peer: {argv}");
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&bin);
+    }
+
+    #[test]
+    fn an_eidolon_send_held_for_approval_runs_nothing() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (root, id, _listener) = door_fixture("eidolon-held", None);
+        set_wrap(&id, |r| r.agent = "eidolon".into());
+        let bin = fake_eidolon("held");
+        with_fake_eidolon(&bin, || {
+            let out = session_send(&send_on(Door::Cli, &["later"], &[("id", &id)]));
+            assert_eq!(out.data.as_ref().unwrap()["state"], "pending", "{}", out.message);
+        });
+        assert!(!bin.join("record.argv").exists(), "a held send runs no eidolon");
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&bin);
     }
 
     fn send_on(door: Door, args: &[&str], flags: &[(&str, &str)]) -> Invocation {
