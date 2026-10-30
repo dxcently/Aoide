@@ -22,6 +22,9 @@
   `aoide.quickshell.*` and `aoide.stylix.enable` become `strillix.*`. A hard rename with no alias: a host that sets an old name fails
   eval with an unknown option until it is renamed. `aoide.enable` no longer
   turns Strillix on; `strillix.enable` does, and Strillix runs with `aoide.enable` off.
+  A NixOS host whose user also imports `homeModules.nucleus` fails eval naming
+  `strillix.runtime.nixos`; `homeModules.nucleus` is for standalone homes, and
+  `tests/standalone-home` checks that refusal.
 - Two sockets. `aoided` serves `$XDG_RUNTIME_DIR/aoide/shellbridge.sock` for core's
   verbs. `strillix shellbridge --run` serves `$XDG_RUNTIME_DIR/strillix/bridge.sock`
   for the desktop's verbs. `ShellBridge.qml` routes each cmd to one socket.

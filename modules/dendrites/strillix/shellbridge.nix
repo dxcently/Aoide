@@ -44,7 +44,9 @@ let
   # shells out to `quickshell ipc call shell reload`; the client binary must
   # be the build the live shell actually runs.
   quickshellPkg = aoideInputs.quickshell.packages.${pkgs.stdenv.hostPlatform.system}.default;
-  strillixPkg = import ./package.nix { inherit pkgs; };
+  aoide = aoideInputs.aoide.packages.${pkgs.stdenv.hostPlatform.system}.default;
+  strillixRices = pkgs.strillix-rices;
+  strillixPkg = import ./package.nix { inherit pkgs aoide strillixRices; };
 in
 
 # Gated on the strillix fact alone: a host may select strillix with no Aoide. The desktop's socket
@@ -53,7 +55,7 @@ in
 #
 # `strillix.enable` is the gate because strillix OWNS this bridge
 # (docs/architecture/PACKAGE-LAYOUT.md): ExecStart below execs the installed strillix
-# (package.nix, a wrapper over `pkgs.aoide.strillix`, a SEPARATE, droppable output). With the fact
+# (package.nix, a wrapper over the aoide input's `strillix` output, a SEPARATE, droppable output). With the fact
 # off, `lib.mkIf` defines no unit here, so no unit execs a binary the closure lacks.
 lib.mkIf config.strillix.enable {
 
@@ -124,8 +126,8 @@ lib.mkIf config.strillix.enable {
       # workstream — it now lives only in `strillix` (crates/strillix/src/registry.rs;
       # core's registration lines were dropped, per the doc comment at
       # crates/cli/src/commands/mod.rs::all()). Both binaries ship from the
-      # same `pkgs.aoide` derivation (P-A7), but as of P-A8 `strillix` lives in
-      # that derivation's separate `strillix` output (`pkgs.aoide.strillix`) —
+      # same aoide derivation (P-A7), but as of P-A8 `strillix` lives in
+      # that derivation's separate `strillix` output (the aoide input's `strillix`) —
       # sibling resolution breaks across store paths (protocol::bin's
       # resolver walks current_exe's own directory), so this names the
       # installed strillix (package.nix, which wraps that output) rather than
@@ -154,14 +156,14 @@ lib.mkIf config.strillix.enable {
         # This unit execs `strillix shellbridge --run` (below) — the process that
         # actually reads `STRILLIX_TEMPLATES` (`strillix-rice::widgets`, `strillix`-only).
         # Paint data belongs on the unit that paints.
-        "STRILLIX_TEMPLATES=${pkgs.strillix-rices}/share/strillix/rices"
+        "STRILLIX_TEMPLATES=${strillixRices}/share/strillix/rices"
       ]
       # The core binary's path, for shellbridge's core_bin() re-exec sites (the
       # usage/recheck calls, the session window attach and the workspace verbs).
       # `strillix` runs out of its own output and `aoide` out of another, so the
       # sibling inference cannot find it. With Aoide off there is no binary to
       # name: the variable is absent and those calls are skipped.
-      ++ lib.optional config.aoide.enable "AOIDE_CORE_BIN=${pkgs.aoide}/bin/aoide";
+      ++ lib.optional config.aoide.enable "AOIDE_CORE_BIN=${aoide}/bin/aoide";
 
       # The desktop's socket directory under XDG_RUNTIME_DIR (`strillix/`).
       RuntimeDirectory = "strillix";

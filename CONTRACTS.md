@@ -492,8 +492,11 @@ Rules:
   `habit.home.imports`, never `habit.home = ./home.nix`: habit unifies a bare
   path into a module with no key, and two lanes would apply it twice. The home
   half closes over the system config through an internal `deferredModule`
-  option that the system half sets and the home half imports through
-  `osConfig` (`strillix.quickshell.home`, `strillix.home`).
+  module, reached through the forwarded options: NixOS passes them through
+  Home Manager's `sharedModules`, a standalone home through
+  `homeModules.nucleus` (`lib/strillix.nix` `standaloneNucleus`, which imports
+  `homeNucleus`). No home half reads
+  `osConfig`.
 
 - **The front door is provider modules and rice bodies, never a slot.** A
   consumer takes `parts.<component>` (each component slot's `strillix` provider,
