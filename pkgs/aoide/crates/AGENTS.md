@@ -37,7 +37,8 @@ MCP until its own `doors` says otherwise.
 
 Every command also declares its `kind` and `verb` in its own `cmd!`, and two
 goldens in `cli/src/registry.rs` pin them: `kinds_match_the_golden_snapshot`
-(one `path kind verb` line per command) and `kind_coverage_matches_the_golden_snapshot`
+(one `path kind verb` line per command) and
+`kind_coverage_matches_the_golden_snapshot`
 (each kind's four verbs as `ok`, `missing` or `n/a: <reason>`). A command that
 adds or retags a kind moves the first in the same commit. A command that fills
 a verb cell moves the second, and an `n/a` cell it fills loses its

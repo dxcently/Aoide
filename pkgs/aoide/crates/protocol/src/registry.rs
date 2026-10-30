@@ -32,8 +32,9 @@ fn is_cli_doors(d: &&'static [Door]) -> bool {
 pub const SCHEMA_VERSION: &str = "0";
 
 /// The kind vocabulary (CONTRACTS.md §3, `kind`): the one list every command's
-/// `kind` is checked against, by `aoide-test-support`'s `registry_walk` in each
-/// app crate. `none` is the explicit "about no object". A new object adds one
+/// `kind` is checked against, by `aoide-test-support`'s
+/// `every_command_has_a_kind`, which aoide's registry runs. Strillix does not
+/// run it yet. `none` is the explicit "about no object". A new object adds one
 /// name here, then the commands that carry it.
 pub const KINDS: &[&str] = &[
     "config", "content", "event", "graph", "hold", "job", "letter", "mailbox",

@@ -990,8 +990,8 @@ mod tests {
         assert_eq!(got, expected, "kind coverage drifted from the golden snapshot");
     }
 
-    /// Every kind in the vocabulary has at least one registered command, stub or
-    /// not, so an unused name cannot sit in `KINDS` unnoticed.
+    /// Every kind in the vocabulary has at least one registered command,
+    /// stub or not, so an unused name cannot sit in `KINDS` unnoticed.
     #[test]
     fn every_kind_in_the_vocabulary_is_registered() {
         let r = crate::commands::all();

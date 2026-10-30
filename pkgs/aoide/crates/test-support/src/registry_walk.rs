@@ -1,8 +1,9 @@
-//! Registry-walk assertions: each takes ONE binary's registry and checks
-//! every command against what the registry declares about it. `aoide-cli` and
-//! `strillix` each call all of them from a test, so the two binaries are
-//! held to the same rules and a command added tomorrow is covered the day it
-//! is registered. Each walk asserts what a command DECLARES; one that declares
+//! Registry-walk assertions: each takes ONE binary's registry and checks every
+//! command against what the registry declares about it. `aoide-cli` calls all
+//! of them from a test, so a command added tomorrow is covered the day it is
+//! registered. `strillix` calls the older walks; it does not call
+//! `every_command_has_a_kind` or `follow_is_a_watch` until strx tags its
+//! commands. Each walk asserts what a command DECLARES; one that declares
 //! nothing passes, so a rule tightens exactly as commands migrate onto it.
 
 use aoide_protocol::door::{list_description, parse, BRIEF_MAX};
@@ -377,8 +378,9 @@ pub fn suggestion_or_list(bin: &str, registry: &Registry) {
 /// Every command declares a `kind` and a `verb`, each from the protocol's
 /// vocabulary (`KINDS`, `VERBS`; CONTRACTS.md §3). A blank kind is "not decided
 /// yet", and core refuses it; a `none` kind pairs with verb `none`, and any
-/// other kind takes list, show, watch or act. Both binaries call this (strillix
-/// once it tags its commands), so a misspelt kind is refused in each.
+/// other kind takes list, show, watch or act. aoide's registry calls this, from
+/// the cli crate's test. Strillix does not call it yet: once strx tags its
+/// commands, its registry test makes the one call.
 pub fn every_command_has_a_kind(registry: &Registry) {
     for c in registry.commands() {
         let path = c.dotted();

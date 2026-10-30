@@ -703,19 +703,21 @@ Contract guarantees:
   same discipline as `internal`: each key is omitted entirely when `false`, so
   an unmarked command serializes byte-identical to before. `Command::check`
   reads neither mark.
-- `kind` and `verb` (optional strings; a blank key means "not decided yet") —
-  the object a command is about, and what it does to that object. `kind` is
-  one name from `KINDS` in `aoide-protocol`'s `registry.rs`; `verb` is one of
-  `VERBS`: `list` a set, `show` one object, `watch` a stream, `act` on one. A
-  command about no object says `none` for both. The value sets are checked by
-  `aoide-test-support`'s `every_command_has_a_kind` in each app crate, and the
-  core golden in cli/src/registry.rs pins every command's pair and each kind's
-  verb coverage, with each `n/a` cell's reason as text. `Command::check` reads
-  neither key. In this section `kind` means a command's object only: the event
-  feed's own `"kind"` lines and a refusal's `refusal.kind` keep their meanings.
-  **Additive**, same discipline as `approves`: `schemaVersion` stays `"0"`, since
-  a blank key is omitted and a declared one adds a key no consumer must read.
-  `strx schema --json` stays byte-identical until Strillix declares its kinds.
+- `kind` and `verb` (optional strings; a blank key means "not decided yet"): the
+  object a command is about, and what it does to that object. `kind` is one name
+  from `KINDS` in `aoide-protocol`'s `registry.rs`; `verb` is one of `VERBS`:
+  `list` a set, `show` one object, `watch` a stream, `act` on one. A command
+  about no object says `none` for both. aoide's registry checks the value sets
+  with `aoide-test-support`'s `every_command_has_a_kind` (the cli crate's test),
+  and the core golden in cli/src/registry.rs pins every command's pair and each
+  kind's verb coverage, with each `n/a` cell's reason as text. Strillix does not
+  run that check yet: when strx tags its commands, its registry test makes the
+  one call. `Command::check` reads neither key. In this section `kind` means a
+  command's object only: the event feed's own `"kind"` lines and a refusal's
+  `refusal.kind` keep their meanings. **Additive**, same discipline as
+  `approves`: `schemaVersion` stays `"0"`, since a blank key is omitted and a
+  declared one adds a key no consumer must read. `strx schema --json` stays
+  byte-identical until Strillix declares its kinds.
 - `doors` (optional string array on a command, and on a flag) — the doors that
   may call the command, from `cli`, `daemon`, `mcp`, `a2a`. **Additive**, same
   discipline: omitted from `schema --json` when it is the default `["cli",
