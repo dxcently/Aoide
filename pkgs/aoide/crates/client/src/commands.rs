@@ -2176,6 +2176,7 @@ pub fn register_nodes(r: &mut Registry) {
         handler: handle_node_add,
         examples: ["node add sakaki https://aoide.example.net", "node add laptop poll", "node add yomi http://127.0.0.1:8710 --via ssh://khoa@yomi --no-verify"],
         brief: "Register a node by address, checking its AgentCard first.",
+        kind: "node", verb: "act",
     ));
     r.insert(cmd!(
         path: ["node", "remove"],
@@ -2187,6 +2188,7 @@ pub fn register_nodes(r: &mut Registry) {
         handler: handle_node_remove,
         examples: ["node remove sakaki"],
         brief: "Unregister a node and drop its cache.",
+        kind: "node", verb: "act",
     ));
     r.insert(cmd!(
         path: ["node", "pull"],
@@ -2200,6 +2202,7 @@ pub fn register_nodes(r: &mut Registry) {
         handler: handle_node_pull,
         examples: ["node pull", "node pull sakaki"],
         brief: "Refresh the cached graph summary of one node, or of every node.",
+        kind: "node", verb: "act",
     ));
     r.insert(cmd!(
         path: ["node", "status"],
@@ -2211,6 +2214,7 @@ pub fn register_nodes(r: &mut Registry) {
         handler: handle_node_status,
         examples: ["node status"],
         brief: "Show each node's last-pull outcome and how fresh its cache is.",
+        kind: "node", verb: "list",
     ));
     r.insert(cmd!(
         path: ["node", "address"],
@@ -2225,6 +2229,7 @@ pub fn register_nodes(r: &mut Registry) {
         handler: handle_node_address,
         examples: ["node address sakaki https://aoide.necoconeco.net", "node address laptop poll"],
         brief: "Point a node at a new address, keeping its key, grants and trust.",
+        kind: "node", verb: "act",
     ));
     r.insert(cmd!(
         path: ["node", "hub"],
@@ -2238,6 +2243,7 @@ pub fn register_nodes(r: &mut Registry) {
         handler: handle_node_hub,
         examples: ["node hub sakaki", "node hub sakaki --clear"],
         brief: "Mark a node as THE hub for address resolution, or clear it.",
+        kind: "node", verb: "act",
     ));
     r.insert(cmd!(
         path: ["node", "allow"],
@@ -2255,6 +2261,7 @@ pub fn register_nodes(r: &mut Registry) {
         handler: handle_node_allow,
         examples: ["node allow yomi-strix spawn on", "node allow yomi-strix spawn off --mesh away"],
         brief: "Turn one capability on or off in a node's grant for a mesh.",
+        kind: "node", verb: "act",
     ));
     r.insert(cmd!(
         path: ["node", "spawn"],
@@ -2276,6 +2283,7 @@ pub fn register_nodes(r: &mut Registry) {
         examples: ["node spawn yomi-strix -- status check please"],
         brief: "Start a session on a paired node and type its first turn.",
         approves: true, launches: true,
+        kind: "session", verb: "act",
     ));
 }
 
@@ -4471,6 +4479,7 @@ pub fn register_node_discovery(r: &mut Registry) {
         handler: handle_node_discover,
         examples: ["node discover", "node discover --secs 8"],
         brief: "Listen on the LAN and list the instances advertising.",
+        kind: "node", verb: "list",
     ));
     r.insert(cmd!(
         path: ["node", "advertise"],
@@ -4482,6 +4491,7 @@ pub fn register_node_discovery(r: &mut Registry) {
         handler: handle_node_advertise,
         examples: ["node advertise on", "node advertise off"],
         brief: "Switch this instance's LAN discovery advertising on or off.",
+        kind: "node", verb: "act",
     ));
 }
 
@@ -4859,6 +4869,7 @@ pub fn register_pair(r: &mut Registry) {
         handler: handle_pair,
         examples: ["pair", "pair osaka", "pair osaka --code 839-035", "pair http://box:8710/ --wait 0"],
         brief: "Pair with another instance: request, approve or resume a pairing.",
+        kind: "pairing", verb: "act",
     ));
     r.insert(cmd!(
         path: ["pair", "reject"],
@@ -4870,6 +4881,7 @@ pub fn register_pair(r: &mut Registry) {
         handler: handle_pair_reject,
         examples: ["pair reject osaka"],
         brief: "Refuse or abort a pending pairing request.",
+        kind: "pairing", verb: "act",
     ));
     r.insert(cmd!(
         path: ["pair", "watch"],
@@ -4887,6 +4899,7 @@ pub fn register_pair(r: &mut Registry) {
         examples: ["pair watch", "pair watch --json", "pair watch --popup"],
         brief: "Follow pairing events live, optionally as typed-code dialogs.",
         doors: &[Door::Cli],
+        kind: "pairing", verb: "watch",
     ));
 }
 
@@ -4912,6 +4925,7 @@ pub fn register_post_graph(r: &mut Registry) {
         implemented: true,
         handler: handle_adapter_melete,
         brief: "Feed the neutral event stream to Melete (default-deny per class).",
+        kind: "none", verb: "none",
     ));
 }
 
@@ -4948,6 +4962,7 @@ pub fn register_mail_names(r: &mut Registry, names: fn(&Invocation) -> Outcome) 
         examples: ["mail"],
         brief: "List the mailboxes that hold mail you have not read.",
         doors: &[Door::Cli, Door::Mcp],
+        kind: "mailbox", verb: "list",
     ));
 }
 
@@ -4968,6 +4983,7 @@ pub fn register_mail_reads(r: &mut Registry, read: fn(&Invocation) -> Outcome, s
         brief: "Print unread letters and move the cursor past them.",
         one_of: &[&["for", "all-names"]],
         doors: &[Door::Cli, Door::Mcp],
+        kind: "letter", verb: "list",
     ));
     r.insert(cmd!(
         path: ["mail", "show"],
@@ -4980,6 +4996,7 @@ pub fn register_mail_reads(r: &mut Registry, read: fn(&Invocation) -> Outcome, s
         examples: ["mail show <msgid>"],
         brief: "Print one mail entry by its msgid, leaving cursors alone.",
         doors: &[Door::Cli, Door::Mcp],
+        kind: "letter", verb: "show",
     ));
     r.insert(cmd!(
         path: ["mail", "mark"],
@@ -4992,6 +5009,7 @@ pub fn register_mail_reads(r: &mut Registry, read: fn(&Invocation) -> Outcome, s
         examples: ["mail mark --for conductor"],
         brief: "Move a mailbox's cursor to its latest entry, printing nothing.",
         doors: &[Door::Cli, Door::Mcp],
+        kind: "mailbox", verb: "act",
     ));
 }
 
@@ -5016,6 +5034,7 @@ pub fn register_mail_send(r: &mut Registry) {
         examples: ["mail send --to self/conductor -- status?", "mail send --to yomi-strix/conductor -- build finished"],
         brief: "Send a letter to self/<name> or to <node>/<name>.",
         approves: true,
+        kind: "letter", verb: "act",
     ));
 }
 
@@ -5031,6 +5050,7 @@ pub fn register_mail(r: &mut Registry) {
         examples: ["mail box add conductor"],
         brief: "Create an empty mailbox so far mail to it can file.",
         doors: &[Door::Cli],
+        kind: "mailbox", verb: "act",
     ));
     r.insert(cmd!(
         path: ["mail", "box", "rm"],
@@ -5043,6 +5063,7 @@ pub fn register_mail(r: &mut Registry) {
         examples: ["mail box rm conductor", "mail box rm conductor --force"],
         brief: "Remove a mailbox, its letters and its reader marks.",
         doors: &[Door::Cli],
+        kind: "mailbox", verb: "act",
     ));
     r.insert(cmd!(
         path: ["mail", "rm"],
@@ -5054,6 +5075,7 @@ pub fn register_mail(r: &mut Registry) {
         handler: handle_mail_rm,
         examples: ["mail rm --older-than 30d"],
         brief: "Prune mailbase entries older than an age (the only pruning there is).",
+        kind: "letter", verb: "act",
     ));
     r.insert(cmd!(
         path: ["mail", "outbox"],
@@ -5065,6 +5087,7 @@ pub fn register_mail(r: &mut Registry) {
         handler: handle_mail_outbox,
         examples: ["mail outbox", "mail outbox yomi-strix"],
         brief: "List letters spooled toward nodes and not yet delivered.",
+        kind: "outbox", verb: "list",
     ));
     r.insert(cmd!(
         path: ["mail", "outbox", "rm"],
@@ -5076,6 +5099,7 @@ pub fn register_mail(r: &mut Registry) {
         handler: handle_mail_outbox_rm,
         examples: ["mail outbox rm <msgid>"],
         brief: "Retire one spooled letter by msgid without waiting for an ack.",
+        kind: "outbox", verb: "act",
     ));
     r.insert(cmd!(
         path: ["mail", "outbox", "retry"],
@@ -5087,6 +5111,7 @@ pub fn register_mail(r: &mut Registry) {
         handler: handle_mail_outbox_retry,
         examples: ["mail outbox retry <msgid>", "mail outbox retry --refused", "mail outbox retry --refused yomi-strix"],
         brief: "Un-park a refused outbox entry and try delivering it again.",
+        kind: "outbox", verb: "act",
     ));
     r.insert(cmd!(
         path: ["mail", "export"],
@@ -5098,6 +5123,7 @@ pub fn register_mail(r: &mut Registry) {
         handler: handle_mail_export,
         examples: ["mail export", "mail export --dir ~/Magi/aoide-mail"],
         brief: "Write every mail thread as a Markdown note, read-only.",
+        kind: "letter", verb: "act",
     ));
     r.insert(cmd!(
         path: ["mail", "poll"],
@@ -5111,6 +5137,7 @@ pub fn register_mail(r: &mut Registry) {
         handler: handle_mail_poll,
         examples: ["mail poll", "mail poll yomi-strix"],
         brief: "Ask a paired node (or every one) for the mail it holds for you.",
+        kind: "letter", verb: "act",
     ));
     r.insert(cmd!(
         path: ["mail", "route"],
@@ -5122,6 +5149,7 @@ pub fn register_mail(r: &mut Registry) {
         handler: handle_mail_route,
         examples: ["mail route chiyo/conductor", "mail route evo/conductor --mesh home"],
         brief: "Show where a letter to <node>/<name> would go next; sends nothing.",
+        kind: "mesh", verb: "show",
     ));
 }
 

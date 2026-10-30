@@ -42,6 +42,7 @@ pub fn register(r: &mut Registry) {
         handler: handle_charter_init,
         examples: ["mesh charter init home"],
         brief: "Root a mesh here: mint its operator key and an empty charter.",
+        kind: "mesh", verb: "act",
     ));
     r.insert(cmd!(
         path: ["mesh", "charter", "sign"],
@@ -53,6 +54,7 @@ pub fn register(r: &mut Registry) {
         handler: handle_charter_sign,
         examples: ["mesh charter sign home", "mesh charter sign home --file ./home.toml"],
         brief: "Sign the charter source, apply it here and spool it to every node.",
+        kind: "mesh", verb: "act",
     ));
     r.insert(cmd!(
         path: ["mesh", "charter", "accept"],
@@ -64,6 +66,7 @@ pub fn register(r: &mut Registry) {
         handler: handle_charter_accept,
         examples: ["mesh charter accept ./home.toml"],
         brief: "Apply a signed charter file carried by hand.",
+        kind: "mesh", verb: "act",
     ));
     r.insert(cmd!(
         path: ["mesh", "charter", "reroot"],
@@ -75,6 +78,7 @@ pub fn register(r: &mut Registry) {
         handler: handle_charter_reroot,
         examples: ["mesh charter reroot home"],
         brief: "Replace a lost or leaked operator key and re-sign the charter.",
+        kind: "mesh", verb: "act",
     ));
     r.insert(cmd!(
         path: ["mesh", "charter", "show"],
@@ -86,6 +90,7 @@ pub fn register(r: &mut Registry) {
         handler: handle_charter_show,
         examples: ["mesh charter show", "mesh charter show home", "mesh charter show home --json"],
         brief: "Print the charter in force here, its operator and its status.",
+        kind: "mesh", verb: "show",
     ));
     r.insert(cmd!(
         path: ["mesh", "join"],
@@ -104,6 +109,7 @@ pub fn register(r: &mut Registry) {
         handler: handle_charter_join,
         examples: ["mesh join home --operator ed25519:…", "mesh join home sakaki", "mesh join home 192.168.1.158 --yes --json"],
         brief: "Trust a mesh's operator key, by key or from the operator over the LAN.",
+        kind: "mesh", verb: "act",
     ));
 }
 

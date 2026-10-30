@@ -300,6 +300,20 @@ pub fn run_cli(argv: &[String]) -> i32 {
             return Some(secrets::watch::run(&socket, &events, json, popup));
         }
 
+        // `session watch --json` (live) closes its stream with the outcome
+        // envelope on ONE line, so every stdout line of the run parses as a
+        // JSON object; the stream's own `end` object comes just before it.
+        // Only the success path writes stdout: a refusal goes through the
+        // door's emit.
+        if inv.path == ["session", "watch"] && json && !inv.flag_present("snapshot") {
+            let out = dispatch::dispatch(inv);
+            if out.status != output::Status::Ok {
+                return Some(protocol::door::emit(&out, json));
+            }
+            let line = serde_json::to_string(&out).unwrap_or_default();
+            return Some(protocol::door::say(&line).unwrap_or(out.status.exit_code()));
+        }
+
         // `events tail` (P-D3, `docs/architecture/AOIDED.md`'s "L1" section)
         // is a foreground, line-mode follow of aoided's OWN events feed —
         // special-cased the SAME way as `secrets watch` just above: dispatch

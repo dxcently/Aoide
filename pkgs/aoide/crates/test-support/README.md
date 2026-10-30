@@ -44,8 +44,12 @@ of those exists as a copy per crate.
 - `registry_walk` — assertions that take one binary's `Registry` and check
   every command against what it declares (`every_example_parses`,
   `required_is_enforced` with a sentinel handler, `defaults_applied`,
-  `brief_fits`, `suggestion_or_list`); `aoide-cli` and `strillix` each call
-  all of them.
+  `brief_fits`, `suggestion_or_list`, `every_command_has_a_kind`,
+  `follow_is_a_watch`). `aoide-cli` calls all of them. `strillix` calls the
+  older walks only. The switch is one call in `strillix/src/registry.rs`'s
+  tests, once strx tags its commands:
+  `registry_walk::every_command_has_a_kind(&crate::commands::all())`, and the
+  same for `follow_is_a_watch`.
 - The fixture note payloads (`VALID_NOTES`, `NOTES_WITH_WINDOW`,
   `NOTES_WITH_GEOMETRY`, `NOTES_WITH_INTERPOLATION`), `inv`,
   `isolated_mail_root`.

@@ -26,6 +26,7 @@ pub fn register(r: &mut Registry) {
         ],
         brief: "Add a local job on a systemd user timer.",
         approves: true, launches: true,
+        kind: "job", verb: "act",
     ));
     r.insert(cmd!(
         path: ["job", "remove"],
@@ -42,6 +43,7 @@ pub fn register(r: &mut Registry) {
         ],
         brief: "Remove a local job and its units.",
         approves: true,
+        kind: "job", verb: "act",
     ));
     r.insert(cmd!(
         path: ["job", "list"],
@@ -56,6 +58,7 @@ pub fn register(r: &mut Registry) {
             "job list --json",
         ],
         brief: "List local jobs and their status.",
+        kind: "job", verb: "list",
     ));
     r.insert(cmd!(
         path: ["job", "runs"],
@@ -72,5 +75,6 @@ pub fn register(r: &mut Registry) {
             "job runs --name=nightly --json",
         ],
         brief: "Show the runs of local jobs from the journal.",
+        kind: "job", verb: "list",
     ));
 }

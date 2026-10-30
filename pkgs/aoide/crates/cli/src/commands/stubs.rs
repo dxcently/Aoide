@@ -32,6 +32,7 @@ pub fn register_content(r: &mut Registry) {
         gated: false,
         implemented: false,
         handler: unimplemented,
+        kind: "content", verb: "act",
     ));
     r.insert(cmd!(
         path: ["content", "propose"],
@@ -41,6 +42,7 @@ pub fn register_content(r: &mut Registry) {
         gated: false,
         implemented: false,
         handler: unimplemented,
+        kind: "content", verb: "act",
     ));
     r.insert(cmd!(
         path: ["content", "approve"],
@@ -50,6 +52,7 @@ pub fn register_content(r: &mut Registry) {
         gated: true,
         implemented: false,
         handler: unimplemented,
+        kind: "content", verb: "act",
     ));
     r.insert(cmd!(
         path: ["content", "ingest"],
@@ -59,6 +62,7 @@ pub fn register_content(r: &mut Registry) {
         gated: false,
         implemented: false,
         handler: unimplemented,
+        kind: "content", verb: "act",
     ));
     r.insert(cmd!(
         path: ["content", "query"],
@@ -68,6 +72,7 @@ pub fn register_content(r: &mut Registry) {
         gated: false,
         implemented: false,
         handler: unimplemented,
+        kind: "content", verb: "list",
     ));
 }
 
@@ -82,6 +87,7 @@ pub fn register_make(r: &mut Registry) {
         implemented: false,
         handler: unimplemented,
         brief: "Generate a dendrite, widget and adapter from an intent.",
+        kind: "none", verb: "none",
     ));
 }
 
@@ -96,5 +102,6 @@ pub fn register_update(r: &mut Registry) {
         implemented: false,
         handler: unimplemented,
         brief: "Fetch upstream, merge framework paths, propose the rebuild.",
+        kind: "none", verb: "none",
     ));
 }

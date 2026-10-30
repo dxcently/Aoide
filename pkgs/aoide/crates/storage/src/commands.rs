@@ -51,6 +51,7 @@ pub fn register(r: &mut Registry) {
         implemented: true,
         handler: handle_usage,
         brief: "Token and cost rollup from this machine's transcripts.",
+        kind: "usage", verb: "show",
     ));
 }
 
@@ -636,6 +637,7 @@ pub fn register_identity(r: &mut Registry) {
         handler: handle_identity,
         examples: ["identity"],
         brief: "Show this instance's ed25519 identity and node fingerprint.",
+        kind: "node", verb: "show",
     ));
 }
 
@@ -697,6 +699,7 @@ pub fn register_config(r: &mut Registry) {
         implemented: true,
         handler: handle_config,
         examples: ["config", "config --json"],
+        kind: "config", verb: "show",
     ));
     r.insert(cmd!(
         path: ["config", "set"],
@@ -710,6 +713,7 @@ pub fn register_config(r: &mut Registry) {
         implemented: true,
         handler: handle_config_set,
         examples: ["config set pairing.defaultGrant read", "config set pairing.defaultGrant read,spawn"],
+        kind: "config", verb: "act",
     ));
 }
 

@@ -766,7 +766,7 @@ pub(super) fn audit_log_of(inv: &Invocation) -> PathBuf {
 /// refusal keeps: no one reads an expired body back whole.
 fn audit_eviction(log: &HoldLog, dropped: &PendingSend, admitted: &str) {
     let from = dropped.from.as_deref().unwrap_or("unattributed");
-    let _ = aoide_protocol::append_audit(
+    if let Err(e) = aoide_protocol::append_audit(
         &log.path,
         &aoide_protocol::AuditRecord {
             ts: super::conduct::unix_ts(),
@@ -780,7 +780,9 @@ fn audit_eviction(log: &HoldLog, dropped: &PendingSend, admitted: &str) {
             ),
             untrusted_data: Some(dropped.text.chars().take(AUDIT_REFUSED_TEXT_MAX).collect()),
         },
-    );
+    ) {
+        eprintln!("[aoide/conduct] audit line lost for expired hold {}: {e}", dropped.session_id);
+    }
 }
 
 /// Append `entry` to `file` if it fits: under the entry cap, under its source's
@@ -3264,6 +3266,41 @@ mod tests {
     use crate::graph::session_store::{
         do_hook_session_start, do_session_start, stamp_attested_spawner, stamp_seal,
     };
+
+    /// An eviction whose audit line cannot be written is printed, not dropped.
+    /// The print goes to stderr, which an in-process test cannot read, so the
+    /// test re-runs itself as a child with the flag set and reads the child's
+    /// stderr. Seen to fail with the `eprintln!` removed.
+    #[test]
+    fn an_unwritable_eviction_audit_is_printed_not_dropped() {
+        const CHILD: &str = "AOIDE_EVICTION_PRINT_CHILD";
+        if std::env::var_os(CHILD).is_some() {
+            let dir = std::env::temp_dir().join(format!("aoide-evict-print-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(dir.join("blocker"), b"").unwrap();
+            let log = HoldLog { door: Door::Cli, path: dir.join("blocker").join("audit.log") };
+            let dropped: PendingSend = serde_json::from_value(serde_json::json!({
+                "sessionId": "expired-s1",
+                "text": "held",
+                "queuedAt": "2000-01-01T00:00:00Z",
+            }))
+            .unwrap();
+            audit_eviction(&log, &dropped, "admitted-s2");
+            let _ = std::fs::remove_dir_all(&dir);
+            return;
+        }
+        let out = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "graph::send::tests::an_unwritable_eviction_audit_is_printed_not_dropped", "--nocapture"])
+            .env(CHILD, "1")
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            stderr.contains("audit line lost for expired hold expired-s1"),
+            "the lost audit line is not printed: {stderr}"
+        );
+    }
 
     #[test]
     fn attested_parent_is_honoured_only_where_the_spawn_stamp_names_it() {

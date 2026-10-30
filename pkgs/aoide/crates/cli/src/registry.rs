@@ -783,6 +783,224 @@ mod tests {
     }
 
     #[test]
+    fn every_command_has_a_kind() {
+        aoide_test_support::registry_walk::every_command_has_a_kind(&crate::commands::all());
+    }
+
+    /// Golden snapshot: every command's `kind` and `verb`, one sorted
+    /// `path kind verb` line each (CONTRACTS.md §3). A retag moves this list.
+    #[test]
+    fn every_follow_flag_is_a_watch() {
+        aoide_test_support::registry_walk::follow_is_a_watch(&crate::commands::all());
+    }
+
+    #[test]
+    fn kinds_match_the_golden_snapshot() {
+        let r = crate::commands::all();
+        let mut got: Vec<String> = r.commands().map(|c| format!("{} {} {}", c.dotted(), c.kind, c.verb)).collect();
+        got.sort();
+        let mut expected: Vec<&str> = vec![
+            "a2a.serve none none",
+            "adapter.melete none none",
+            "conduct session act",
+            "conductor none none",
+            "config config show",
+            "config.set config act",
+            "content.approve content act",
+            "content.ingest content act",
+            "content.propose content act",
+            "content.query content list",
+            "content.register content act",
+            "context note show",
+            "daemon none none",
+            "events.tail event watch",
+            "graph graph show",
+            "graph.link graph act",
+            "guide none none",
+            "hooks.install none none",
+            "identity node show",
+            "job.add job act",
+            "job.list job list",
+            "job.remove job act",
+            "job.runs job list",
+            "mail mailbox list",
+            "mail.box.add mailbox act",
+            "mail.box.rm mailbox act",
+            "mail.export letter act",
+            "mail.mark mailbox act",
+            "mail.outbox outbox list",
+            "mail.outbox.retry outbox act",
+            "mail.outbox.rm outbox act",
+            "mail.poll letter act",
+            "mail.read letter list",
+            "mail.ring mailbox act",
+            "mail.rm letter act",
+            "mail.route mesh show",
+            "mail.send letter act",
+            "mail.serve none none",
+            "mail.show letter show",
+            "make none none",
+            "mcp.serve none none",
+            "melete.call melete act",
+            "melete.graph melete show",
+            "melete.status melete show",
+            "mesh mesh list",
+            "mesh.charter.accept mesh act",
+            "mesh.charter.init mesh act",
+            "mesh.charter.reroot mesh act",
+            "mesh.charter.show mesh show",
+            "mesh.charter.sign mesh act",
+            "mesh.join mesh act",
+            "mesh.pair mesh act",
+            "node.add node act",
+            "node.address node act",
+            "node.advertise node act",
+            "node.allow node act",
+            "node.discover node list",
+            "node.hub node act",
+            "node.list node list",
+            "node.pull node act",
+            "node.remove node act",
+            "node.spawn session act",
+            "node.status node list",
+            "onboard none none",
+            "pair pairing act",
+            "pair.reject pairing act",
+            "pair.watch pairing watch",
+            "project.add project act",
+            "project.edit project act",
+            "project.lead project act",
+            "project.list project list",
+            "project.remove project act",
+            "resurrect session act",
+            "schema none none",
+            "secrets.add secret act",
+            "secrets.allow-remote-origin secret act",
+            "secrets.approve secret-hold act",
+            "secrets.automate secret act",
+            "secrets.dismiss secret-hold act",
+            "secrets.enroll secret act",
+            "secrets.exec secret act",
+            "secrets.expose secret act",
+            "secrets.grant secret act",
+            "secrets.migrate secret act",
+            "secrets.pending secret-hold list",
+            "secrets.put secret act",
+            "secrets.revoke secret act",
+            "secrets.rm secret act",
+            "secrets.serve none none",
+            "secrets.set-totp secret act",
+            "secrets.status secret list",
+            "secrets.watch secret-hold watch",
+            "send session act",
+            "session session list",
+            "session.bind session act",
+            "session.codex.sync session act",
+            "session.end session act",
+            "session.find session list",
+            "session.grant session act",
+            "session.hook session act",
+            "session.kill session act",
+            "session.pending.approve hold act",
+            "session.pending.deny hold act",
+            "session.pending.list hold list",
+            "session.permit session act",
+            "session.phase session act",
+            "session.project session act",
+            "session.prune session act",
+            "session.reap session act",
+            "session.show session show",
+            "session.start session act",
+            "session.trace session watch",
+            "session.watch session watch",
+            "session.window.attach session act",
+            "session.window.closed session act",
+            "session.window.roster session act",
+            "soundcheck none none",
+            "spawn session act",
+            "update none none",
+            "usage usage show",
+            "workspace.clear workspace act",
+            "workspace.list workspace list",
+            "workspace.root workspace show",
+            "workspace.set workspace act",
+        ];
+        expected.sort();
+        assert_eq!(got, expected, "kind and verb set drifted from the golden snapshot");
+    }
+
+    /// Cells the coverage golden spells `n/a`, each with its reason. A command
+    /// that fills one of them fails the golden until its entry is dropped here.
+    const NOT_APPLICABLE: &[(&str, &str, &str)] = &[
+        ("event", "act", "producers write events, no verb does"),
+        ("graph", "list", "one graph per host"),
+        ("config", "list", "one config"),
+        ("usage", "list", "one rollup"),
+        ("usage", "act", "the refresh is a bridge verb, not a command"),
+    ];
+
+    /// Golden snapshot: per kind with an implemented command, whether each verb
+    /// is `ok`, `missing`, or `n/a: <reason>`. Stub-only kinds are left out
+    /// (`content`), and `none` is not a kind to cover. A command that fills a
+    /// gap moves this list, so every gap stays visible in one place.
+    #[test]
+    fn kind_coverage_matches_the_golden_snapshot() {
+        let r = crate::commands::all();
+        let mut got: Vec<String> = Vec::new();
+        for kind in aoide_protocol::registry::KINDS.iter().filter(|k| **k != "none") {
+            let live: Vec<&aoide_protocol::registry::Command> = r.commands().filter(|c| c.kind == *kind && c.implemented).collect();
+            if live.is_empty() {
+                continue;
+            }
+            let mut cells: Vec<String> = Vec::new();
+            for verb in ["list", "show", "watch", "act"] {
+                let filled = live.iter().any(|c| c.verb == verb);
+                let na = NOT_APPLICABLE.iter().find(|(k, v, _)| k == kind && *v == verb).map(|(_, _, why)| *why);
+                let cell = match (filled, na) {
+                    (true, None) => "ok".to_string(),
+                    (true, Some(why)) => panic!("`{kind} {verb}` has a command now: drop its n/a (\"{why}\")"),
+                    (false, Some(why)) => format!("n/a: {why}"),
+                    (false, None) => "missing".to_string(),
+                };
+                cells.push(format!("{verb} {cell}"));
+            }
+            got.push(format!("{kind}: {}", cells.join(", ")));
+        }
+        let expected: Vec<&str> = vec![
+            "config: list n/a: one config, show ok, watch missing, act ok",
+            "event: list missing, show missing, watch ok, act n/a: producers write events, no verb does",
+            "graph: list n/a: one graph per host, show ok, watch missing, act ok",
+            "hold: list ok, show missing, watch missing, act ok",
+            "job: list ok, show missing, watch missing, act ok",
+            "letter: list ok, show ok, watch missing, act ok",
+            "mailbox: list ok, show missing, watch missing, act ok",
+            "melete: list missing, show ok, watch missing, act ok",
+            "mesh: list ok, show ok, watch missing, act ok",
+            "node: list ok, show ok, watch missing, act ok",
+            "note: list missing, show ok, watch missing, act missing",
+            "outbox: list ok, show missing, watch missing, act ok",
+            "pairing: list missing, show missing, watch ok, act ok",
+            "project: list ok, show missing, watch missing, act ok",
+            "secret: list ok, show missing, watch missing, act ok",
+            "secret-hold: list ok, show missing, watch ok, act ok",
+            "session: list ok, show ok, watch ok, act ok",
+            "usage: list n/a: one rollup, show ok, watch missing, act n/a: the refresh is a bridge verb, not a command",
+            "workspace: list ok, show ok, watch missing, act ok",
+        ];
+        assert_eq!(got, expected, "kind coverage drifted from the golden snapshot");
+    }
+
+    /// Every kind in the vocabulary has at least one registered command,
+    /// stub or not, so an unused name cannot sit in `KINDS` unnoticed.
+    #[test]
+    fn every_kind_in_the_vocabulary_is_registered() {
+        let r = crate::commands::all();
+        for kind in aoide_protocol::registry::KINDS {
+            assert!(r.commands().any(|c| c.kind == *kind), "kind `{kind}` is in KINDS with no command");
+        }
+    }
+
+    #[test]
     fn every_example_parses() {
         aoide_test_support::registry_walk::every_example_parses("aoide", &crate::commands::all());
     }

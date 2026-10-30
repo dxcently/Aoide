@@ -133,17 +133,20 @@ fn the_equals_form_is_taught_the_spaced_one() {
 /// Run `bin args` with its stdout reader already gone; return (code, stderr).
 fn with_stdout_closed(bin: &str, args: &[&str]) -> (i32, String) {
     let sb = Sandbox::new("closed");
+    // The reader is dropped before the spawn, so the child's first write meets
+    // EPIPE. Dropping it after the spawn raced the child's write under load.
+    let (reader, writer) = std::io::pipe().unwrap();
+    drop(reader);
     let mut child = Command::new(bin)
         .args(args)
         .env("AOIDE_ROOT", sb.dir.join("root"))
         .env("STRILLIX_ROOT", sb.dir.join("root"))
         .env("XDG_RUNTIME_DIR", sb.dir.join("run"))
         .env("AOIDE_AUDIT_LOG", sb.dir.join("root").join("log"))
-        .stdout(Stdio::piped())
+        .stdout(Stdio::from(writer))
         .stderr(Stdio::piped())
         .spawn()
         .unwrap();
-    drop(child.stdout.take());
     let start = Instant::now();
     while child.try_wait().unwrap().is_none() {
         assert!(start.elapsed() < DEADLINE, "{bin} {args:?} hung");
