@@ -16576,8 +16576,9 @@ mod tests {
     }
 
     /// **A return that fails does not stop the poll.** One refused letter's
-    /// write fails, because a directory sits where its temp file goes, so only
-    /// that entry is affected. The poll still returns the other refused letter,
+    /// record write fails at its rename (a registered `WriteWatch` swaps that
+    /// record for a non-empty directory for the one write, then restores it),
+    /// so only that entry is affected. The poll still returns the other refused letter,
     /// still offers the held letter it was asked for, and audits the failure.
     #[test]
     fn a_failed_return_does_not_stop_the_poll() {
@@ -16598,10 +16599,26 @@ mod tests {
             aoide_storage::outbox::write_entry("box-b", &aoide_storage::outbox::OutboxEntry::held(envelope)).unwrap();
         }
         let (blocked, returned, offered) = (&held[0], &held[1], &held[2]);
-        let temp = aoide_storage::outbox::outbox_dir()
-            .join("box-b")
-            .join(format!("{blocked}.tmp.{}", std::process::id()));
-        std::fs::create_dir_all(&temp).unwrap();
+        struct BlockRecordWrite;
+        impl aoide_storage::fs::WriteWatch for BlockRecordWrite {
+            fn around_write(
+                &self,
+                path: &std::path::Path,
+                rename: &mut dyn FnMut() -> std::io::Result<()>,
+            ) -> std::io::Result<()> {
+                let saved = std::fs::read(path).unwrap();
+                std::fs::remove_file(path).unwrap();
+                std::fs::create_dir(path).unwrap();
+                std::fs::write(path.join("occupied"), b"").unwrap();
+                let result = rename();
+                std::fs::remove_dir_all(path).unwrap();
+                std::fs::write(path, saved).unwrap();
+                result
+            }
+        }
+        let record = aoide_storage::outbox::outbox_dir().join("box-b").join(format!("{blocked}.json"));
+        let _block: std::sync::Arc<dyn aoide_storage::fs::WriteWatch> = std::sync::Arc::new(BlockRecordWrite);
+        aoide_storage::fs::watch_writes(vec![record], std::sync::Arc::downgrade(&_block));
         let refused = json!([
             { "msgid": blocked, "word": "unknown-box" },
             { "msgid": returned, "word": "unknown-box" },

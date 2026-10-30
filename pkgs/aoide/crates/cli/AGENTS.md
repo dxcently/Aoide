@@ -17,8 +17,9 @@ verified against that pid's real ancestry. `graph_residency_p_d6` re-execs this
 test binary as a resident `run_loop` child; its readiness signal must be the
 daemon's own startup line in the events feed, not a successful connect —
 `listen()` happens inside the bind, so a connect proves only that the socket
-exists, and the first dispatch then sits past the hop's 2 s reply bound (measured
-on Windows as `WSAETIMEDOUT`). Those six tests serialize on
+exists, and the first dispatch can then sit past the hop's reply bound
+(`ROUND_TRIP_TIMEOUT` in `client/src/daemon.rs`; measured on Windows as
+`WSAETIMEDOUT`). Those six tests serialize on
 `aoide_test_support::env_lock`; a fully parallel run of that binary is still
 contention-sensitive on a busy box, so read its result single-threaded.
 

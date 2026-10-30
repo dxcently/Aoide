@@ -49,7 +49,7 @@ pointer position in `state/pointer-pos.json`. The session store `screen shot
 reads is `<stage>/sessions.json` where the stage dir is the conducting stage
 dir — `$AOIDE_STAGE_DIR` (absolute) else `$AOIDE_ROOT/state/stage/`. Every JSON
 write in this group routes
-through `aoide_storage::fs::atomic_write` — temp file `<stem>.tmp.<pid>`,
+through `aoide_storage::fs::atomic_write` — temp file `<stem>.<n>.tmp.<pid>`,
 fsync, then rename (symlink-transparent; stale temps swept).
 
 Every command takes `--json`. Without it the CLI prints the human `message`

@@ -49,9 +49,11 @@ const CONNECT_TIMEOUT: Duration = Duration::from_millis(100);
 /// read so a daemon that accepted a connection and then wedged (rather than
 /// refusing outright) can never hang the calling process indefinitely. Not
 /// part of the design doc's stated "~100ms budget" (that names the CONNECT
-/// half only); generous enough for a routed handler's real file I/O to
-/// finish under ordinary load.
-const ROUND_TRIP_TIMEOUT: Duration = Duration::from_secs(2);
+/// half only). Ten seconds: a daemon under load still finishes the call and
+/// writes its reply (server/src/daemon.rs's dispatch arm runs `dispatch`
+/// before it writes), so a shorter bound reported failure for a call that had
+/// taken effect.
+const ROUND_TRIP_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Resolve the daemon's own control socket — `$AOIDE_DAEMON_SOCKET` when
 /// set to a non-blank value, else `$XDG_RUNTIME_DIR/aoide/aoided.sock`
@@ -92,7 +94,7 @@ pub fn daemon_dispatch(inv: &Invocation) -> Option<Outcome> {
 }
 
 /// Explicit reply bound for operations that perform bounded upstream work.
-/// The default dispatch callers retain their two-second bound; no retry occurs.
+/// The default dispatch callers retain their ten-second bound; no retry occurs.
 pub fn daemon_dispatch_with_timeout(inv: &Invocation, reply_timeout: Duration) -> Option<Outcome> {
     if inv.door != Door::Cli {
         return None;
@@ -275,6 +277,52 @@ mod tests {
                 "{door:?} must never connect to the daemon"
             );
         }
+        std::fs::remove_file(&socket_path).ok();
+    }
+
+    /// A reply that takes three seconds still arrives: the round trip is bounded
+    /// by `ROUND_TRIP_TIMEOUT` (ten seconds), so a bound under three seconds
+    /// fails this test.
+    #[test]
+    fn daemon_dispatch_waits_out_a_reply_that_takes_three_seconds() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let socket_path = short_tmp("slow-reply").with_extension("sock");
+        let listener = UnixListener::bind(&socket_path).unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let handle = std::thread::spawn(move || {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+            let mut conn = loop {
+                match listener.accept() {
+                    Ok((conn, _)) => break conn,
+                    Err(e) if e.kind() == std::io::ErrorKind::WouldBlock && std::time::Instant::now() < deadline => {
+                        std::thread::sleep(std::time::Duration::from_millis(10));
+                    }
+                    Err(e) => panic!("the client never connected: {e}"),
+                }
+            };
+            conn.set_nonblocking(false).unwrap();
+            let mut buf = [0u8; 4096];
+            let _ = conn.read(&mut buf).unwrap();
+            std::thread::sleep(std::time::Duration::from_secs(3));
+            let outcome = Outcome::ok("session.start", "started session `slow`");
+            let mut line = json!({ "outcome": outcome }).to_string();
+            line.push('\n');
+            let _ = conn.write_all(line.as_bytes());
+        });
+
+        let saved = std::env::var("AOIDE_DAEMON_SOCKET").ok();
+        std::env::set_var("AOIDE_DAEMON_SOCKET", &socket_path);
+        let out = daemon_dispatch(&inv(&["session", "start"], Door::Cli));
+        match saved {
+            Some(v) => std::env::set_var("AOIDE_DAEMON_SOCKET", v),
+            None => std::env::remove_var("AOIDE_DAEMON_SOCKET"),
+        }
+        handle.join().unwrap();
+
+        let out = out.expect("a reply inside the bound must be answered");
+        assert_eq!(out.status, Status::Ok);
+        assert!(out.message.contains("slow"));
+
         std::fs::remove_file(&socket_path).ok();
     }
 

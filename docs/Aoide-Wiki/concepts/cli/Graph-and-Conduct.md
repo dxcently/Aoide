@@ -46,7 +46,7 @@ that one override (`aoide_storage::fs::conducting_stage_dir`, distinct from
 the rice `stage_dir` under `/stage/`). The state dir is
 `$AOIDE_STATE_DIR` else `$AOIDE_ROOT/state/` (default `~/.aoide/state/`).
 Every stage write goes through
-`aoide_storage::fs::atomic_write` (temp `<stem>.tmp.<pid>`, `fsync`, rename,
+`aoide_storage::fs::atomic_write` (temp `<stem>.<n>.tmp.<pid>`, `fsync`, rename,
 symlink-transparent) and multi-file load-modify-writes serialise through
 `with_stage_lock` (an exclusive `.stage.lock` flock that nests for the thread
 already holding it, still fixed to the rice `stage_dir()` so conducting writes

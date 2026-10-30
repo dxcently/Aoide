@@ -2801,14 +2801,12 @@ mod tests {
     /// A `TransportFailed` must back the link off even when the entry's own
     /// record write fails — the exact condition (a full or read-only disk)
     /// under which the link is most likely failing too. Made deterministic,
-    /// without chmod and without root: `atomic_write`
-    /// (`aoide_storage::fs::atomic_write_bytes_impl`) writes an entry
-    /// through a temp path shaped `<msgid>.tmp.<our own pid>` beside the
-    /// entry file; planting a DIRECTORY at that exact path makes the next
-    /// write to this entry fail with EISDIR, while `back_off`'s own
-    /// `link.json` (same directory, a different name) is untouched and
-    /// still writes fine, and `list_entries` never trips over the directory
-    /// (it filters on `extension == "json"`).
+    /// without chmod and without root: a registered `WriteWatch` swaps the
+    /// entry's record for a non-empty directory around its rename, so the
+    /// rename fails with the record's own error. The watch restores the
+    /// record's bytes afterwards, so the drain still reads the record before
+    /// it writes, and `back_off`'s own `link.json` is a different path and
+    /// still writes fine.
     #[test]
     fn a_link_backs_off_even_when_the_entrys_own_record_cannot_be_written() {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -2820,13 +2818,29 @@ mod tests {
         let msgid = env.msgid.clone();
         aoide_storage::outbox::write_entry("elsewhere", &OutboxEntry::fresh(env)).unwrap();
 
-        // Block the entry's own record write before the drain ever runs, so
-        // the FIRST attempt on this entry (not a later retry) already hits
-        // the failure this test pins.
-        let blocked_tmp =
-            dir.join("state").join("outbox").join("elsewhere").join(format!("{msgid}.tmp.{}", std::process::id()));
-        std::fs::create_dir_all(&blocked_tmp).unwrap();
-        std::fs::write(blocked_tmp.join("occupied"), b"").unwrap();
+        // Fail the entry's own record write from the first attempt on (not a
+        // later retry): every write to this record swaps it for a directory
+        // around its rename, and restores the bytes after.
+        struct BlockRecordWrite;
+        impl aoide_storage::fs::WriteWatch for BlockRecordWrite {
+            fn around_write(
+                &self,
+                path: &std::path::Path,
+                rename: &mut dyn FnMut() -> std::io::Result<()>,
+            ) -> std::io::Result<()> {
+                let saved = std::fs::read(path).unwrap();
+                std::fs::remove_file(path).unwrap();
+                std::fs::create_dir(path).unwrap();
+                std::fs::write(path.join("occupied"), b"").unwrap();
+                let result = rename();
+                std::fs::remove_dir_all(path).unwrap();
+                std::fs::write(path, saved).unwrap();
+                result
+            }
+        }
+        let record = dir.join("state").join("outbox").join("elsewhere").join(format!("{msgid}.json"));
+        let _block: std::sync::Arc<dyn aoide_storage::fs::WriteWatch> = std::sync::Arc::new(BlockRecordWrite);
+        aoide_storage::fs::watch_writes(vec![record], std::sync::Arc::downgrade(&_block));
 
         let result = drain_node("elsewhere");
         assert!(result.is_err(), "the entry write's own error must still propagate: {result:?}");

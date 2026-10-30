@@ -34,7 +34,7 @@ process start: on first run it moves a pre-existing
 `~/Aoide/{state,log}` tree into the current root, each piece
 gated on its own override being unset. All file
 writes in this group route through `aoide_storage::fs::atomic_write`
-(temp `<stem>.tmp.<pid>` then rename, symlink-transparent — a write to a
+(temp `<stem>.<n>.tmp.<pid>` then rename, symlink-transparent — a write to a
 symlinked `stage/theme.json` lands in the link target). Shared stage
 mutators serialise through a `.stage.lock` `flock` in the stage dir
 (`with_stage_lock`, which nests for the thread that already holds it).

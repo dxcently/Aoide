@@ -72,7 +72,17 @@ use std::time::{Duration, Instant};
 /// The spawn itself has already succeeded (the process is running, detached,
 /// and will keep running) — this is only a best-effort "did it get far
 /// enough to be steerable yet" check, never a blocking guarantee.
+///
+/// 10 s under `cfg(test)`, 3 s otherwise. A child on a loaded machine can take
+/// longer than 3 s to bind its socket, and the unit suite starts many children
+/// at once. At 3 s this fails under that load:
+/// `spawn_registers_a_detached_headless_child_and_mirrors_its_log`. Only this
+/// crate's own unit tests see `cfg(test)`; the `aoide-cli` and `aoide-server`
+/// test binaries link the 3 s value.
+#[cfg(not(test))]
 const REGISTRATION_BUDGET: Duration = Duration::from_millis(3000);
+#[cfg(test)]
+const REGISTRATION_BUDGET: Duration = Duration::from_millis(10_000);
 const REGISTRATION_POLL: Duration = Duration::from_millis(25);
 
 /// How long a first-turn injection waits for its target to become READY to
@@ -85,14 +95,15 @@ const REGISTRATION_POLL: Duration = Duration::from_millis(25);
 /// so "how long is long enough" has one answer, not three.
 ///
 /// Shortened under `cfg(test)` for [`SUBMIT_KEYSTROKE_DELAY`]'s reason: the
-/// unit suite must not pay a real-world budget to observe a timeout, and only
-/// a real harness can be slow. (A crate that CONSUMES this constant in its own
-/// tests — `aoide-server` — passes its own explicit duration instead; `cfg`
-/// only ever applies to the crate being compiled.)
+/// unit suite must not pay a real-world budget to observe a timeout. 5 s, not
+/// 500 ms: a child whose first line comes a second late, as a loaded box makes
+/// a shell do, must still land inside the window. (A crate that CONSUMES this
+/// constant in its own tests — `aoide-server` — passes its own explicit
+/// duration instead; `cfg` only ever applies to the crate being compiled.)
 #[cfg(not(test))]
 pub const READY_BUDGET: Duration = Duration::from_secs(20);
 #[cfg(test)]
-pub const READY_BUDGET: Duration = Duration::from_millis(500);
+pub const READY_BUDGET: Duration = Duration::from_secs(5);
 
 /// The quiet window the no-declarable-fact arm waits for: output arrived and
 /// then stood still. That is NOT readiness (a harness can print a banner and
