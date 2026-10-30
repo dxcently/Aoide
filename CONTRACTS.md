@@ -4094,7 +4094,7 @@ is the only place a source's own format is read.
 | `v` | `1`. A consumer ignores fields it does not know; a new required field bumps `v` |
 | `session` | the aoide session id the verb resolved |
 | `id` | the source's own record id, stable across reads: a consumer de-duplicates by it |
-| `ts` | the source's own epoch milliseconds, or `null`; never a read time |
+| `ts` | the source's own epoch milliseconds, or `null` (a Claude Code line is `null`: its adapter reads no timestamp yet); never a read time |
 | `role` | closed: `user`, `agent`, `tool`, `system`. A consumer treats any other name as `system` |
 | `from` | who spoke when `role` does not say it (a peer, an operator's label) |
 | `text` | stripped of the characters no terminal may be handed, clipped to 4000 characters (`clipped: true`). Hostile data: a consumer renders it as text only |

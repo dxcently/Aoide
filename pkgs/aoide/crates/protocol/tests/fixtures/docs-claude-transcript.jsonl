@@ -1,0 +1,8 @@
+{"type":"user","uuid":"u1","sessionId":"s","timestamp":"2026-10-30T10:00:00.000Z","message":{"role":"user","content":"fix the bug"}}
+{"type":"assistant","uuid":"a1","timestamp":"2026-10-30T10:00:02.000Z","message":{"role":"assistant","content":[{"type":"thinking","thinking":"read the file first"},{"type":"text","text":"Reading it now."},{"type":"tool_use","id":"toolu_1","name":"Read","input":{"file_path":"/x.rs"}}]}}
+{"type":"user","uuid":"u2","timestamp":"2026-10-30T10:00:03.000Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"fn main() {}","is_error":false}]}}
+{"type":"user","uuid":"u3","timestamp":"2026-10-30T10:00:04.000Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_2","content":[{"type":"text","text":"no such file"}],"is_error":true}]}}
+{"type":"summary","summary":"earlier work on the parser","leafUuid":"a0"}
+{"type":"user","uuid":"u4","isSidechain":true,"message":{"role":"user","content":"sub-agent prompt"}}
+{"type":"user","uuid":"u5","isMeta":true,"message":{"role":"user","content":"caveat text"}}
+{"type":"assistant","uuid":"a2","timestamp":"2026-10-30T10:00:09.000Z","message":{"role":"assistant","content":"Fixed."}}

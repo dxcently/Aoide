@@ -480,6 +480,12 @@ fn transcript_tail(path: &Path) -> Vec<String> {
     transcript_tail_bounded(path, TRANSCRIPT_TAIL_BYTES)
 }
 
+/// Claude's chat read: the transcript's tail lines, or none when the path is not
+/// a file.
+fn claude_chat_read(path: &Path) -> Option<Vec<String>> {
+    path.is_file().then(|| transcript_tail(path))
+}
+
 /// The transcript tail's own budget, named once because eidolon's journal arm
 /// reads the SAME window off the door's export rather than off a file.
 const TRANSCRIPT_TAIL_BYTES: u64 = 32 * 1024;
@@ -852,9 +858,10 @@ pub static CLAUDE_PROFILE: AgentProfile = AgentProfile {
         // No mirrored trace — claude's own transcript IS its turn log.
         trace: None,
     },
-    chat: crate::chat::ChatSupport::Unsupported(
-        "no chat adapter yet: the Claude transcript is read for say, tool and title only",
-    ),
+    chat: crate::chat::ChatSupport::Adapter(crate::chat::ChatAdapter {
+        read: claude_chat_read,
+        project: crate::chat::claude::project,
+    }),
     hook_settings: SettingsSpec {
         relative_path: ".claude/settings.json",
         format: SettingsFormat::Json,

@@ -11,7 +11,8 @@ other crate in this workspace sits above.
   type; its constructor strips and clips every string once, and its wire form
   is fixed by `CONTRACTS.md` "The chat line — v1" and
   `tests/fixtures/chat-v1.jsonl`. The role and state tables are closed here.
-  Per-harness adapters that build these lines land beside it, one file each.
+  Per-harness adapters that build these lines sit beside it, one file each:
+  `chat/eidolon.rs` (journal records) and `chat/claude.rs` (transcript lines).
 - `registry` — `Registry`/`Command`/`Arg`/`Flag` + the `cmd!`/`arg!`/`flag!`
   registration macros. Every domain crate's `commands::register` builds one
   of these; `schema --json`, the MCP tool list, and the A2A `AgentCard` all

@@ -11,6 +11,7 @@ use crate::untrusted::strip_unsafe;
 use serde_json::{json, Map, Value};
 use std::path::Path;
 
+pub mod claude;
 pub mod eidolon;
 
 /// The line's version. A new required field bumps it; a consumer ignores what
