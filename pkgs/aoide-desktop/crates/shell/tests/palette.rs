@@ -58,14 +58,15 @@ fn every_named_floor_class_and_every_marked_command_is_refused_and_absent_from_t
         &["config", "set"],
         &["hooks", "install"],
         &["update"],
-        &["daemon"],
         &["mneme", "call"],
         &["melete", "call"],
     ];
+    assert!(FLOOR.contains(&("self-change", &["daemon"][..])), "daemon is floored as a self-change");
+    let daemon = check(&s, &grants, &["daemon"], &[]);
+    assert!(matches!(daemon, Err(Refusal::Blocking(_))), "blocking precedes the floor: {daemon:?}");
     for words in floored {
         let refused = check(&s, &grants, words, &[]);
-        let blocking = is_blocking(words) && matches!(refused, Err(Refusal::Blocking(_)));
-        assert!(blocking || matches!(refused, Err(Refusal::Floored { .. })), "{words:?}: {refused:?}");
+        assert!(matches!(refused, Err(Refusal::Floored { .. })), "{words:?}: {refused:?}");
         assert!(!offered(&s).contains(&words.join(" ")), "{words:?} is offered");
     }
 }
