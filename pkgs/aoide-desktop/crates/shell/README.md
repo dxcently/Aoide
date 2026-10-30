@@ -25,8 +25,10 @@ sha2 (a dialog's digest), the door crate, and the exec crate.
   passes its own narrower set. `FLOOR` lists the named classes the floor
   refuses. A command is offered only when the grant set names it and the floor
   does not hold it, and the floor is checked on every call, granted or not.
-- `blocking.rs`: `PATHS`, the six paths that never end on their own. They run
-  only as held children, never through `palette::call`.
+- `blocking.rs`: `PATHS`, the paths of the core commands that never end on
+  their own (the serve family, the daemon, the conductor, the melete adapter,
+  the watches, and trace `--follow`). They run only as held children, never
+  through `palette::call`. The test in `tests/palette.rs` pins the list.
 - `chat/`: `say` sends to a session, and `follow` opens its stream as a `Chat`
   whose `next` yields a `Push`. `chat/cases.rs` holds the follow cases, one
   entry each. `chat/record.rs` is the one place a stream line is parsed.

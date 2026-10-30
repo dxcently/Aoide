@@ -255,7 +255,7 @@ are in README.md.
   to `palette` and `check`; the grant set's shape is stated in README.md.
 - `blocking::PATHS` is pinned until the kinds lane marks watch verbs in the
   schema. That list is deleted when the marks land, and `palette::check`'s
-  blocking arm goes with it. A test pins the six paths.
+  blocking arm goes with it. A test pins the list against the core registry.
 
 ## Extension points
 

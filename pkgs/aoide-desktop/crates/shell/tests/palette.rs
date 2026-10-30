@@ -2,7 +2,7 @@ use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use aoide_desktop_shell::blocking::PATHS;
+use aoide_desktop_shell::blocking::{is_blocking, PATHS};
 use aoide_desktop_shell::exec::{Exec, Flag, Schema};
 use aoide_desktop_shell::palette::{call, check, main_grants, palette, CallError, Refusal, FLOOR};
 
@@ -64,16 +64,16 @@ fn every_named_floor_class_and_every_marked_command_is_refused_and_absent_from_t
     ];
     for words in floored {
         let refused = check(&s, &grants, words, &[]);
-        assert!(matches!(refused, Err(Refusal::Floored { .. })), "{words:?}: {refused:?}");
+        let blocking = is_blocking(words) && matches!(refused, Err(Refusal::Blocking(_)));
+        assert!(blocking || matches!(refused, Err(Refusal::Floored { .. })), "{words:?}: {refused:?}");
         assert!(!offered(&s).contains(&words.join(" ")), "{words:?} is offered");
     }
 }
 
 #[test]
-fn the_six_blocking_paths_are_refused_as_blocking_and_are_not_offered() {
+fn every_blocking_path_is_refused_as_blocking_and_is_not_offered() {
     let s = schema();
     let grants = main_grants(&s);
-    assert_eq!(PATHS.len(), 6);
     for words in PATHS {
         let refused = check(&s, &grants, words, &[]);
         assert!(matches!(refused, Err(Refusal::Blocking(_))), "{words:?}: {refused:?}");
@@ -227,10 +227,40 @@ fn every_floor_case_is_refused_by_its_class() {
     let grants = main_grants(&s);
     for (class, path) in FLOOR_CASES {
         let refused = check(&s, &grants, path, &[]);
-        assert_eq!(
-            refused,
-            Err(Refusal::Floored { path: path.join(" "), why: class }),
-            "{path:?} is refused by its class"
-        );
+        if is_blocking(path) {
+            assert!(matches!(refused, Err(Refusal::Blocking(_))), "{path:?} is blocking: {refused:?}");
+        } else {
+            assert_eq!(
+                refused,
+                Err(Refusal::Floored { path: path.join(" "), why: class }),
+                "{path:?} is refused by its class"
+            );
+        }
     }
+}
+
+#[test]
+fn the_blocking_list_is_exactly_the_core_commands_that_never_end() {
+    // The commands of the core registry (`aoide schema --json`, 124 commands, read at
+    // worktree 839911a5) that run until the app ends them. A new one is added here
+    // and to `blocking::PATHS` in the same commit.
+    let expected: &[&[&str]] = &[
+        &["session", "trace"],
+        &["session", "watch"],
+        &["events", "tail"],
+        &["secrets", "watch"],
+        &["pair", "watch"],
+        &["a2a", "serve"],
+        &["daemon"],
+        &["mcp", "serve"],
+        &["mail", "serve"],
+        &["secrets", "serve"],
+        &["conductor"],
+        &["adapter", "melete"],
+    ];
+    let mut got: Vec<&[&str]> = PATHS.to_vec();
+    let mut want: Vec<&[&str]> = expected.to_vec();
+    got.sort_unstable();
+    want.sort_unstable();
+    assert_eq!(got, want);
 }
