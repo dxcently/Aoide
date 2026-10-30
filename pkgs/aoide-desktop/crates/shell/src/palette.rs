@@ -49,8 +49,8 @@ pub enum Refusal {
     Blocking(String),
     /// The schema declares no command at this path.
     Unknown(String),
-    /// The schema names no verb for the path, so the palette cannot tell whether
-    /// it blocks. Refused, never guessed.
+    /// The schema names no verb for the path, or a verb the palette does not know,
+    /// so it cannot tell whether the path blocks. Refused, never guessed.
     Unverified(String),
     /// The floor holds the command, granted or not.
     Floored { path: String, why: &'static str },
@@ -112,8 +112,9 @@ fn row(path: &[String], spec: &CommandSpec) -> Row {
 }
 
 /// Whether the main window may run `words` with `flags`. Each refusal is checked
-/// in this order: a `--node` or `--typed` flag, an undeclared command, a verb
-/// that blocks or is missing, the floor, and last the grant.
+/// in this order: a `--node` or `--typed` flag, an undeclared command, the verb
+/// (a blocking verb, or one the palette does not offer), the floor, and last the
+/// grant.
 pub fn check(schema: &Schema, grants: &[Vec<&str>], words: &[&str], flags: &[Flag<'_>]) -> Result<(), Refusal> {
     let path = words.join(" ");
     if flags.iter().any(|f| f.name == "node" || f.name == "typed") {
@@ -122,8 +123,8 @@ pub fn check(schema: &Schema, grants: &[Vec<&str>], words: &[&str], flags: &[Fla
     let spec = schema.command(words).ok_or_else(|| Refusal::Unknown(path.clone()))?;
     match spec.verb.as_deref() {
         Some("watch" | "serve") => return Err(Refusal::Blocking(path)),
-        Some(_) => {}
-        None => return Err(Refusal::Unverified(path)),
+        Some("list" | "show" | "act" | "none") => {}
+        _ => return Err(Refusal::Unverified(path)),
     }
     if let Some(why) = floor_reason(words, spec) {
         return Err(Refusal::Floored { path, why });

@@ -243,7 +243,8 @@ palette::call(exec, grants, words, flags, positionals)
     1. a --node or --typed flag              -> Refusal::Floored
     2. schema.command(words) is None         -> Refusal::Unknown
     3. the verb: watch or serve              -> Refusal::Blocking
-       no verb in the schema                 -> Refusal::Unverified
+       no verb, or one not in list, show,
+       act or none                           -> Refusal::Unverified
     4. the floor: a schema mark (approves,
        launches, internal, or not
        implemented), then FLOOR's prefixes   -> Refusal::Floored

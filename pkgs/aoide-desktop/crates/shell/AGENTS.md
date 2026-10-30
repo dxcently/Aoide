@@ -261,9 +261,11 @@ are in README.md.
   main palette is the schema less the floor. It is the person's own window and
   the floor is the only gate on it. A frame's grant set is its own list, passed
   to `palette` and `check`; the grant set's shape is stated in README.md.
-- A path whose schema verb is `watch` or `serve` is refused as `Blocking`,
-  and one with no verb is refused as `Unverified`. The palette keeps no hand
-  list of blocking paths: the verb in the schema is the only source.
+- A path whose schema verb is `watch` or `serve` is refused as `Blocking`.
+  The palette offers a path only when its verb is `list`, `show`, `act` or
+  `none`: a missing verb, or any verb it does not know, is refused as
+  `Unverified`. The palette keeps no hand list of blocking paths: the verb in
+  the schema is the only source.
 
 ## Extension points
 

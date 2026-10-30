@@ -107,6 +107,14 @@ fn a_command_with_no_verb_is_refused_and_is_not_offered() {
 }
 
 #[test]
+fn a_verb_the_palette_does_not_know_is_refused_as_unverified() {
+    let s = one_verb(Some("stream"));
+    let refused = check(&s, &main_grants(&s), &["widget", "go"], &[]);
+    assert_eq!(refused, Err(Refusal::Unverified("widget go".to_owned())), "{refused:?}");
+    assert!(offered(&s).is_empty(), "a verb the palette does not know is not offered");
+}
+
+#[test]
 fn a_list_show_or_act_verb_is_offered() {
     for verb in ["list", "show", "act"] {
         let s = one_verb(Some(verb));
