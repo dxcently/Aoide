@@ -164,11 +164,30 @@ fn every_case_runs_a_verb_the_schema_declares() {
 
 #[test]
 fn the_chat_record_is_parsed_in_one_module_only() {
+    const FORMS: &[&str] = &["from_str", "from_slice", "from_reader", "from_value", "Deserializer"];
     let chat = Path::new(env!("CARGO_MANIFEST_DIR")).join("src").join("chat");
     for entry in fs::read_dir(&chat).expect("the chat module is read") {
         let file = entry.expect("an entry").path();
         let text = fs::read_to_string(&file).expect("a source is read");
         let parser = file.file_name().is_some_and(|name| name == "record.rs");
-        assert!(parser || !text.contains("serde_json::from_str"), "{} parses JSON outside record.rs", file.display());
+        for form in FORMS {
+            assert!(
+                parser || !text.contains(form),
+                "{} parses JSON with `{form}` outside record.rs",
+                file.display()
+            );
+        }
     }
+}
+
+#[test]
+fn a_line_that_is_not_utf8_arrives_as_other_and_a_line_past_the_cap_as_dropped() {
+    let not_utf8: &[u8] = b"\xff\xfe{\"kind\":\"say\"}";
+    let long = vec![b'a'; 1024 * 1024 + 10];
+    let (exec, _) = load("bytes", &[not_utf8, &long, br#"{"kind":"say"}"#], &[]);
+    let mut chat = follow(&exec, "eidolon-1").expect("the trace answers");
+    assert!(matches!(chat.next(WAIT), Some(Push::Other(_))), "a non-UTF-8 line is text");
+    assert_eq!(chat.next(WAIT), Some(Push::Dropped(1024 * 1024 + 10)), "a line past the cap is dropped, in bytes");
+    assert_eq!(chat.next(WAIT), Some(Push::Record(json!({"kind": "say"}))), "the stream goes on");
+    chat.close().expect("the stream ends");
 }
