@@ -291,7 +291,7 @@ pub fn register(r: &mut Registry) {
             "session trace Aoide-7d23 --follow",
             "session trace brave-otter --json",
         ],
-        kind: "session", verb: "show",
+        kind: "session", verb: "watch",
     ));
     r.insert(cmd!(
         path: ["session", "watch"],

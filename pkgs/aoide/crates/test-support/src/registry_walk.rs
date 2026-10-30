@@ -390,6 +390,16 @@ pub fn every_command_has_a_kind(registry: &Registry) {
     }
 }
 
+/// A command that declares a `follow` flag blocks until Ctrl-C, so its verb is
+/// `watch`: a follow is a stream, whatever else the command shows.
+pub fn follow_is_a_watch(registry: &Registry) {
+    for c in registry.commands() {
+        if c.flags.iter().any(|f| f.name == "follow") {
+            assert_eq!(c.verb, "watch", "`{}` declares --follow, so its verb is watch, not `{}`", c.dotted(), c.verb);
+        }
+    }
+}
+
 #[cfg(test)]
 mod kind_tests {
     use super::*;

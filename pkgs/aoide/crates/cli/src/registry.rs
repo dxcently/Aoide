@@ -790,6 +790,11 @@ mod tests {
     /// Golden snapshot: every command's `kind` and `verb`, one sorted
     /// `path kind verb` line each (CONTRACTS.md §3). A retag moves this list.
     #[test]
+    fn every_follow_flag_is_a_watch() {
+        aoide_test_support::registry_walk::follow_is_a_watch(&crate::commands::all());
+    }
+
+    #[test]
     fn kinds_match_the_golden_snapshot() {
         let r = crate::commands::all();
         let mut got: Vec<String> = r.commands().map(|c| format!("{} {} {}", c.dotted(), c.kind, c.verb)).collect();
@@ -906,7 +911,7 @@ mod tests {
             "session.reap session act",
             "session.show session show",
             "session.start session act",
-            "session.trace session show",
+            "session.trace session watch",
             "session.watch session watch",
             "session.window.attach session act",
             "session.window.closed session act",
