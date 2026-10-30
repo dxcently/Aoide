@@ -17,6 +17,7 @@ use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus, Stdio};
 use std::sync::mpsc::{self, RecvTimeoutError};
+use std::sync::{Arc, Condvar, Mutex, PoisonError};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -570,8 +571,74 @@ impl Exec {
 /// The most a followed line may hold. A longer line is read to its end and
 /// sent as `Event::Dropped`, so one line cannot grow a buffer without bound.
 pub const LINE_CAP: usize = 1024 * 1024;
-/// How many events a followed child may run ahead of its reader.
-const LINES_BOUND: usize = 256;
+/// The most a followed child may have queued for its reader, in bytes. An event
+/// costs its line's bytes and `EVENT_COST`, so a flood of empty lines is bounded too.
+pub const QUEUE_BYTES: usize = 8 * 1024 * 1024;
+const EVENT_COST: usize = 64;
+
+/// The queue cost of one event.
+fn cost(event: &Event) -> usize {
+    match event {
+        Event::Line(line) => line.len() + EVENT_COST,
+        Event::Dropped(_) | Event::Eof => EVENT_COST,
+    }
+}
+
+/// The bytes a followed child's queue holds. The reader waits here for room before
+/// it sends, and the reader is released when the queue is closed.
+#[derive(Default)]
+struct Room {
+    used: Mutex<RoomState>,
+    freed: Condvar,
+}
+
+#[derive(Default)]
+struct RoomState {
+    bytes: usize,
+    closed: bool,
+}
+
+impl Room {
+    /// Waits until `cost` bytes fit, then takes them. False once the queue is closed.
+    fn reserve(&self, cost: usize) -> bool {
+        let mut state = self.used.lock().unwrap_or_else(PoisonError::into_inner);
+        while !state.closed && state.bytes + cost > QUEUE_BYTES {
+            state = self.freed.wait(state).unwrap_or_else(PoisonError::into_inner);
+        }
+        if state.closed {
+            return false;
+        }
+        state.bytes += cost;
+        true
+    }
+
+    fn release(&self, cost: usize) {
+        let mut state = self.used.lock().unwrap_or_else(PoisonError::into_inner);
+        state.bytes = state.bytes.saturating_sub(cost);
+        self.freed.notify_all();
+    }
+
+    fn close(&self) {
+        let mut state = self.used.lock().unwrap_or_else(PoisonError::into_inner);
+        state.closed = true;
+        self.freed.notify_all();
+    }
+}
+
+/// The reader's end of a followed child's queue: each event waits for room first.
+struct Out {
+    tx: mpsc::Sender<Event>,
+    room: Arc<Room>,
+}
+
+impl Out {
+    fn send(&self, event: Event) -> Result<(), ()> {
+        if !self.room.reserve(cost(&event)) {
+            return Err(());
+        }
+        self.tx.send(event).map_err(|_| ())
+    }
+}
 
 /// One thing a held child did, in order.
 #[derive(Debug, PartialEq, Eq)]
@@ -591,6 +658,7 @@ pub struct Follow {
     child: Option<std::process::Child>,
     pidfd: OwnedFd,
     lines: mpsc::Receiver<Event>,
+    room: Arc<Room>,
     stderr: mpsc::Receiver<io::Result<(Vec<u8>, bool)>>,
 }
 
@@ -615,7 +683,10 @@ impl Follow {
     /// The next event, or `None` when none comes within `wait`.
     pub fn next(&self, wait: Duration) -> Option<Event> {
         match self.lines.recv_timeout(wait) {
-            Ok(event) => Some(event),
+            Ok(event) => {
+                self.room.release(cost(&event));
+                Some(event)
+            }
             Err(RecvTimeoutError::Timeout) => None,
             Err(RecvTimeoutError::Disconnected) => Some(Event::Eof),
         }
@@ -632,7 +703,10 @@ impl Follow {
         loop {
             match self.lines.recv_timeout(until.saturating_duration_since(Instant::now())) {
                 Ok(Event::Eof) | Err(_) => break,
-                Ok(event) => rest.push(event),
+                Ok(event) => {
+                    self.room.release(cost(&event));
+                    rest.push(event);
+                }
             }
         }
         let exit_by = Instant::now() + EXIT_BOUND;
@@ -659,6 +733,7 @@ impl Follow {
 
 impl Drop for Follow {
     fn drop(&mut self) {
+        self.room.close();
         if let Some(mut child) = self.child.take() {
             let _ = signal_pidfd(&self.pidfd, libc::SIGINT);
             thread::spawn(move || {
@@ -699,14 +774,16 @@ fn spawn_held(program: &Pinned, args: &[OsString], env: &[(OsString, OsString)])
     };
     let stdout = child.stdout.take().ok_or_else(missing_pipe)?;
     let stderr = child.stderr.take().ok_or_else(missing_pipe)?;
-    let (line_tx, lines) = mpsc::sync_channel(LINES_BOUND);
+    let (tx, lines) = mpsc::channel();
+    let room = Arc::new(Room::default());
+    let out = Out { tx, room: Arc::clone(&room) };
     thread::spawn(move || {
-        let _ = read_lines(stdout, &line_tx);
-        let _ = line_tx.send(Event::Eof);
+        let _ = read_lines(stdout, &out);
+        let _ = out.send(Event::Eof);
     });
     let (err_tx, stderr_rx) = mpsc::channel();
     thread::spawn(move || err_tx.send(capture(stderr)));
-    Ok(Follow { child: Some(child), pidfd, lines, stderr: stderr_rx })
+    Ok(Follow { child: Some(child), pidfd, lines, room, stderr: stderr_rx })
 }
 
 /// Ends a child this process started and has not reaped, after its pidfd would not
@@ -733,10 +810,10 @@ fn signal_unreaped(pid: u32, signal: libc::c_int) -> io::Result<()> {
     }
 }
 
-/// Splits `pipe` into lines and sends each on `out`. A line past `LINE_CAP` is
+/// Splits `pipe` into lines and sends each on `out`, waiting for room in the queue. A line past `LINE_CAP` is
 /// still read to its newline, but its bytes past the cap are dropped, and it is
 /// sent as `Dropped`. Returns when the pipe ends or `out`'s receiver is gone.
-fn read_lines(mut pipe: impl Read, out: &mpsc::SyncSender<Event>) -> io::Result<()> {
+fn read_lines(mut pipe: impl Read, out: &Out) -> io::Result<()> {
     let mut line = Vec::new();
     let mut total = 0usize;
     let mut buf = [0u8; 8192];
@@ -1348,6 +1425,46 @@ mod tests {
         let child = std::process::Command::new("sleep").arg("30").spawn().expect("sleep starts");
         let status = retire_unreaped(child).join().expect("the reaper ends").expect("the child is reaped");
         assert_eq!(status.signal(), Some(libc::SIGINT), "{status:?}");
+    }
+
+    #[test]
+    fn a_followed_child_queues_at_most_the_byte_budget_for_its_reader() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+
+        struct Flood {
+            sent: Arc<AtomicUsize>,
+        }
+        impl Read for Flood {
+            fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+                const TOTAL: usize = 200 * 1024 * 1024;
+                let done = self.sent.load(Ordering::SeqCst);
+                if done >= TOTAL {
+                    return Ok(0);
+                }
+                let n = buf.len().min(TOTAL - done);
+                for (i, b) in buf[..n].iter_mut().enumerate() {
+                    *b = if (done + i + 1) % (512 * 1024) == 0 { b'\n' } else { b'a' };
+                }
+                self.sent.store(done + n, Ordering::SeqCst);
+                Ok(n)
+            }
+        }
+
+        let sent = Arc::new(AtomicUsize::new(0));
+        let flood = Flood { sent: Arc::clone(&sent) };
+        let (tx, rx) = mpsc::channel();
+        let out = Out { tx, room: Arc::new(Room::default()) };
+        thread::spawn(move || {
+            let _ = read_lines(flood, &out);
+        });
+        thread::sleep(Duration::from_secs(1));
+        let read_ahead = sent.load(Ordering::SeqCst);
+        drop(rx);
+        assert!(
+            read_ahead <= QUEUE_BYTES + LINE_CAP,
+            "{read_ahead} bytes were read ahead of a reader that takes none"
+        );
     }
 
     #[test]

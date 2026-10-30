@@ -103,7 +103,8 @@ are in README.md.
 - A held child's line is kept to `LINE_CAP` (1 MiB). The bytes past the cap
   are read and dropped, and the line is reported as `Dropped` with its length,
   so one line cannot grow a buffer without bound. A reader that stops draining
-  holds the child's stdout, and the channel's bound holds the reader.
+  holds the child's stdout, and the queue's byte budget (`QUEUE_BYTES`, 8 MiB,
+  each event costing its bytes plus 64) holds the reader.
 - Each call runs under one deadline, 30 s, from the spawn to the end of the
   reading of its output. `Exec::deadline` can only shorten it: the shorter of
   the two is taken. A child still running at the deadline is sent SIGTERM and

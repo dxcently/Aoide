@@ -112,8 +112,9 @@ lib.rs      Exec::load(aoide, home, env)
   pipe reports an exec failure of the door as `spawn`'s error.
 - A held child, from `Exec::follow`, runs the same argv and environment checks
   as a call, under no deadline. Its stdout is read on one thread, a line at a
-  time, into a channel of 256 events. A line past `LINE_CAP` is read to its end
-  and reported as `Dropped` with its length. Its stderr is captured on another
+  time, into a queue of at most 8 MiB (`QUEUE_BYTES`): each event costs its
+  line's bytes plus 64, and the reader waits for room. A line past `LINE_CAP` is
+  read to its end and reported as `Dropped` with its length in bytes. Its stderr is captured on another
   thread, up to 16 MiB.
 
 ```
@@ -124,7 +125,7 @@ Exec::follow(words, flags, positionals)
   v
 spawn_held                   stdin closed, stdout and stderr piped
   +-- open_pidfd             refused: the child is terminated and the call fails
-  +-- read_lines thread      Line | Dropped | Eof, to a channel of 256
+  +-- read_lines thread      Line | Dropped | Eof, to a queue of 8 MiB
   +-- capture thread         stderr, up to 16 MiB
   |
   v
