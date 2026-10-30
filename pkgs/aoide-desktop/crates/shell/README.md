@@ -20,9 +20,10 @@ sha2 (a dialog's digest), the door crate, and the exec crate.
 - `asks.rs`: `prepare_answer`, `send_answer`, and the `Dialog` a yes shows.
 - `palette.rs`: `palette` lists the commands the main window offers, from
   `schema --json`, and `check` decides one call. `call` runs a checked call
-  through `Exec::call`. `MAIN_GRANTS` is the window's grant set: `config`,
-  `graph` and `session find`, and nothing else. `FLOOR` lists the named classes
-  the floor refuses. A command is offered only when it is granted and the floor
+  through `Exec::call`. `main_grants` is the main window's grant set: every
+  path the schema declares, since the main window is the person's own. A frame
+  passes its own narrower set. `FLOOR` lists the named classes the floor
+  refuses. A command is offered only when the grant set names it and the floor
   does not hold it, and the floor is checked on every call, granted or not.
 - `blocking.rs`: `PATHS`, the six paths that never end on their own. They run
   only as held children, never through `palette::call`.
@@ -245,8 +246,9 @@ palette::call(exec, grants, words, flags, positionals)
   exec.call(words, flags, positionals)       only when check passed
 ```
 
-The grant set is the list of paths the window holds. A granted command that
-the floor holds is refused, so a grant can never name a floored command.
+The grant set is the list of paths the window holds: `main_grants(schema)` for
+the main window, every declared path, and a frame's own list. A granted command
+that the floor holds is refused, so a grant can never name a floored command.
 
 ## How a chat is followed
 

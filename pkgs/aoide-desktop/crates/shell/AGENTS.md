@@ -249,8 +249,10 @@ are in README.md.
 - The floor is `floor_reason`: the schema's marks first, then the named classes
   in `FLOOR`. A new floored class is one entry in `FLOOR`, and its test in
   `tests/palette.rs` names a path it covers.
-- `MAIN_GRANTS` is the window's grant set. Widening it is a decision for the
-  User, and it is stated in README.md with the grant set.
+- `main_grants` is the main window's grant set: every declared path, so the
+  main palette is the schema less the floor. It is the person's own window and
+  the floor is the only gate on it. A frame's grant set is its own list, passed
+  to `palette` and `check`; the grant set's shape is stated in README.md.
 - `blocking::PATHS` is pinned until the kinds lane marks watch verbs in the
   schema. That list is deleted when the marks land, and `palette::check`'s
   blocking arm goes with it. A test pins the six paths.

@@ -1,6 +1,6 @@
-//! The palette: the commands the main window offers, from `aoide schema --json`.
-//! A command is offered when the window is granted it and the floor does not
-//! hold it. The floor is re-checked at every call, so a grant that names a
+//! The palette: the commands a window offers, from `aoide schema --json`.
+//! A command is offered when the window's grant set names it and the floor does
+//! not hold it. The floor is re-checked at every call, so a grant that names a
 //! floored command still refuses.
 
 use serde::Serialize;
@@ -9,10 +9,12 @@ use crate::exec::untrusted::visible;
 use crate::exec::{CommandSpec, Exec, ExecError, Flag, Output, Schema};
 use crate::blocking;
 
-/// The paths the main window is granted, as path words. The window's grant set is
-/// this list and nothing else: a command the schema declares but this list omits
-/// is not offered and is refused as not granted.
-pub const MAIN_GRANTS: &[&[&str]] = &[&["config"], &["graph"], &["session", "find"]];
+/// The main window's grant set: every path the schema declares. The main window is
+/// the person's own, so its palette is the schema less the floor. A frame passes a
+/// narrower set of its own (V21 section 4.3).
+pub fn main_grants(schema: &Schema) -> Vec<Vec<&str>> {
+    schema.commands().map(|(path, _)| path.iter().map(String::as_str).collect()).collect()
+}
 
 /// The classes the floor refuses by name, each as the path words it starts with
 /// (V21 section 4.4). A path that starts with one is refused, granted or not.
@@ -82,7 +84,7 @@ pub struct FlagRow {
 }
 
 /// The offered commands: each command that `check` allows, in path order.
-pub fn palette(schema: &Schema, grants: &[&[&str]]) -> Vec<Row> {
+pub fn palette(schema: &Schema, grants: &[Vec<&str>]) -> Vec<Row> {
     schema
         .commands()
         .filter(|(path, _)| {
@@ -109,7 +111,7 @@ fn row(path: &[String], spec: &CommandSpec) -> Row {
 /// Whether the main window may run `words` with `flags`. Each refusal is checked
 /// in this order: a blocking path, a `--node` or `--typed` flag, an undeclared
 /// command, the floor, and last the grant.
-pub fn check(schema: &Schema, grants: &[&[&str]], words: &[&str], flags: &[Flag<'_>]) -> Result<(), Refusal> {
+pub fn check(schema: &Schema, grants: &[Vec<&str>], words: &[&str], flags: &[Flag<'_>]) -> Result<(), Refusal> {
     let path = words.join(" ");
     if blocking::is_blocking(words) {
         return Err(Refusal::Blocking(path));
@@ -121,7 +123,7 @@ pub fn check(schema: &Schema, grants: &[&[&str]], words: &[&str], flags: &[Flag<
     if let Some(why) = floor_reason(words, spec) {
         return Err(Refusal::Floored { path, why });
     }
-    if grants.contains(&words) {
+    if grants.iter().any(|granted| granted.as_slice() == words) {
         Ok(())
     } else {
         Err(Refusal::NotGranted(path))
@@ -150,7 +152,7 @@ fn floor_reason(words: &[&str], spec: &CommandSpec) -> Option<&'static str> {
 /// call starts no child.
 pub fn call(
     exec: &Exec,
-    grants: &[&[&str]],
+    grants: &[Vec<&str>],
     words: &[&str],
     flags: &[Flag<'_>],
     positionals: &[&str],
