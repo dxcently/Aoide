@@ -28,7 +28,8 @@ sha2 (a dialog's digest), the door crate, and the exec crate.
 - `blocking.rs`: `PATHS`, the paths of the core commands that never end on
   their own (the serve family, the daemon, the conductor, the melete adapter,
   the watches, and trace `--follow`). They run only as held children, never
-  through `palette::call`. The test in `tests/palette.rs` pins the list.
+  through `palette::call`. The list is a hand list checked against the core's
+  schema at 839911a5, and is deleted when the kinds lane's `verb` lands.
 - `chat/`: `say` sends to a session, and `follow` opens its stream as a `Chat`
   whose `next` yields a `Push`. `chat/cases.rs` holds the follow cases, one
   entry each. `chat/record.rs` is the one place a stream line is parsed.
@@ -253,7 +254,7 @@ the main window, every declared path, and a frame's own list. A granted command
 that the floor holds is refused, so a grant can never name a floored command.
 
 `palette::call` runs no confirm. A confirm before a palette run belongs to the
-window that shows the palette (Part C); `call` is the check and the spawn only.
+window that shows the palette; `call` is the check and the spawn only.
 
 ## How a chat is followed
 

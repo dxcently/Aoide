@@ -135,7 +135,9 @@ are in README.md.
 - `retire_unreaped` is the one pid signal outside `run`. It sends SIGINT, never
   SIGTERM, to a child `spawn_held` could not give a pidfd, because the child is
   unreaped and its pid cannot be reused. It reaps the child on a thread. It
-  refuses the pids `terminate` refuses, through `signal_unreaped`.
+  refuses the pids `terminate` refuses, through `signal_unreaped`. It sends
+  SIGINT once, with no escalation: a child that ignores SIGINT keeps its reaper
+  thread for as long as it lives.
 - A non-zero exit is not an error. `call` returns the child's status and its
   stderr, verbatim, for the caller to show.
 

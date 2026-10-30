@@ -243,9 +243,9 @@ fn every_floor_case_is_refused_by_its_class() {
 
 #[test]
 fn the_blocking_list_is_exactly_the_core_commands_that_never_end() {
-    // The commands of the core registry (`aoide schema --json`, 124 commands, read at
-    // worktree 839911a5) that run until the app ends them. A new one is added here
-    // and to `blocking::PATHS` in the same commit.
+    // A hand list of the core commands that run until the app ends them, checked
+    // against `aoide schema --json` at 839911a5. Deleted when the kinds lane's
+    // `verb` lands. A new one goes here and in `blocking::PATHS` in one commit.
     let expected: &[&[&str]] = &[
         &["session", "trace"],
         &["session", "watch"],

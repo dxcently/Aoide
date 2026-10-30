@@ -5,7 +5,7 @@
 
 /// The paths of the core commands that never end on their own: the serve family,
 /// the daemon, the conductor TUI, the melete adapter, the watches and trace
-/// `--follow`. `tests/palette.rs` compares this list to the core registry's set.
+/// `--follow`. A hand list, checked against `aoide schema --json` at 839911a5.
 /// `session trace` is listed whole: its one-shot is refused with its `--follow`
 /// form, since a palette cannot tell them apart by path.
 pub const PATHS: &[&[&str]] = &[

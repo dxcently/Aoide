@@ -255,7 +255,9 @@ are in README.md.
   to `palette` and `check`; the grant set's shape is stated in README.md.
 - `blocking::PATHS` is pinned until the kinds lane marks watch verbs in the
   schema. That list is deleted when the marks land, and `palette::check`'s
-  blocking arm goes with it. A test pins the list against the core registry.
+  blocking arm goes with it. The list is a hand list checked against
+  `aoide schema --json` at 839911a5; it is deleted when the kinds lane's `verb`
+  lands. No test reads the schema for it.
 
 ## Extension points
 
@@ -266,8 +268,11 @@ are in README.md.
   README's "How a chat is followed" list, in one commit.
   `every_case_runs_a_verb_the_schema_declares` fails for an entry whose verb
   the schema does not declare.
-- A chat record shape is parsed only in `chat/record.rs`. A new kind of
-  line goes there, as one arm of `line`, and its test goes in `tests/chat.rs`.
+- A chat record is parsed in `chat/record.rs`. The one-parser test scans
+  `src/chat` for five serde_json names (`from_str`, `from_slice`, `from_reader`,
+  `from_value`, `Deserializer`) and finds them only in `record.rs`; no other
+  parse form is scanned. A new kind of line goes in `record.rs`, as one arm of
+  `line`, and its test goes in `tests/chat.rs`.
 - A new aoide command needs no code. Its path, flags and arguments come from
   `aoide schema --json`.
 - A new door command goes in `doors.rs`. It calls `verify` before any request

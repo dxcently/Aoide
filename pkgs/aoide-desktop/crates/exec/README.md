@@ -115,8 +115,8 @@ lib.rs      Exec::load(aoide, home, env)
   as a call, under no deadline. Its stdout is read on one thread, a line at a
   time, into a queue of at most 8 MiB (`QUEUE_BYTES`): each event costs its
   line's bytes plus 64, and the reader waits for room. A line past `LINE_CAP` is
-  read to its end and reported as `Dropped` with its length in bytes. Its stderr is captured on another
-  thread, up to 16 MiB.
+  read to its end and reported as `Dropped` with its length in bytes. Its
+  stderr is captured on another thread, up to 16 MiB.
 
 ```
 Exec::follow(words, flags, positionals)
