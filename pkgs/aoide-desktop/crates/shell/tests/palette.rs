@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use aoide_desktop_shell::blocking::PATHS;
 use aoide_desktop_shell::exec::{Exec, Flag, Schema};
-use aoide_desktop_shell::palette::{call, check, main_grants, palette, CallError, Refusal};
+use aoide_desktop_shell::palette::{call, check, main_grants, palette, CallError, Refusal, FLOOR};
 
 const SCHEMA: &str = include_str!("../fixtures/palette-schema.json");
 const FAKE: &str = env!("CARGO_BIN_EXE_fake-aoide");
@@ -175,4 +175,62 @@ fn a_frame_granted_a_parent_cannot_reach_a_floored_child_through_positionals() {
         "{err:?}"
     );
     assert_eq!(records(&record), before, "no child started");
+}
+
+/// One command the floor must refuse, for each `FLOOR` class: its class and the
+/// path a test runs. A new `FLOOR` entry without a row here fails
+/// `every_floor_class_has_a_test_case`.
+const FLOOR_CASES: &[(&str, &[&str])] = &[
+    ("custody", &["secrets", "put"]),
+    ("custody", &["secret", "put"]),
+    ("trust", &["pair", "ask"]),
+    ("trust", &["mesh", "join"]),
+    ("trust", &["node", "allow"]),
+    ("trust", &["node", "add"]),
+    ("trust", &["node", "remove"]),
+    ("trust", &["node", "address"]),
+    ("trust", &["node", "hub"]),
+    ("trust", &["identity"]),
+    ("trust", &["session", "grant"]),
+    ("trust", &["extension", "grant"]),
+    ("self-change", &["config", "set"]),
+    ("self-change", &["hooks", "install"]),
+    ("self-change", &["update"]),
+    ("self-change", &["daemon"]),
+    ("self-change", &["node", "advertise"]),
+    ("self-change", &["extension", "add"]),
+    ("self-change", &["extension", "remove"]),
+    ("melete tools", &["melete", "call"]),
+    ("mneme writes", &["mneme", "call"]),
+];
+
+#[test]
+fn every_floor_class_has_a_test_case() {
+    for (class, prefix) in FLOOR {
+        assert!(
+            FLOOR_CASES.iter().any(|(c, path)| c == class && path.starts_with(prefix)),
+            "the floor class `{class}` at {prefix:?} has no case in FLOOR_CASES"
+        );
+    }
+}
+
+#[test]
+fn every_floor_case_is_refused_by_its_class() {
+    let commands: Vec<serde_json::Value> = FLOOR_CASES
+        .iter()
+        .map(|(_, path)| {
+            serde_json::json!({"path": path, "summary": "x", "args": [], "flags": [], "implemented": true})
+        })
+        .collect();
+    let text = serde_json::json!({"commands": commands}).to_string();
+    let s = Schema::parse(&text).expect("the floor schema parses");
+    let grants = main_grants(&s);
+    for (class, path) in FLOOR_CASES {
+        let refused = check(&s, &grants, path, &[]);
+        assert_eq!(
+            refused,
+            Err(Refusal::Floored { path: path.join(" "), why: class }),
+            "{path:?} is refused by its class"
+        );
+    }
 }
