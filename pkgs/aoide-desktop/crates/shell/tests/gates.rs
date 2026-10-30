@@ -218,8 +218,8 @@ fn store_path_len(after: &str) -> Option<usize> {
         return None;
     }
     let name = &after[33..];
-    let end = name.find(['/', '"']).unwrap_or(name.len());
-    (end > 0).then_some(33 + end)
+    let end = name.find(|c: char| !(c.is_ascii_alphanumeric() || "+._?=-".contains(c))).unwrap_or(name.len());
+    (end > 0 && name[end..].starts_with(['/', '"'])).then_some(33 + end)
 }
 
 /// Where two texts first differ: the line number, and both lines there.
@@ -513,6 +513,7 @@ fn the_config_normalizer_is_pinned_by_a_table_of_known_bad_paths() {
         (format!("\"linker\" = \"/nix/store/e{}-cc/bin/cc\"", &hash[1..]), linker),
         (format!("\"linker\" = \"/nix/store/{hash}-cc\"/bin/cc"), linker),
         (format!("\"linker\" = \"/nix/store/{hash}-cc/bin/cc/extra\""), linker),
+        (format!("\"linker\" = \"/nix/store/{hash}-c c/bin/cc\""), linker),
         ("directory = \"cargo-vendor-dir2\"".to_string(), dir),
         ("directory = \"cargo-vendor-di\"".to_string(), dir),
     ];

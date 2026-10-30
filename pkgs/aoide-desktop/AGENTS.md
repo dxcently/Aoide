@@ -98,7 +98,8 @@ and each crate's own invariants are in its AGENTS.md (`crates/door/AGENTS.md`,
     hook writes to point cargo at the vendored crates. The test accepts that
     file only when its text equals
     `crates/shell/tests/fixtures/nix-cargo-config.toml` once every store path
-    (a `/nix/store/` hash and name, in nix's base-32) and the vendor directory
+    (a `/nix/store/` hash in nix's base-32, and a name in nix's store-name
+    characters `[A-Za-z0-9+._?=-]`) and the vendor directory
     `cargo-vendor-dir`, the relative value the hook writes, are placeholders.
     The golden fixes the linker line too
     (`no_cargo_config_applies_to_the_workspace`);
