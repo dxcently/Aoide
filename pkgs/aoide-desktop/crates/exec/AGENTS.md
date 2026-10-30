@@ -72,6 +72,10 @@ are in README.md.
   valued flag is `--name=value`. A bool flag is written bare, because aoide's
   parser never lets a declared bool take the next word. A bare `--` ends flag
   parsing, so `--` is written only when there are positionals.
+- A positional cannot extend a path. `resolve` takes the longest declared path
+  over the words and the positionals together, as aoide's parser does, and
+  refuses (`ExecError::Resolves`) when it is longer than the words. `call` and
+  `follow` key the child's environment on that same resolved path.
 - A call that does not match the schema is refused before anything runs: an
   unknown path, an undeclared flag, a bool given a value, a valued flag given
   none, a missing required argument, or a NUL byte in any word.

@@ -4,12 +4,20 @@
   "stageNotesVersion": "1",
   "commands": [
     {
+      "path": ["config", "set"],
+      "summary": "Set a key.",
+      "args": [],
+      "flags": [],
+      "implemented": true
+    },
+    {
       "path": ["config"],
       "summary": "Show the effective runtime config.",
       "args": [],
       "flags": [
         {"name": "json", "type": "bool", "description": "Structured I/O."}
-      ]
+      ],
+      "implemented": true
     },
     {
       "path": ["send"],

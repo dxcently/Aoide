@@ -76,7 +76,9 @@ lib.rs      Exec::load(aoide, home, env)
   of the canonical path, which is the only path the app runs.
 - `argv` builds the argument list from `aoide schema --json`. It refuses, before
   anything runs, an unknown path, an undeclared flag, a bool flag given a value,
-  a valued flag given none, a missing required argument, and a NUL byte.
+  a valued flag given none, a missing required argument, a NUL byte, and a
+  positional that names a longer declared command than the words (`Resolves`:
+  aoide takes the longest declared path over words and positionals together).
 - `child_env` builds the environment from the app's own, minus the variables
   the child must not see. An `eidolon` child loses `AOIDE_SESSION_ID`, the
   `AOIDE_MELETE_*` variables and the vault keys. An `aoide` child loses the

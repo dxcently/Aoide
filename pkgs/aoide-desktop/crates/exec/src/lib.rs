@@ -311,6 +311,7 @@ pub fn argv(
     let command = schema
         .command(words)
         .ok_or_else(|| ExecError::UnknownCommand(path.clone()))?;
+    resolve(schema, words, positionals)?;
     let mut line = vec![aoide.as_os_str().to_owned()];
     line.extend(words.iter().map(|w| OsString::from(*w)));
     line.push(OsString::from("--json"));
@@ -349,6 +350,20 @@ pub fn argv(
         line.extend(positionals.iter().map(|p| OsString::from(*p)));
     }
     Ok(line)
+}
+
+/// The command aoide runs for `words` and `positionals`. aoide reads everything
+/// after `--` as a positional, then takes the longest declared path those words
+/// begin with. So a positional can name a longer command than `words` does: that
+/// is refused here, before any child starts. On success the path is `words`.
+fn resolve<'a>(schema: &Schema, words: &[&'a str], positionals: &[&str]) -> Result<Vec<&'a str>, ExecError> {
+    let called = words.len();
+    let all: Vec<&str> = words.iter().copied().chain(positionals.iter().copied()).collect();
+    let longest = (called..=all.len()).rev().find(|&n| schema.command(&all[..n]).is_some()).unwrap_or(called);
+    if longest > called {
+        return Err(ExecError::Resolves { called: words.join(" "), resolved: all[..longest].join(" ") });
+    }
+    Ok(words.to_vec())
 }
 
 fn nul(text: &str, what: &'static str) -> Result<(), ExecError> {
@@ -494,7 +509,8 @@ impl Exec {
         positionals: &[&str],
         stdin: Option<&[u8]>,
     ) -> Result<Output, ExecError> {
-        let first = words.first().copied().unwrap_or("");
+        let resolved = resolve(&self.schema, words, positionals)?;
+        let first = resolved.first().copied().unwrap_or("");
         let env = child_env(Child::Aoide, first, &self.base_env, self.keys())?;
         let line = argv(self.aoide.path(), &self.schema, words, flags, positionals)?;
         run(&self.aoide, &line[1..], &env, stdin, &words.join(" "), self.deadline)
@@ -514,7 +530,8 @@ impl Exec {
     /// interrupts it. A held child runs under no deadline: it is the one that ends
     /// when the caller ends it.
     pub fn follow(&self, words: &[&str], flags: &[Flag<'_>], positionals: &[&str]) -> Result<Follow, ExecError> {
-        let first = words.first().copied().unwrap_or("");
+        let resolved = resolve(&self.schema, words, positionals)?;
+        let first = resolved.first().copied().unwrap_or("");
         let env = child_env(Child::Aoide, first, &self.base_env, self.keys())?;
         let line = argv(self.aoide.path(), &self.schema, words, flags, positionals)?;
         spawn_held(&self.aoide, &line[1..], &env)
@@ -883,6 +900,9 @@ pub enum ExecError {
     Pin(PinError),
     /// The program could not be started.
     Spawn(io::Error),
+    /// The positionals name a longer declared command than `called`, which aoide
+    /// would run as `resolved`. Refused before any child starts.
+    Resolves { called: String, resolved: String },
     /// Reading the child's output or waiting on it failed.
     Io(io::Error),
 }
@@ -891,6 +911,9 @@ impl fmt::Display for ExecError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Schema(why) => write!(f, "aoide schema --json did not parse: {why}"),
+            Self::Resolves { called, resolved } => {
+                write!(f, "`{called}` with these positionals is `{resolved}`, a different command; nothing starts")
+            }
             Self::Config(why) => write!(f, "aoide config --json did not parse: {why}"),
             Self::Bootstrap { call, why } => write!(f, "aoide {call} failed at start: {why}"),
             Self::UnknownCommand(path) => write!(f, "the installed aoide declares no command `{path}`"),
@@ -1266,6 +1289,31 @@ mod tests {
     use std::os::unix::process::ExitStatusExt;
 
     use super::*;
+
+    #[test]
+    fn a_positional_cannot_extend_a_path_into_a_longer_declared_one() {
+        let text = r#"{"commands":[
+            {"path":["config"],"summary":"Show.","args":[],"flags":[],"implemented":true},
+            {"path":["config","set"],"summary":"Set.","args":[],"flags":[],"implemented":true},
+            {"path":["session"],"summary":"Bare.","args":[],"flags":[],"implemented":true},
+            {"path":["session","watch"],"summary":"Watch.","args":[],"flags":[],"implemented":true}
+        ]}"#;
+        let schema = Schema::parse(text).expect("the schema parses");
+        let aoide = Path::new("/usr/bin/aoide");
+        for (words, positionals, resolved) in [
+            (&["config"][..], &["set"][..], "config set"),
+            (&["session"][..], &["watch", "id"][..], "session watch"),
+        ] {
+            match argv(aoide, &schema, words, &[], positionals) {
+                Err(ExecError::Resolves { called, resolved: got }) => {
+                    assert_eq!(called, words.join(" "));
+                    assert_eq!(got, resolved);
+                }
+                other => panic!("{words:?} with {positionals:?} must refuse: {other:?}"),
+            }
+        }
+        assert!(argv(aoide, &schema, &["config"], &[], &["x"]).is_ok(), "a positional naming no path is fine");
+    }
 
     #[test]
     fn a_command_keeps_its_brief_doors_marks_and_kind() {

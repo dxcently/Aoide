@@ -156,3 +156,23 @@ fn a_blocking_path_through_call_is_refused_and_starts_no_child() {
     assert!(matches!(err, CallError::Refused(Refusal::Blocking(_))), "{err:?}");
     assert_eq!(records(&record), before, "no child started");
 }
+
+#[test]
+fn a_frame_granted_a_parent_cannot_reach_a_floored_child_through_positionals() {
+    let dir = scratch("frame-parent");
+    let record = dir.join("record.jsonl");
+    let env = vec![
+        (OsString::from("PATH"), OsString::from("/usr/bin:/bin")),
+        (OsString::from("FAKE_AOIDE_RECORD"), record.clone().into_os_string()),
+    ];
+    let exec = Exec::load(Path::new(FAKE), &dir.join("home"), env).expect("the fake loads");
+    let frame: Vec<Vec<&str>> = vec![vec!["config"]];
+    assert!(check(exec.schema(), &frame, &["config"], &[]).is_ok(), "the frame may run config itself");
+    let before = records(&record);
+    let err = call(&exec, &frame, &["config"], &[], &["set", "key", "value"]).expect_err("refused");
+    assert!(
+        matches!(err, CallError::Exec(aoide_desktop_shell::exec::ExecError::Resolves { .. })),
+        "{err:?}"
+    );
+    assert_eq!(records(&record), before, "no child started");
+}
