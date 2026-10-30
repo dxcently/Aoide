@@ -674,7 +674,7 @@ impl Doors {
         {
             let mut shared = link.state.lock().unwrap();
             if shared.turn != TurnState::Idle {
-                if arm_on_busy {
+                if arm_on_busy && shared.turn == TurnState::Running {
                     shared.armed = true;
                     return Ok(Close::Armed);
                 }

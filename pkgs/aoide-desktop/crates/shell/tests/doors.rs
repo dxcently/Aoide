@@ -1724,3 +1724,17 @@ fn a_close_due_for_a_door_idle_while_the_channel_is_full_still_arrives() {
     let seen = events_through(&rx, |e| matches!(e, Event::CloseDue { .. }));
     assert!(matches!(seen.last(), Some(Event::CloseDue { launch_id }) if *launch_id == id), "{seen:?}");
 }
+
+#[test]
+fn a_turn_that_is_unknown_at_the_lock_is_busy_and_arms_nothing() {
+    let world = World::new("race-unknown");
+    let (tx, _rx) = mpsc::sync_channel(EVENTS_BOUND);
+    let mut doors = world.open(tx);
+    let id = world.launch(&mut doors);
+    world.command("idle");
+    assert!(until(Duration::from_secs(5), || doors.turn(&id).unwrap() == TurnState::Idle));
+    doors.race_turn_between_locks(TurnState::Unknown);
+    assert_eq!(doors.close_after_turn(&id).unwrap(), Close::Busy, "an unknown turn at the lock is busy, not armed");
+    assert_eq!(world.count("SIGTERM"), 0, "nothing is signalled");
+    assert_eq!(doors.close_due(&id).unwrap(), Close::Revoked, "no mark stands");
+}
