@@ -56,7 +56,7 @@ use super::model::{
     STAGE_GRAPH_VERSION,
 };
 use super::remote::{node_record, resolve_on_node};
-use super::session_store::{
+use super::session_store::{stamp_transcript_path, 
     audit_ignored_wrap_hook, clear_stale_parent, do_hook_session_start, do_session_end,
     do_session_phase, protected_wrap, reserved_id_refusal,
     do_session_phase_if, do_subagent_end, do_subagent_rekey,
@@ -113,6 +113,40 @@ use std::path::{Path, PathBuf};
 // a keystroke spelling of its own.
 #[cfg(not(test))]
 pub const SUBMIT_KEYSTROKE_DELAY: std::time::Duration = std::time::Duration::from_millis(300);
+/// The admission a hook-named transcript meets before it is recorded: the
+/// profile's own check. Returns the admitted path, or the refusal's name.
+fn transcript_decision(profile: &AgentProfile, sid: &str, path: &str) -> (Option<String>, Option<&'static str>) {
+    match profile.transcript.admit {
+        None => (None, Some("no-transcript-admission")),
+        Some(admit) => match admit(Path::new(path), sid) {
+            None => (Some(path.to_string()), None),
+            refusal => (None, refusal),
+        },
+    }
+}
+
+/// Records an admitted hook transcript on the session, or audits the refusal
+/// and records nothing.
+fn admit_transcript_path(profile: &AgentProfile, sid: &str, hint: &str) {
+    match transcript_decision(profile, sid, hint) {
+        (Some(admitted), _) => stamp_transcript_path(sid, &admitted),
+        (None, refusal) => {
+            let _ = aoide_protocol::append_audit(
+                &aoide_protocol::default_audit_log(),
+                &aoide_protocol::AuditRecord {
+                    ts: super::conduct::unix_ts(),
+                    door: Door::Daemon,
+                    class: aoide_protocol::EventClass::Audit,
+                    command: "session.transcript-path".to_string(),
+                    status: "refused".to_string(),
+                    message: format!("{sid}: {}", refusal.unwrap_or("refused")),
+                    untrusted_data: Some(hint.chars().take(AUDIT_REFUSED_TEXT_MAX).collect()),
+                },
+            );
+        }
+    }
+}
+
 #[cfg(test)]
 pub const SUBMIT_KEYSTROKE_DELAY: std::time::Duration = std::time::Duration::from_millis(0);
 
@@ -2956,6 +2990,11 @@ fn hook_for_profile_gated(
             (profile.hook_event_map)(evt),
             HookClass::Stop | HookClass::PostToolUse | HookClass::PromptSubmit | HookClass::Notification
         );
+        if !is_sub {
+            if let Some(hint) = payload.get("transcript_path").and_then(Value::as_str) {
+                admit_transcript_path(profile, sid, hint);
+            }
+        }
         if !is_sub && say_boundary {
             refresh_transcript_fields(
                 profile,
@@ -4508,6 +4547,33 @@ mod tests {
     }
 
     // ── Approval doors: which door may approve a gated send ─────────────────
+
+    #[test]
+    fn a_hook_names_a_transcript_only_through_the_profiles_admission() {
+        let root = std::env::temp_dir().join(format!("ao-hook-transcript-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let bucket = root.join("projects").join("-home-u-Aoide");
+        std::fs::create_dir_all(&bucket).unwrap();
+        let good = bucket.join("sid-1.jsonl");
+        std::fs::write(&good, "{}\n").unwrap();
+        let claude = aoide_protocol::agents::agent_profile("claude").unwrap();
+        assert_eq!(
+            transcript_decision(claude, "sid-1", good.to_str().unwrap()),
+            (Some(good.display().to_string()), None)
+        );
+        let other = bucket.join("other.jsonl");
+        std::fs::write(&other, "{}\n").unwrap();
+        assert_eq!(
+            transcript_decision(claude, "sid-1", other.to_str().unwrap()),
+            (None, Some("name-is-not-the-session"))
+        );
+        let kimi = aoide_protocol::agents::agent_profile("kimi").unwrap();
+        assert_eq!(
+            transcript_decision(kimi, "sid-1", good.to_str().unwrap()),
+            (None, Some("no-transcript-admission"))
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
 
     fn send_on(door: Door, args: &[&str], flags: &[(&str, &str)]) -> Invocation {
         Invocation {

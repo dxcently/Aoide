@@ -43,9 +43,51 @@ pub enum HookClass {
     Unknown,
 }
 
+/// The four checks a hook-named Claude transcript passes, in order. The first
+/// check that fails names the refusal: the transcript must be a regular file
+/// (not a symlink), owned by this user, named `<session_id>.jsonl`, and sit
+/// directly in a bucket under a `projects` directory (`CONTRACTS.md`
+/// `transcriptPath`).
+pub const CLAUDE_TRANSCRIPT_CHECKS: &[(&str, fn(&Path, &str, u32) -> bool)] = &[
+    ("not-a-regular-file", |p, _, _| {
+        std::fs::symlink_metadata(p).is_ok_and(|m| m.file_type().is_file())
+    }),
+    ("not-owned-by-this-user", |p, _, uid| {
+        std::fs::symlink_metadata(p).is_ok_and(|m| std::os::unix::fs::MetadataExt::uid(&m) == uid)
+    }),
+    ("name-is-not-the-session", |p, sid, _| {
+        p.file_name().and_then(|f| f.to_str()).is_some_and(|f| f == format!("{sid}.jsonl"))
+    }),
+    ("not-under-projects", |p, _, _| {
+        !p.components().any(|c| matches!(c, std::path::Component::ParentDir))
+            && p.parent()
+                .and_then(Path::parent)
+                .and_then(Path::file_name)
+                .is_some_and(|n| n == "projects")
+    }),
+];
+
+/// The first failing check's name for `path` as a `session_id` transcript
+/// owned by `uid`, or None when every check passes.
+pub fn transcript_refusal(path: &Path, session_id: &str, uid: u32) -> Option<&'static str> {
+    CLAUDE_TRANSCRIPT_CHECKS
+        .iter()
+        .find(|(_, ok)| !ok(path, session_id, uid))
+        .map(|(name, _)| *name)
+}
+
+/// [`transcript_refusal`] for this user's own uid: Claude's admission.
+pub fn claude_transcript_refusal(path: &Path, session_id: &str) -> Option<&'static str> {
+    transcript_refusal(path, session_id, unsafe { libc::geteuid() } as u32)
+}
+
 /// Locator + extractors for an agent's on-disk transcript (claude: the
 /// per-session JSONL Claude Code writes under `~/.claude/projects/`).
 pub struct TranscriptSpec {
+    /// Admit a hook-named transcript path for this session before it is
+    /// recorded (`CONTRACTS.md` `transcriptPath`). None when the profile has no
+    /// admission: its hook-named paths are never recorded.
+    pub admit: Option<fn(path: &Path, session_id: &str) -> Option<&'static str>>,
     /// Resolve a session's transcript path: prefer the hook-supplied
     /// `transcript_path` hint when it names a real file, else derive the
     /// canonical location. None when neither resolves to an existing file.
@@ -797,6 +839,7 @@ pub static CLAUDE_PROFILE: AgentProfile = AgentProfile {
     normalize_payload: claude_normalize_payload,
     model_ceiling: crate::model::context_ceiling_for_model,
     transcript: TranscriptSpec {
+        admit: Some(claude_transcript_refusal),
         locate: transcript_path_for,
         tail: transcript_tail,
         say: extract_say,
@@ -1250,6 +1293,7 @@ pub static KIMI_PROFILE: AgentProfile = AgentProfile {
     normalize_payload: kimi_normalize_payload,
     model_ceiling: kimi_context_ceiling,
     transcript: TranscriptSpec {
+        admit: None,
         locate: kimi_transcript_locate,
         tail: kimi_wire_tail,
         say: kimi_extract_say,
@@ -1589,6 +1633,7 @@ pub static PI_PROFILE: AgentProfile = AgentProfile {
     normalize_payload: normalize_identity,
     model_ceiling: crate::model::context_ceiling_for_model,
     transcript: TranscriptSpec {
+        admit: None,
         locate: pi_transcript_locate,
         tail: transcript_tail,
         say: pi_extract_say,
@@ -2999,6 +3044,7 @@ pub static EIDOLON_PROFILE: AgentProfile = AgentProfile {
     normalize_payload: normalize_identity,
     model_ceiling: crate::model::context_ceiling_for_model,
     transcript: TranscriptSpec {
+        admit: None,
         locate: eidolon_transcript_locate,
         tail: eidolon_transcript_tail,
         say: eidolon_extract_say,

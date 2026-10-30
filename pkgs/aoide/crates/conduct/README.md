@@ -219,6 +219,12 @@ blank one is refused too.
   harness_session_id` (P-D7) from the raw hook payload's own `session_id`
   on every event that carries one, mapped-to-an-action or not — see
   `CONTRACTS.md`'s `sessions.json` entry for the full field contract.
+- `session hook` also records the payload's `transcript_path` as
+  `SessionRecord.transcript_path` only through `send.rs`'s
+  `admit_transcript_path`, which asks the profile's `TranscriptSpec.admit`
+  (`protocol/src/agents.rs`). A refusal is audited and nothing is stamped.
+  The raw hook path still feeds `refresh_transcript_fields` unchanged, so the
+  say/tool/title read is not yet gated by this admission (chat-core, commit 4).
 - **The hook door's two self-reported facts, and the ONE rule that resolves
   them.** A hook process is the only process that can read what a harness
   reports about itself, so it reads its parent claim once

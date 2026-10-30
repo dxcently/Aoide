@@ -39,6 +39,7 @@ pub(crate) fn session(
         agent: "claude".into(),
         window_address: format!("0x{id}"),
         cwd: cwd.into(),
+        transcript_path: None,
         state: state.into(),
         // Every fixture here is a harness-shaped record unless a test says
         // otherwise: a claude wrap whose resolved program is `claude`.

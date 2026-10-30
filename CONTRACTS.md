@@ -3326,6 +3326,20 @@ record yet" (a legacy record, or a wrap with no hook-driven agent inside
 it); readers must tolerate both forms and round-trip fields they do not
 know.
 
+**Additive (chat-core):** a session record MAY also carry `transcriptPath`
+(string), the transcript file a hook named for the session once the profile's
+admission passed. `aoide session hook` stamps it change-only
+(`conduct/src/graph/session_store.rs` `stamp_transcript_path`) and only through
+`admit_transcript_path` (`conduct/src/graph/send.rs`). A refusal writes an
+audit line (command `session.transcript-path`, status `refused`) and stamps
+nothing. Claude's admission (`protocol/src/agents.rs` `claude_transcript_refusal`)
+runs four checks in order and names the first that fails:
+`not-a-regular-file` (a symlink refuses), `not-owned-by-this-user`,
+`name-is-not-the-session` (`<session_id>.jsonl`), and `not-under-projects` (the
+grandparent directory is `projects`, and no `..` component). A profile with no
+admission (`kimi`, `pi`, `eidolon`) refuses every named path as
+`no-transcript-admission`.
+
 **Additive in v0 (P-D8, `docs/architecture/AOIDED.md`'s "L5"):** a session
 record MAY also carry an optional `resumedFrom` (string) — the durable
 session ledger's `sessionId` (see `state/session-ledger.jsonl` below) this

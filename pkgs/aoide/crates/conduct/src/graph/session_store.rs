@@ -1256,6 +1256,28 @@ pub fn stamp_seal(id: &str, seal: &str, issued_at: i64, pid_starttime: u64) {
     });
 }
 
+/// Records the hook-named transcript an admission check passed on the session
+/// (`CONTRACTS.md` `transcriptPath`). Change-only, as `stamp_harness_session_id`.
+pub(in crate::graph) fn stamp_transcript_path(id: &str, path: &str) {
+    with_stage_lock(|| {
+        let mut file: SessionsFile = match load_stage(&sessions_path()) {
+            Ok(f) => f,
+            Err(_) => return,
+        };
+        if let Some(s) = file
+            .sessions
+            .iter_mut()
+            .find(|s| s.session_id == id && s.transcript_path.as_deref() != Some(path))
+        {
+            s.transcript_path = Some(path.to_string());
+            if file.schema_version.is_empty() {
+                file.schema_version = STAGE_GRAPH_VERSION.to_string();
+            }
+            let _ = write_stage(&sessions_path(), &file);
+        }
+    });
+}
+
 /// Stamp `harnessSessionId` — the raw hook payload's OWN `session_id` field
 /// (P-D7) — on a session record, on EVERY hook event that carries one, not
 /// just at registration: unlike `headless` (a birth fact,
