@@ -1329,6 +1329,24 @@ pub(in crate::graph) fn deliver_local_with(
         audit_send(inv, "error", &out.message, &text);
         return out;
     }
+    // `--harness <name>`: the target must be a wrap of that harness. A shell wrap or
+    // another harness's wrap is refused here, before the gate, so `--yes` cannot
+    // type chat text into a bare shell.
+    if let Some(harness) = inv.flags.get("harness").map(|h| h.trim()).filter(|h| !h.is_empty()) {
+        if rec.shell || rec.agent != harness {
+            let out = Outcome::error(
+                cmd,
+                format!(
+                    "`{id}` is not a `{harness}` session: it runs `{}`{}, so nothing was typed",
+                    aoide_protocol::untrusted::strip_unsafe(&rec.agent),
+                    if rec.shell { " in a shell" } else { "" }
+                ),
+            )
+            .with_data(json!({ "reason": "not-that-harness", "sessionId": id, "harness": harness, "agent": rec.agent, "shell": rec.shell }));
+            audit_send(inv, "not-that-harness", &out.message, &text);
+            return out;
+        }
+    }
     let is_conductable = super::doc::is_conductable_now(rec);
     let socket = rec.socket.clone().filter(|s| !s.is_empty());
     if !is_conductable {
@@ -4609,6 +4627,47 @@ mod tests {
             transcript_decision(kimi, "sid-1", good.to_str().unwrap()),
             (None, Some("no-transcript-admission"))
         );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// `--harness <name>` checks the wrap before anything is typed: a shell wrap,
+    /// or a wrap of another harness, is refused as `not-that-harness`.
+    fn set_wrap(id: &str, edit: impl FnOnce(&mut SessionRecord)) {
+        let mut f: SessionsFile = load_stage(&sessions_path()).unwrap();
+        edit(f.sessions.iter_mut().find(|s| s.session_id == id).unwrap());
+        write_stage(&sessions_path(), &f).unwrap();
+    }
+
+    #[test]
+    fn a_shell_wrap_is_refused_for_harness_claude_even_with_yes() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (root, id, listener) = door_fixture("harness-shell", None);
+        set_wrap(&id, |r| r.shell = true);
+        let out = session_send(&send_on(Door::Cli, &["ls"], &[("id", &id), ("harness", "claude"), ("yes", "true")]));
+        assert_eq!(out.status, aoide_protocol::output::Status::Error, "{}", out.message);
+        assert_eq!(out.data.as_ref().unwrap()["reason"], "not-that-harness", "{}", out.message);
+        assert!(nothing_connected(&listener), "a refused send types nothing");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_wrap_of_another_harness_is_refused_for_harness_claude() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (root, id, listener) = door_fixture("harness-kimi", None);
+        set_wrap(&id, |r| r.agent = "kimi".into());
+        let out = session_send(&send_on(Door::Cli, &["ls"], &[("id", &id), ("harness", "claude"), ("yes", "true")]));
+        assert_eq!(out.data.as_ref().unwrap()["reason"], "not-that-harness", "{}", out.message);
+        assert!(nothing_connected(&listener));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_claude_wrap_passes_the_harness_check_and_reaches_its_socket() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (root, id, listener) = door_fixture("harness-claude", None);
+        let out = session_send(&send_on(Door::Cli, &["ls"], &[("id", &id), ("harness", "claude"), ("yes", "true")]));
+        assert_ne!(out.data.as_ref().and_then(|d| d["reason"].as_str()), Some("not-that-harness"), "{}", out.message);
+        assert!(!nothing_connected(&listener), "a harness wrap takes the delivery: {}", out.message);
         let _ = std::fs::remove_dir_all(&root);
     }
 

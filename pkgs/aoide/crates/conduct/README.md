@@ -315,6 +315,10 @@ blank one is refused too.
   never lands one: its send parks in `pending.json`, and a held send is filed
   when a local approver releases it. `aoide-server`'s A2A spawn holds its
   opening turn the same way, so it files nothing either.
+- **`send --harness <name>`** (chat-core, commit 7) — `send.rs::deliver_local_with`
+  refuses a target that is a shell wrap (`shell: true`) or a wrap of another
+  agent, as `not-that-harness`, audited, nothing typed. The check runs before the
+  gate, so `--yes` does not pass it. A harness's own wrap is unchanged.
 - **`send.rs::write_delivery`** is the one place a delivered payload actually
   reaches a target's control socket (task #124): the text write, then — on
   `--submit` — a SEPARATE, later write of the target's own submit keystroke,
