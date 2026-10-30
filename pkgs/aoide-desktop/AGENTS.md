@@ -72,7 +72,9 @@ and each crate's own invariants are in its AGENTS.md (`crates/door/AGENTS.md`,
   reads every `.rs` file under this directory, and every file under `ui/` once
   that exists, skipping the root's `target`. It bars six words in each one:
   `aoided.sock`, `"dispatch"`, `"subscribe"`, `/api/launch`, `sh -c` and
-  `SIGKILL`. It reads the raw text, so a split spelling passes it. The scan
+  `SIGKILL`. A second scan bars `extern` and `#[link` in door and shell
+  (not exec, the one member that allows unsafe code): each opens foreign code
+  the lints do not see. It reads the raw text, so a split spelling passes it. The scan
   reads source text, not expansions, so it does not see a lift a macro writes;
   the forbid refuses one that a `macro_rules!` macro writes; a proc macro comes
   only from a new member or a changed manifest, which moves a golden manifest,

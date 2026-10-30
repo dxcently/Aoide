@@ -18,6 +18,11 @@ const EVERYWHERE: [&str; 6] = [
     concat!("SIG", "KILL"),
 ];
 
+/// Words no door or shell source may hold: each one opens foreign code that the
+/// lints do not see. Exec is the one member that allows unsafe code, so it is
+/// not scanned for them.
+const NO_FOREIGN: [&str; 2] = [concat!("ext", "ern"), concat!("#[", "link")];
+
 /// Each manifest's golden text. The test compares its lines less the blank and
 /// comment lines, so a change to a manifest moves its golden in the same commit.
 const ROOT_MANIFEST: &str = r##"[workspace]
@@ -247,6 +252,18 @@ fn the_scan_reads_the_sources() {
 fn no_source_holds_an_everywhere_word() {
     for (path, text) in sources() {
         for word in EVERYWHERE {
+            assert!(!text.contains(word), "{path} holds `{word}`");
+        }
+    }
+}
+
+#[test]
+fn no_door_or_shell_source_holds_a_foreign_word() {
+    for (path, text) in sources() {
+        if path.starts_with("crates/exec/") {
+            continue;
+        }
+        for word in NO_FOREIGN {
             assert!(!text.contains(word), "{path} holds `{word}`");
         }
     }
