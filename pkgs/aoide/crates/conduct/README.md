@@ -1046,6 +1046,21 @@ blank one is refused too.
   `session trace` joined the `session` family at P-EIDOLON slice E6, beside
   `session pending list`; the exact path set and its count live in `cli`'s
   golden snapshot, never here.
+- **`session chat <id> [--follow] [--json]`** (chat-core, commit 6) —
+  `graph/chat.rs::session_chat`, the conversation as chat lines
+  (`CONTRACTS.md` "The chat line — v1"). It reads through the profile's chat
+  adapter (`agent_profile(..).chat`, the same record `session trace` reads
+  through `transcript.trace`), and resolves its `<id>` through
+  `trace.rs::resolve_local`, the one resolver `session trace` now shares. A
+  harness with `ChatSupport::Unsupported` is refused with its reason. Each
+  tick re-reads the session's record, so a transcript that `/clear` or
+  `/resume` moved is followed from its first line. The wrap-to-live-child
+  relation is not resolved separately. State lines: `awaiting` is `waiting`,
+  `idle`/`stopped`/`done` are `settled`. A Claude permission prompt is an ask
+  line while the session is `awaiting` and its `permit-<id>` card stands; the
+  fingerprint is the card's `received_at`. Doors: the default (Cli and the
+  daemon hop); `--follow` is CLI-only. Kind `session`, verb `watch`, so the
+  kinds golden carries it.
 - **`session trace <id> [--tail N] [--follow] [--json] [--clip line|detail]`
   (P-EIDOLON slice E6, `docs/architecture/EIDOLON-TRACE.md`)** —
   `graph/trace.rs::session_trace`, the read surface over a harness's own TRACE:

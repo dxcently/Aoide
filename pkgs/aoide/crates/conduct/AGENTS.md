@@ -3351,3 +3351,9 @@ in the message.
   is the lane's own trigger, as for an unfiled local run) and is swept once
   filed, by the automatic sweep AND by `session prune`; its durable history
   stays exactly as a pruned local run's does.
+
+- A new verb: one `cmd!` in `commands/graph.rs` with its `kind` and `verb`,
+  its handler re-exported in `graph.rs`, and the same commit's kinds golden
+  and path golden in `cli/src/registry.rs`. `session chat` is the example
+  (`graph/chat.rs`). Its resolver is `trace.rs::resolve_local`; a second
+  resolver is not written.

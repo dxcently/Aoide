@@ -4127,6 +4127,12 @@ pkgs/aoide/crates/protocol/tests/fixtures/chat-v1.jsonl
 {"ask":{"fingerprint":"3f9a","id":"perm-1","kind":"approval","prompt":"Bash: rm -rf build"},"id":"9","role":"system","session":"s-1","ts":null,"v":1}
 ```
 
+The verb that prints these lines is `session chat <id> [--follow] [--json]`
+(`pkgs/aoide/crates/conduct/src/graph/chat.rs`). It is `kind session`, `verb
+watch`, answers the terminal and the daemon hop only, and reads no stage
+except the session record and the permit card. `--follow` prints one JSON
+object per line under `--json`, then its closing envelope.
+
 ### `state/stage/projects.json` — **v0**
 
 Registered project anchor roots for the graph. Written by

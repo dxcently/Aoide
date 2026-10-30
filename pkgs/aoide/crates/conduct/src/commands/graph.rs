@@ -294,6 +294,23 @@ pub fn register(r: &mut Registry) {
         kind: "session", verb: "watch",
     ));
     r.insert(cmd!(
+        path: ["session", "chat"],
+        summary: "Read a session's conversation as chat lines, one per message, the same shape for every harness (CONTRACTS.md \"The chat line — v1\"): the agent's text and thinking (thinking flagged), its tool calls and their results, peer and tool messages as system lines, the state (waiting, settled) and a Claude permission prompt as an ask line (its fingerprint is the permit card's received_at). The source is read through the harness's own chat adapter; a harness with none (kimi, pi) is refused with the reason. <id> resolves like `session trace` (id / tail4 / petname). --follow prints new lines until Ctrl-C, then a closing envelope; each tick re-reads the session's record, so a /clear or /resume that moves it to another transcript keeps the chat. Terminal and daemon doors only (the default doors): A2A and MCP do not reach it, and a remote `--to` is not resolved. Read-only: no stage write, no lock.",
+        args: [arg!("id", "string", true, "Session to read: a local session id, its tail4, or its petname (resolved by the same resolver `session trace` uses).")],
+        flags: [
+            flag!("follow", "bool", "Print new chat lines as they land, until Ctrl-C. CLI-only — a follow that parks a connection makes no sense over the daemon socket.", doors: &[Door::Cli]),
+        ],
+        gated: false,
+        implemented: true,
+        handler: crate::graph::session_chat,
+        examples: [
+            "session chat brave-otter",
+            "session chat Aoide-7d23 --follow",
+            "session chat brave-otter --json",
+        ],
+        kind: "session", verb: "watch",
+    ));
+    r.insert(cmd!(
         path: ["session", "watch"],
         summary: "Watch a managed task run (`snapshot`/live): the instructions it was started with, its live output, the CHILD's own unread queue (the letters sent TO the subagent), and where it stands — LIVE by default, until the run ends or Ctrl-C. --snapshot returns ONE frame instead (the bounded mode a door that must return asks for); --tail N widens the output window (default 50); --json returns the frame in the registry's structured envelope; live, --json prints one JSON object per line, each tagged by `type` (`frame`, `output`, `mail`, `read`, `end`), then the outcome envelope on one line, so every stdout line is one JSON object. Read-only by construction: no stage write, no lock, no cursor — mail is read with `mail::unread_for` (a reader-selected PEEK), so watching advances neither the child's nor the observer's unread state, and the run's own report never lands in the child's inbox (it goes to its report mailbox). The footer's report line is read from the report lane's cursor, never inferred from a letter; a process exit is never rendered as task success, and a killed run's absent exitCode is reported as absent, never 0. Refusals: an unknown id, a `sub:` card, and a record that keeps no conduct-owned PTY.",
         args: [arg!("id", "string", true, "Session to watch: a local session id, its tail4, or its petname (resolved by the same resolver `send --to` uses).")],

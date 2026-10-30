@@ -210,9 +210,9 @@ impl Step {
     }
 }
 
-static INTERRUPTED: AtomicBool = AtomicBool::new(false);
+pub(super) static INTERRUPTED: AtomicBool = AtomicBool::new(false);
 
-extern "C" fn on_sigint(_signum: libc::c_int) {
+pub(super) extern "C" fn on_sigint(_signum: libc::c_int) {
     INTERRUPTED.store(true, Ordering::SeqCst);
 }
 
@@ -821,6 +821,75 @@ fn ledger_ended(target: &str) -> Option<aoide_storage::ledger::LedgerEntry> {
 }
 
 /// `session trace <id> [--tail N] [--follow] [--json]` — see the module doc.
+/// The local session a `<target>` names, resolved exactly as `send --to` resolves
+/// it, with the ledger's ended entry when the name is an ended session. A refusal
+/// comes back as the outcome to return. Shared by `session trace` and `session chat`.
+pub(super) fn resolve_local(
+    cmd: &str,
+    target: &str,
+) -> Result<(String, Option<aoide_storage::ledger::LedgerEntry>, SessionsFile), Outcome> {
+    let file: SessionsFile = match load_stage(&sessions_path()) {
+        Ok(f) => f,
+        Err(e) => return Err(stage_error(cmd, e)),
+    };
+    let host = aoide_storage::display::local_host_name();
+    let ids: HashSet<&str> = file.sessions.iter().map(|s| s.session_id.as_str()).collect();
+    let candidates: Vec<LocalCandidate<'_>> = file
+        .sessions
+        .iter()
+        .map(|s| {
+            let role = if resolved_parent(s, &ids).is_some() { "child" } else { "root" };
+            LocalCandidate { session_id: &s.session_id, petname: s.petname.as_deref(), role }
+        })
+        .collect();
+    let nodes = aoide_storage::node_store::load_nodes();
+    let node_names: Vec<&str> = nodes.iter().map(|p| p.name.as_str()).collect();
+
+    let echo_target = strip_unsafe(&target);
+    let (id, ended) = match addr::resolve(&target, &host, &candidates, &node_names) {
+        Resolution::Local(id) => (id, None),
+        Resolution::Remote { node, .. } => {
+            let node = strip_unsafe(&node);
+            return Err(Outcome::error(
+                cmd,
+                format!(
+                    "`{echo_target}` resolves to a session on node `{node}` — a trace is a file on the \
+                     node that wrote it, so run `session trace` there"
+                ),
+            )
+            .with_data(json!({ "reason": "remote-target", "node": node, "target": echo_target })));
+        }
+        Resolution::Ambiguous(found) => {
+            let found: Vec<String> = found.iter().map(|f| strip_unsafe(f)).collect();
+            return Err(Outcome::error(
+                cmd,
+                format!(
+                    "`{echo_target}` is ambiguous — {} local session(s) match: {}",
+                    found.len(),
+                    found.join(", ")
+                ),
+            )
+            .with_data(json!({ "reason": "ambiguous", "target": echo_target, "candidates": found })));
+        }
+        Resolution::NotFound => match ledger_ended(&target) {
+            Some(entry) => (entry.session_id.clone(), Some(entry)),
+            None => {
+                let hint = if !target.contains('/') && node_names.contains(&target) {
+                    format!(
+                        " (`{echo_target}` names a known node, not a local session — did you mean `{echo_target}/<session>`?)"
+                    )
+                } else {
+                    String::new()
+                };
+                return Err(Outcome::error(cmd, format!("no session matches `{echo_target}`{hint}"))
+                    .with_data(json!({ "reason": "not-found", "target": echo_target })));
+            }
+        },
+    };
+    let id = strip_unsafe(&id);
+    Ok((id, ended, file))
+}
+
 pub fn session_trace(inv: &Invocation) -> Outcome {
     let cmd = "session.trace";
     let args = match require_args(inv, &["id"]) {
@@ -845,65 +914,12 @@ pub fn session_trace(inv: &Invocation) -> Outcome {
     // registered node names, with the same ambiguity/not-found
     // refusals. No hub preference here — that is a ROUTING rule for `send`
     // (P-D5), not a rule for reading a file that lives on THIS box.
-    let file: SessionsFile = match load_stage(&sessions_path()) {
-        Ok(f) => f,
-        Err(e) => return stage_error(cmd, e),
+    let (id, ended, file) = match resolve_local(cmd, &target) {
+        Ok(r) => r,
+        Err(o) => return o,
     };
     let host = aoide_storage::display::local_host_name();
     let ids: HashSet<&str> = file.sessions.iter().map(|s| s.session_id.as_str()).collect();
-    let candidates: Vec<LocalCandidate<'_>> = file
-        .sessions
-        .iter()
-        .map(|s| {
-            let role = if resolved_parent(s, &ids).is_some() { "child" } else { "root" };
-            LocalCandidate { session_id: &s.session_id, petname: s.petname.as_deref(), role }
-        })
-        .collect();
-    let nodes = aoide_storage::node_store::load_nodes();
-    let node_names: Vec<&str> = nodes.iter().map(|p| p.name.as_str()).collect();
-
-    let echo_target = strip_unsafe(&target);
-    let (id, ended) = match addr::resolve(&target, &host, &candidates, &node_names) {
-        Resolution::Local(id) => (id, None),
-        Resolution::Remote { node, .. } => {
-            let node = strip_unsafe(&node);
-            return Outcome::error(
-                cmd,
-                format!(
-                    "`{echo_target}` resolves to a session on node `{node}` — a trace is a file on the \
-                     node that wrote it, so run `session trace` there"
-                ),
-            )
-            .with_data(json!({ "reason": "remote-target", "node": node, "target": echo_target }));
-        }
-        Resolution::Ambiguous(found) => {
-            let found: Vec<String> = found.iter().map(|f| strip_unsafe(f)).collect();
-            return Outcome::error(
-                cmd,
-                format!(
-                    "`{echo_target}` is ambiguous — {} local session(s) match: {}",
-                    found.len(),
-                    found.join(", ")
-                ),
-            )
-            .with_data(json!({ "reason": "ambiguous", "target": echo_target, "candidates": found }));
-        }
-        Resolution::NotFound => match ledger_ended(&target) {
-            Some(entry) => (entry.session_id.clone(), Some(entry)),
-            None => {
-                let hint = if !target.contains('/') && node_names.contains(&target.as_str()) {
-                    format!(
-                        " (`{echo_target}` names a known node, not a local session — did you mean `{echo_target}/<session>`?)"
-                    )
-                } else {
-                    String::new()
-                };
-                return Outcome::error(cmd, format!("no session matches `{echo_target}`{hint}"))
-                    .with_data(json!({ "reason": "not-found", "target": echo_target }));
-            }
-        },
-    };
-    let id = strip_unsafe(&id);
 
     // The trace is a HARNESS CAPABILITY, never a name check: a profile whose
     // `TranscriptSpec::trace` is `None` keeps no trace file at all, and
