@@ -66,8 +66,10 @@ are in README.md.
   close holds `closing` or the door is gone. A close whose door outlives its
   signal (`StillLive`) withdraws an armed mark, whichever call made the close,
   so the door is not asked again. A close that fails with an error on an idle
-  door keeps an armed mark, so the close is tried again at the next turn end. A stop now that sees no turn end, or
-  whose close finds `Busy`, leaves the mark: the turn it was set for still runs.
+  door leaves no mark: this call arms none, and the caller gets the error and
+  may retry. A mark armed before the call stays armed. A stop now that sees no
+  turn end, or whose close finds `Busy`, leaves the mark: the turn it was set
+  for still runs.
 - A watch that ended is not watched. `launch_ids` leaves it out, and `watch`
   refuses it, so its calls send nothing.
 - A drop or a forget whose store write fails keeps its record. The next open

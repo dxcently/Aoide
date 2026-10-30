@@ -146,9 +146,10 @@ doors.rs    Doors::open(exec, root, runtime, out)
   stands; a turn still running keeps the mark (`StaysArmed`), and any other
   answer leaves the mark as the close left it. A close whose door outlives its
   signal withdraws the mark, whichever call made the close,
-  `close_after_turn`'s idle arm included; a close that fails with an error on
-  an idle door keeps an armed mark, so the close is tried again at the next
-  turn end. `revoke` withdraws a mark.
+  `close_after_turn`'s idle arm included. A close that fails with an error on
+  an idle door leaves no mark: this call arms none, and the caller gets the
+  error and may retry. A mark armed before the call stays armed. `revoke`
+  withdraws a mark.
   A turn that starts between `close_after_turn`'s idle read and its close
   arms the mark (`Armed`) rather than being refused.
 - A stream that ends withdraws an armed mark, and the watch sends

@@ -501,8 +501,9 @@ impl Doors {
     /// After this turn: an idle door closes now, a running one is marked, and an
     /// unknown one is refused, since its state is not known. A turn that starts
     /// after the idle read and before the close arms the mark instead. A close
-    /// that fails with an error on an idle door keeps an armed mark, so the close
-    /// is tried again at the next turn end.
+    /// that fails with an error on an idle door leaves no mark: this call arms
+    /// none, and the caller gets the error and may retry. A mark armed before the
+    /// call stays armed.
     pub fn close_after_turn(&mut self, id: &str) -> Result<Close, DoorsError> {
         let link = self.watch(id)?.link.clone();
         let turn = {
