@@ -131,8 +131,10 @@ spawn_held                   stdin closed, stdout and stderr piped
   v
 Follow::next(wait)           Some(event), or None when none came in time
 Follow::end()                SIGINT through the pidfd; drains events until the
-                             child's stdout closes or 5 s pass; waits 5 s for
-                             the exit; returns Ended { status, rest, stderr }
+                             child's stdout closes or 5 s pass; keeps up to
+                             QUEUE_BYTES of them as `rest`, and counts the rest
+                             as one Dropped(bytes); waits 5 s for the exit;
+                             returns Ended { status, rest, stderr }
 Drop for Follow              SIGINT through the pidfd; reaps on a thread
 ```
 

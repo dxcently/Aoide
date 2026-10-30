@@ -320,6 +320,18 @@ fn ending_a_follow_interrupts_the_child_which_prints_its_end_line_and_is_reaped(
 }
 
 #[test]
+fn what_a_child_prints_after_its_interrupt_is_capped_and_its_overflow_is_counted() {
+    let (exec, _) = held("flood-after", &[b"one".to_vec()], &[("FAKE_AOIDE_AFTER_INT", "40")]);
+    let follow = exec.follow(&["session", "trace"], &[FOLLOW], &["ab"]).expect("the follow starts");
+    assert_eq!(follow.next(WAIT), Some(Event::Line(b"one".to_vec())));
+    let ended = follow.end().expect("the follow ends");
+    let kept: usize = ended.rest.iter().map(|e| if let Event::Line(l) = e { l.len() } else { 0 }).sum();
+    assert!(kept <= aoide_desktop_shell::exec::QUEUE_BYTES, "{kept} bytes were kept after the interrupt");
+    let dropped: usize = ended.rest.iter().map(|e| if let Event::Dropped(n) = e { *n } else { 0 }).sum();
+    assert!(dropped > 0, "the overflow is counted in bytes");
+}
+
+#[test]
 fn dropping_a_follow_interrupts_its_child_and_reaps_it() {
     let (exec, _) = held("drop", &[b"one".to_vec()], &[]);
     let follow = exec.follow(&["session", "trace"], &[FOLLOW], &["ab"]).expect("the follow starts");

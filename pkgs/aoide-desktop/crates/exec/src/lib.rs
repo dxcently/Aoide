@@ -576,6 +576,15 @@ pub const LINE_CAP: usize = 1024 * 1024;
 pub const QUEUE_BYTES: usize = 8 * 1024 * 1024;
 const EVENT_COST: usize = 64;
 
+/// The bytes one event carries, as `Dropped` counts them.
+fn event_bytes(event: &Event) -> usize {
+    match event {
+        Event::Line(line) => line.len(),
+        Event::Dropped(bytes) => *bytes,
+        Event::Eof => 0,
+    }
+}
+
 /// The queue cost of one event.
 fn cost(event: &Event) -> usize {
     match event {
@@ -700,14 +709,25 @@ impl Follow {
         let signalled = signal_pidfd(&self.pidfd, libc::SIGINT).or_else(ignore_gone);
         let until = Instant::now() + EXIT_BOUND;
         let mut rest = Vec::new();
+        let mut kept = 0usize;
+        let mut overflow = 0usize;
         loop {
             match self.lines.recv_timeout(until.saturating_duration_since(Instant::now())) {
                 Ok(Event::Eof) | Err(_) => break,
                 Ok(event) => {
-                    self.room.release(cost(&event));
-                    rest.push(event);
+                    let price = cost(&event);
+                    self.room.release(price);
+                    if kept + price <= QUEUE_BYTES {
+                        kept += price;
+                        rest.push(event);
+                    } else {
+                        overflow += event_bytes(&event);
+                    }
                 }
             }
+        }
+        if overflow > 0 {
+            rest.push(Event::Dropped(overflow));
         }
         let exit_by = Instant::now() + EXIT_BOUND;
         let status = loop {

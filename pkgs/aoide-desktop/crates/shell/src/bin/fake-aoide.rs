@@ -50,6 +50,11 @@ fn follow(id: &str, watch: bool) -> ! {
     test_doors::block_sigint().expect("SIGINT is blocked before any thread starts");
     std::thread::spawn(|| {
         test_doors::wait_sigint().expect("SIGINT is taken");
+        let mut out = io::stdout();
+        for _ in 0..count("FAKE_AOIDE_AFTER_INT") {
+            write_bytes(&mut out, 512 * 1024);
+            let _ = out.write_all(b"\n");
+        }
         println!("{{\"ok\":true,\"followed\":true}}");
         std::process::exit(0)
     });
