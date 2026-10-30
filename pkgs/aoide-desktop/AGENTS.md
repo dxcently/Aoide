@@ -55,7 +55,9 @@ and each crate's own invariants are in its AGENTS.md (`crates/door/AGENTS.md`,
   E0453. The `unsafe_code` forbid also refuses `#[no_mangle]`, `#[export_name]`,
   `#[link_section]` and `global_asm!`, so no door or shell code defines a symbol
   that a libc call in exec could reach. Exec's own table allows the three, so
-  exec is the one crate where `unsafe`, a process start or a signal can appear.
+  exec is the one crate of this workspace where `unsafe`, a process start or a
+  signal can appear; aoide-protocol, its path dependency, starts processes
+  outside it.
 - `clippy.toml` lists the std paths that start a process or send a signal:
   `Command` (the type), `Command::new`, `CommandExt::pre_exec`,
   `CommandExt::exec` and `Child::kill`, which sends SIGKILL. In door and shell,

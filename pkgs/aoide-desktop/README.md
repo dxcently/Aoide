@@ -9,8 +9,9 @@ GUI-free libraries; the window is a later crate.
 
 - `crates/door` (`aoide-desktop-door`): the loopback door client. See
   `crates/door/README.md`.
-- `crates/exec` (`aoide-desktop-exec`): the one crate that starts a process or
-  sends a signal. It is also the one that depends on aoide-protocol, and it
+- `crates/exec` (`aoide-desktop-exec`): starts a process or sends a signal, and
+  so does its path dependency aoide-protocol. It is the one member that depends
+  on aoide-protocol, and it
   re-exports that crate's `untrusted` module, the app's only way to it. See
   `crates/exec/README.md`.
 - `crates/shell` (`aoide-desktop-shell`): the app's own doors and the asks they
