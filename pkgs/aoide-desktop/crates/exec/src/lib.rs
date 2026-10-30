@@ -353,13 +353,23 @@ pub fn argv(
     Ok(line)
 }
 
+/// The shorthands aoide rewrites before it matches a path (`ALIASES` in aoide's
+/// `protocol/src/door.rs`). A copy: a new alias there is a row here.
+const ALIASES: &[(&[&str], &[&str])] = &[(&["node", "rm"], &["node", "remove"])];
+
 /// The command aoide runs for `words` and `positionals`. aoide reads everything
 /// after `--` as a positional, then takes the longest declared path those words
 /// begin with. So a positional can name a longer command than `words` does: that
 /// is refused here, before any child starts. On success the path is `words`.
 fn resolve<'a>(schema: &Schema, words: &[&'a str], positionals: &[&str]) -> Result<Vec<&'a str>, ExecError> {
     let called = words.len();
-    let all: Vec<&str> = words.iter().copied().chain(positionals.iter().copied()).collect();
+    let mut all: Vec<&str> = words.iter().copied().chain(positionals.iter().copied()).collect();
+    if let Some((from, to)) = ALIASES
+        .iter()
+        .find(|(from, _)| all.len() >= from.len() && all.iter().zip(from.iter()).all(|(a, f)| a == f))
+    {
+        all.splice(0..from.len(), to.iter().copied());
+    }
     let longest = (called..=all.len()).rev().find(|&n| schema.command(&all[..n]).is_some()).unwrap_or(called);
     if longest > called {
         return Err(ExecError::Resolves { called: words.join(" "), resolved: all[..longest].join(" ") });
@@ -1485,6 +1495,22 @@ mod tests {
             read_ahead <= QUEUE_BYTES + LINE_CAP,
             "{read_ahead} bytes were read ahead of a reader that takes none"
         );
+    }
+
+    #[test]
+    fn an_alias_is_rewritten_before_the_longest_path_is_matched() {
+        let text = r#"{"commands":[
+            {"path":["node"],"summary":"Node.","args":[],"flags":[],"implemented":true},
+            {"path":["node","remove"],"summary":"Remove.","args":[],"flags":[],"implemented":true}
+        ]}"#;
+        let schema = Schema::parse(text).expect("the schema parses");
+        match argv(Path::new("/usr/bin/aoide"), &schema, &["node"], &[], &["rm", "k"]) {
+            Err(ExecError::Resolves { called, resolved }) => {
+                assert_eq!(called, "node");
+                assert_eq!(resolved, "node remove");
+            }
+            other => panic!("`node rm` is `node remove`, so it must refuse: {other:?}"),
+        }
     }
 
     #[test]
