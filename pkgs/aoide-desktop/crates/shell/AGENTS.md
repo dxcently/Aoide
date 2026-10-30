@@ -274,7 +274,7 @@ are in README.md.
 - A follow case is one entry in `CASES` (`chat/cases.rs`), and its verb must
   be declared by the schema. Adding one changes `chat/cases.rs` and the
   README's "How a chat is followed" list, in one commit.
-  `every_case_runs_a_verb_the_schema_declares` fails for an entry whose verb
+  `every_case_runs_a_verb_the_schema_declares` fails for an entry whose path
   the schema does not declare.
 - A chat record is parsed in `chat/record.rs`. The one-parser test scans
   `src/chat` for five serde_json names (`from_str`, `from_slice`, `from_reader`,
