@@ -936,13 +936,13 @@ mod tests {
         ("graph", "list", "one graph per host"),
         ("config", "list", "one config"),
         ("usage", "list", "one rollup"),
-        ("usage", "act", "derived from transcripts"),
+        ("usage", "act", "the refresh is a bridge verb, not a command"),
     ];
 
     /// Golden snapshot: per kind with an implemented command, whether each verb
     /// is `ok`, `missing`, or `n/a: <reason>`. Stub-only kinds are left out
     /// (`content`), and `none` is not a kind to cover. A command that fills a
-    /// gap moves this list: the visible report ruling 181 asks for.
+    /// gap moves this list, so every gap stays visible in one place.
     #[test]
     fn kind_coverage_matches_the_golden_snapshot() {
         let r = crate::commands::all();
@@ -984,7 +984,7 @@ mod tests {
             "secret: list ok, show missing, watch missing, act ok",
             "secret-hold: list ok, show missing, watch ok, act ok",
             "session: list ok, show ok, watch ok, act ok",
-            "usage: list n/a: one rollup, show ok, watch missing, act n/a: derived from transcripts",
+            "usage: list n/a: one rollup, show ok, watch missing, act n/a: the refresh is a bridge verb, not a command",
             "workspace: list ok, show ok, watch missing, act ok",
         ];
         assert_eq!(got, expected, "kind coverage drifted from the golden snapshot");
