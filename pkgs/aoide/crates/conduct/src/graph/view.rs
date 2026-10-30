@@ -1048,6 +1048,7 @@ fn follow_remote(
                     obj.insert("followed".to_string(), json!(true));
                     obj.insert("printed".to_string(), json!(printed_lines));
                 }
+                let _ = write_event(&mut *out, json_mode, "end", Vec::new(), json!({ "reason": "read-failed" }));
                 return Outcome::error(cmd, refused.message).with_data(data);
             }
         };
@@ -1058,6 +1059,7 @@ fn follow_remote(
         let running = frame.presence == "running";
         last = frame;
         if !running {
+            write_event(&mut *out, json_mode, "end", Vec::new(), json!({ "reason": "run-ended" }));
             return Outcome::ok(cmd, format!("watched {label} to its end")).with_data(json!({
                 "sessionId": remote_id, "node": node.name, "followed": true,
                 "printed": printed_lines,
@@ -1067,12 +1069,16 @@ fn follow_remote(
 
     // Ctrl-C: report where the far run stood, and change nothing — the run
     // keeps going without this viewer, on a box this process never wrote to.
-    // `--json` gets no prose: its stream is JSON lines and the envelope, and a
-    // bare `status` line in the middle of it is not a frame.
-    if !json_mode {
-        let _ = writeln!(out, "{}", last.status);
-        let _ = writeln!(out, "report: {}", last.report);
-    }
+    // The `end` object carries the same facts for `--json`, so its stream
+    // still closes with the object a reader stops at.
+    let text = vec![last.status.clone(), format!("report: {}", last.report)];
+    let _ = write_event(
+        &mut *out,
+        json_mode,
+        "end",
+        text,
+        json!({ "reason": "interrupted", "status": last.status, "report": last.report }),
+    );
     let _ = out.flush();
     Outcome::ok(cmd, format!("stopped watching {label}")).with_data(json!({
         "sessionId": remote_id, "node": node.name, "followed": true, "printed": printed_lines,
@@ -1425,6 +1431,56 @@ mod tests {
         let end = stream_lines(true, "end", vec!["gone".into()], json!({ "reason": "run-ended" }));
         assert_eq!(serde_json::from_str::<serde_json::Value>(&end[0]).unwrap()["type"], "end");
         assert_eq!(stream_lines(false, "end", vec!["gone".into()], json!({})), vec!["gone".to_string()]);
+    }
+
+    /// A live remote `--json` watch closes its stream with the `end` object
+    /// before it returns: on the far run's end, and on Ctrl-C, as the local
+    /// follow does.
+    #[test]
+    fn a_remote_json_watch_closes_its_stream_with_an_end_object() {
+        let node = remote_node();
+        let mut ended = wire_frame();
+        ended.presence = "exited".to_string();
+        ended.status = "exited 0 at 2026-09-21T05:01:00Z".to_string();
+        let mut sink: Vec<u8> = Vec::new();
+        let out = follow_remote(
+            "session.watch",
+            &node,
+            "sess-remote-1",
+            wire_frame(),
+            50,
+            true,
+            &mut sink,
+            |_, _, _| Ok(ended.clone()),
+        );
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "{}", out.message);
+        let text = String::from_utf8(sink).unwrap();
+        let last: serde_json::Value = serde_json::from_str(text.lines().last().unwrap_or("")).unwrap_or_default();
+        assert_eq!(last["type"], "end", "{text}");
+        assert_eq!(last["reason"], "run-ended", "{text}");
+    }
+
+    #[test]
+    fn a_remote_json_watch_interrupted_closes_its_stream_with_an_end_object() {
+        let _lock = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let node = remote_node();
+        INTERRUPTED.store(true, Ordering::SeqCst);
+        let mut sink: Vec<u8> = Vec::new();
+        let _out = follow_remote(
+            "session.watch",
+            &node,
+            "sess-remote-1",
+            wire_frame(),
+            50,
+            true,
+            &mut sink,
+            |_, _, _| panic!("no poll once Ctrl-C has been pressed"),
+        );
+        INTERRUPTED.store(false, Ordering::SeqCst);
+        let text = String::from_utf8(sink).unwrap();
+        let last: serde_json::Value = serde_json::from_str(text.lines().last().unwrap_or("")).unwrap_or_default();
+        assert_eq!(last["type"], "end", "{text}");
+        assert_eq!(last["reason"], "interrupted", "{text}");
     }
 
     /// A whole live `--json` run through the built binary: every stdout line,
