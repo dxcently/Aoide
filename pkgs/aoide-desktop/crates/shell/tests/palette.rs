@@ -200,6 +200,7 @@ const FLOOR_CASES: &[(&str, &[&str])] = &[
     ("self-change", &["node", "advertise"]),
     ("self-change", &["extension", "add"]),
     ("self-change", &["extension", "remove"]),
+    ("self-change", &["onboard"]),
     ("melete tools", &["melete", "call"]),
     ("mneme writes", &["mneme", "call"]),
 ];
