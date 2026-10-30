@@ -1858,6 +1858,7 @@ mod tests {
     /// `App::cue_session` branches on.
     fn headless_session(path: &std::path::Path) -> SessionRecord {
         SessionRecord {
+            transcript_path: None,
             session_id: "s1".into(),
             enduring_agent_id: None,
             project: None,
