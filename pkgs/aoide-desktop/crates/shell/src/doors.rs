@@ -366,6 +366,8 @@ pub struct Doors {
     store: Store,
     out: SyncSender<Event>,
     watches: BTreeMap<String, Watch>,
+    #[cfg(feature = "fakes")]
+    race: Option<TurnState>,
 }
 
 impl Doors {
@@ -393,6 +395,8 @@ impl Doors {
             store: Store::new(root),
             out,
             watches: BTreeMap::new(),
+            #[cfg(feature = "fakes")]
+            race: None,
         };
         let mut events = Vec::new();
         for entry in doors.store.load()? {
@@ -487,8 +491,16 @@ impl Doors {
         Ok(self.watch(id)?.link.state.lock().unwrap().turn)
     }
 
+    /// Fakes only: the turn the door's state takes between `close_after_turn`'s
+    /// read and its close, so a test reaches that window without a timing race.
+    #[cfg(feature = "fakes")]
+    pub fn race_turn_between_locks(&mut self, turn: TurnState) {
+        self.race = Some(turn);
+    }
+
     /// After this turn: an idle door closes now, a running one is marked, and an
-    /// unknown one is refused, since its state is not known.
+    /// unknown one is refused, since its state is not known. A turn that starts
+    /// after the idle read and before the close arms the mark instead.
     pub fn close_after_turn(&mut self, id: &str) -> Result<Close, DoorsError> {
         let link = self.watch(id)?.link.clone();
         let turn = {
@@ -503,7 +515,13 @@ impl Doors {
                 "this door's turn state is not known until a turn starts or ends; stop now closes it, stopping a turn if one runs"
                     .into(),
             )),
-            TurnState::Idle => self.close_now(id),
+            TurnState::Idle => {
+                #[cfg(feature = "fakes")]
+                if let Some(turn) = self.race.take() {
+                    link.state.lock().unwrap().turn = turn;
+                }
+                self.close_now(id, true)
+            }
             TurnState::Running => Ok(Close::Armed),
         }
     }
@@ -524,7 +542,7 @@ impl Doors {
         if !self.watch(id)?.link.state.lock().unwrap().armed {
             return Ok(Close::Revoked);
         }
-        match self.close_now(id)? {
+        match self.close_now(id, false)? {
             Close::Busy => Ok(Close::StaysArmed),
             other => Ok(other),
         }
@@ -544,18 +562,18 @@ impl Doors {
         let entry = self.watch(id)?.entry.clone();
         let link = self.watch(id)?.link.clone();
         let close = if verify(&self.pins, &entry).is_err() {
-            self.close_now(id)?
+            self.close_now(id, false)?
         } else {
             match self.door(id)?.cancel()? {
                 CancelOutcome::Idle => {
                     link.state.lock().unwrap().turn = TurnState::Idle;
-                    self.close_now(id)?
+                    self.close_now(id, false)?
                 }
                 CancelOutcome::Cancelled => {
                     if !self.wait_turn(id, TurnState::Idle)? {
                         return Ok(Close::NoTurnEnd);
                     }
-                    self.close_now(id)?
+                    self.close_now(id, false)?
                 }
             }
         };
@@ -628,14 +646,15 @@ impl Doors {
     /// signals nothing, and returns `Close::Dropped`; any other failure keeps
     /// both and the mark, signals nothing, and returns
     /// `DoorsError::Unverified`. Under the watch's lock, a turn that is not
-    /// `Idle` is `Busy`, and the watch is left as it was. An idle turn sets
-    /// `closing` and shuts its stream, so the door can drain. SIGTERM goes
-    /// through the pidfd; a signal that fails, but for a door already gone,
+    /// `Idle` is `Busy`, and the watch is left as it was; with `arm_on_busy`
+    /// (the idle arm of `close_after_turn`) it arms the mark and is `Armed`. An
+    /// idle turn sets `closing` and shuts its stream, so the door can drain.
+    /// SIGTERM goes through the pidfd; a signal that fails, but for a door already gone,
     /// clears `closing` and returns its error, keeping the mark. The exit is
     /// awaited for `EXIT_BOUND`. An exit removes the record and the watch. A
     /// door still live clears `closing` and withdraws an armed mark, and keeps
     /// its record and its watch.
-    fn close_now(&mut self, id: &str) -> Result<Close, DoorsError> {
+    fn close_now(&mut self, id: &str, arm_on_busy: bool) -> Result<Close, DoorsError> {
         let (entry, link, pidfd) = {
             let watch = self.watch(id)?;
             (watch.entry.clone(), watch.link.clone(), watch.pidfd.clone())
@@ -651,6 +670,10 @@ impl Doors {
         {
             let mut shared = link.state.lock().unwrap();
             if shared.turn != TurnState::Idle {
+                if arm_on_busy {
+                    shared.armed = true;
+                    return Ok(Close::Armed);
+                }
                 return Ok(Close::Busy);
             }
             shared.closing = true;

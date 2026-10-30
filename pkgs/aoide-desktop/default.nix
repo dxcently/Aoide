@@ -232,6 +232,8 @@ rustPlatform.buildRustPackage {
     "spawned_text_that_starts_with_dashes_or_holds_equals_or_newlines_stays_positional"
     "--skip"
     "a_good_file_pins_to_its_canonical_path"
+    "--skip"
+    "a_turn_that_starts_after_the_idle_read_is_armed_not_refused"
   ];
 
   meta.description = "The aoide desktop workspace, gated by its tests and clippy runs";

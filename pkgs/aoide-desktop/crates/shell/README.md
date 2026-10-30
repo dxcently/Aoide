@@ -146,6 +146,8 @@ doors.rs    Doors::open(exec, root, runtime, out)
   signal withdraws the mark, whichever call made the close,
   `close_after_turn`'s idle arm included; a close that fails with an error
   leaves it, and the next turn end tries again. `revoke` withdraws a mark.
+  A turn that starts between `close_after_turn`'s idle read and its close
+  arms the mark (`Armed`) rather than being refused.
 - A stream that ends withdraws an armed mark, and the watch sends
   `Event::Revoked { launch_id, why }`, with `why` through `visible`. A close
   holds the mark while it ends its own stream, and a door that is gone sends

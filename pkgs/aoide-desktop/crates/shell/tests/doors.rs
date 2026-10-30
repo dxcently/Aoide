@@ -863,6 +863,27 @@ fn a_close_after_turn_that_leaves_the_door_live_withdraws_the_mark() {
 /// events through the stream's `CaughtUp` empties the slot the replay filled.
 /// `running` puts the turn frame in the empty slot. The ask after it is then read,
 /// and the watch waits in `deliver` for the slot to free.
+#[test]
+fn a_turn_that_starts_after_the_idle_read_is_armed_not_refused() {
+    let world = World::new("race-idle");
+    let (tx, rx) = mpsc::sync_channel(EVENTS_BOUND);
+    let mut doors = world.open(tx);
+    let id = world.launch(&mut doors);
+    let pid = world.pid(&id);
+    world.command("idle");
+    assert!(until(Duration::from_secs(5), || doors.turn(&id).unwrap() == TurnState::Idle));
+    doors.race_turn_between_locks(TurnState::Running);
+    assert_eq!(doors.close_after_turn(&id).unwrap(), Close::Armed, "the turn that started is armed, not refused");
+    assert_eq!(world.count("SIGTERM"), 0, "nothing is signalled while the turn runs");
+    assert!(alive(pid), "the door lives");
+    world.command("running");
+    thread::sleep(Duration::from_millis(500));
+    world.command("idle");
+    event_where(&rx, |e| matches!(e, Event::CloseDue { .. }));
+    assert!(matches!(doors.close_due(&id).unwrap(), Close::Exited { .. }), "the armed close runs once the turn ends");
+    assert_eq!(world.count("SIGTERM"), 1, "one signal, after the turn ended");
+}
+
 fn held_watch(world: &World) -> (Doors, Receiver<Event>, String) {
     let (tx, rx) = mpsc::sync_channel(1);
     let mut doors = world.open(tx);
