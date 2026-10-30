@@ -259,12 +259,14 @@ fn no_source_holds_an_everywhere_word() {
 
 #[test]
 fn no_door_or_shell_source_holds_a_foreign_word() {
-    for (path, text) in sources() {
-        if path.starts_with("crates/exec/") {
-            continue;
-        }
-        for word in NO_FOREIGN {
-            assert!(!text.contains(word), "{path} holds `{word}`");
+    for member in ["crates/door", "crates/shell"] {
+        let mut files = Vec::new();
+        walk(&root().join(member).join("src"), &mut files);
+        for path in files {
+            let text = String::from_utf8_lossy(&fs::read(&path).expect("a source is read")).into_owned();
+            for word in NO_FOREIGN {
+                assert!(!text.contains(word), "{} holds `{word}`", path.display());
+            }
         }
     }
 }
