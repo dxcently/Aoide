@@ -1444,7 +1444,7 @@ mod tests {
                 }
                 let n = buf.len().min(TOTAL - done);
                 for (i, b) in buf[..n].iter_mut().enumerate() {
-                    *b = if (done + i + 1) % (512 * 1024) == 0 { b'\n' } else { b'a' };
+                    *b = if (done + i + 1).is_multiple_of(512 * 1024) { b'\n' } else { b'a' };
                 }
                 self.sent.store(done + n, Ordering::SeqCst);
                 Ok(n)
