@@ -2361,12 +2361,24 @@ mod tests {
             "XDG_RUNTIME_DIR",
             "AOIDE_AUDIT_LOG",
             "AOIDE_CONDUCT_SPAWN_EXE",
+            "PATH",
         ]);
 
         let root = unique_stage("spawn-banner-label");
         let stage = root.join("stage");
         let state = root.join("state");
         std::fs::create_dir_all(&stage).unwrap();
+        // An eidolon agent's first prompt goes through its native send. A fake
+        // `eidolon` on a private PATH accepts it, so the result is the status a
+        // send without readiness earns: `delivered-unverified`, not `delivered`.
+        let bin = root.join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        std::fs::write(bin.join("eidolon"), "#!/bin/sh\ncat >/dev/null\necho 'delivered to spawn-banner-label'\n").unwrap();
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(bin.join("eidolon"), std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        std::env::set_var("PATH", format!("{}:{}", bin.display(), std::env::var("PATH").unwrap_or_default()));
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
         std::env::set_var("AOIDE_STATE_DIR", &state);
         std::env::set_var("XDG_RUNTIME_DIR", &root);
