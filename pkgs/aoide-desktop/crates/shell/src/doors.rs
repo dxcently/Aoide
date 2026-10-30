@@ -3,15 +3,19 @@
 //! A door is an `eidolon web` process this app started. A door is signalled
 //! only through a pidfd that names it: a close signals it after its checks hold
 //! at that moment, and a launch that fails before its record is written signals
-//! it. One signal goes by pid: if the intermediate in `exec`'s spawn cannot hand
+//! it. One signal goes by pid: if the intermediate in `exec`'s spawn cannot
+//! hand
 //! the door's pid over, it signals that pid itself. The record is
 //! `$AOIDE_ROOT/state/desktop/doors.json`. Each door has one watch thread: it
-//! reads the door's events, updates the shared state, and forwards to the caller
+//! reads the door's events, updates the shared state, and forwards to the
+//! caller
 //! over a bounded channel. The watch never closes or signals a door. Two flags
 //! steer it. `armed` is the caller's mark on the running turn: the watch sends
 //! `CloseDue` when that turn ends, and withdraws the mark when a stream ends.
-//! `closing` is set by a close while it shuts the door down, and the watch holds
-//! its stream's end for that close. The asks a stream carries are held per door,
+//! `closing` is set by a close while it shuts the door down, and the watch
+//! holds
+//! its stream's end for that close. The asks a stream carries are held per
+//! door,
 //! and answered only at that door (asks.rs).
 //!
 //! Nothing here reads an environment variable. The runtime dir arrives as the
@@ -44,7 +48,8 @@ use serde::{Deserialize, Serialize};
 use crate::asks::{self, Prepared, Sent, Shown};
 use crate::exec::{check_pin, euid, open_pidfd, pidfd_exited, stat_of, terminate_pidfd, Arrived, Exec, ExecError, Pinned};
 
-/// The bound on the events channel. The caller creates the channel with this size.
+/// The bound on the events channel. The caller creates the channel with this
+/// size.
 pub const EVENTS_BOUND: usize = 64;
 /// The most asks a door keeps pending. An ask past it is shown but not kept.
 pub const ASKS_BOUND: usize = 64;
@@ -62,7 +67,8 @@ const REOPEN: Duration = Duration::from_secs(1);
 const BANNER_HEAD: usize = 64 * 1024;
 /// The tail of a door's log quoted when a launch is refused.
 const TAIL: usize = 4096;
-/// How often a waiting launch, or a watch retrying a terminal notice, looks again.
+/// How often a waiting launch, or a watch retrying a terminal notice, looks
+/// again.
 const POLL: Duration = Duration::from_millis(20);
 
 /// A door's turn, from its `turn-state` frames. A new stream starts `Unknown`,
@@ -75,7 +81,8 @@ pub enum TurnState {
     Idle,
 }
 
-/// What the watch threads forward to the caller, over one channel of `EVENTS_BOUND`.
+/// What the watch threads forward to the caller, over one channel of
+/// `EVENTS_BOUND`.
 #[derive(Debug)]
 pub enum Event {
     /// A frame from a door's events stream. Boxed, since a frame is much larger
@@ -83,7 +90,8 @@ pub enum Event {
     Frame { launch_id: String, frame: Box<Frame> },
     /// A door marked for closing has gone idle. The caller answers `close_due`.
     CloseDue { launch_id: String },
-    /// An armed door's mark was withdrawn, because the stream that carried its turn
+    /// An armed door's mark was withdrawn, because the stream that carried its
+    /// turn
     /// ended and no close holds the mark. `why` says so, and nothing is closed.
     Revoked { launch_id: String, why: String },
     /// A door's stream ended and the door is gone. Its record is dropped.
@@ -92,21 +100,26 @@ pub enum Event {
     /// another start time, or another command line. The record is dropped, and
     /// the pid, which was not signalled, is named.
     Dropped { launch_id: String, pid: u32, why: String },
-    /// A door that could not be checked or used, for any other reason. Sent once
+    /// A door that could not be checked or used, for any other reason. Sent
+    /// once
     /// per failure streak: its record is kept, and the watch tries again each
     /// second while the process lives, resuming the frames when a try works.
     Unwatched { launch_id: String, why: String },
-    /// An ask past `ASKS_BOUND`: it is not forwarded and not kept, so it cannot be
-    /// answered at this door. `ask_id` names the first ask a stream refused. Sent
+    /// An ask past `ASKS_BOUND`: it is not forwarded and not kept, so it cannot
+    /// be
+    /// answered at this door. `ask_id` names the first ask a stream refused.
+    /// Sent
     /// once per stream.
     AsksOverflow { launch_id: String, ask_id: u64 },
 }
 
-/// What a close did. Nothing is signalled unless the checks held at that moment.
+/// What a close did. Nothing is signalled unless the checks held at that
+/// moment.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Close {
     /// SIGTERM was sent and the door exited within 10 s. Its record and its
-    /// watch are removed. `watch_joined` is false when the watch thread outlived
+    /// watch are removed. `watch_joined` is false when the watch thread
+    /// outlived
     /// its 2 s bound.
     Exited { watch_joined: bool },
     /// SIGTERM was sent and the door was still live after 10 s. Its record and
@@ -140,7 +153,8 @@ pub enum DoorsError {
     /// The record file or its directory is refused as it stands. It is never
     /// rewritten.
     Store(String),
-    /// A door started but did not pass its checks before its record was written.
+    /// A door started but did not pass its checks before its record was
+    /// written.
     /// It was signalled through its own pidfd, if one could be opened, and its
     /// pid and log are named, so the user can find it.
     Refused { pid: u32, log: PathBuf, why: String },
@@ -151,7 +165,8 @@ pub enum DoorsError {
     Ask(String),
     /// No watched door has this launch id.
     Unknown(String),
-    /// A close whose checks fail for a reason other than identity. The record and
+    /// A close whose checks fail for a reason other than identity. The record
+    /// and
     /// the watch are kept, and nothing is signalled.
     Unverified(String),
     /// A launch whose record is written, for which no watch could start. The
@@ -201,8 +216,10 @@ impl From<ExecError> for DoorsError {
     }
 }
 
-/// What a launch runs: the pinned `eidolon` with `web --bind 127.0.0.1:0 --cwd D`.
-/// Only `launch_plan` builds one, and `Doors::launch` spawns its program and args
+/// What a launch runs: the pinned `eidolon` with `web --bind 127.0.0.1:0 --cwd
+/// D`.
+/// Only `launch_plan` builds one, and `Doors::launch` spawns its program and
+/// args
 /// and no other.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LaunchPlan {
@@ -218,7 +235,8 @@ pub fn launch_plan(eidolon: &Path, home: &Path, cwd: &Path) -> Result<LaunchPlan
     Ok(LaunchPlan { cwd: cwd.to_path_buf(), program: pinned, args: launch_args(cwd) })
 }
 
-/// The working directory is absolute, canonical, an existing directory, and free
+/// The working directory is absolute, canonical, an existing directory, and
+/// free
 /// of every character the app refuses.
 fn check_cwd(cwd: &Path) -> Result<(), String> {
     let shown = visible(&cwd.to_string_lossy());
@@ -285,8 +303,10 @@ impl Store {
         Ok(lock)
     }
 
-    /// The record under the lock. A store directory that does not exist yet holds
-    /// no record, and opening the store makes no directory for it. A link in its
+    /// The record under the lock. A store directory that does not exist yet
+    /// holds
+    /// no record, and opening the store makes no directory for it. A link in
+    /// its
     /// place, dangling or not, is refused by the lock, as `make_private_dir`
     /// refuses it.
     fn load(&self) -> Result<Vec<Entry>, DoorsError> {
@@ -375,7 +395,8 @@ impl Doors {
     /// list it returns, and none is sent on the channel: `Event::Dropped` for a
     /// record whose door is not the one recorded, which is dropped and never
     /// signalled, and `Event::Unwatched` for a record no watch could start for,
-    /// which is kept, so the next open tries again. A record whose removal cannot
+    /// which is kept, so the next open tries again. A record whose removal
+    /// cannot
     /// be written is still reported, and the next open checks it again. A door
     /// whose check fails for any other reason is watched anyway, and its watch
     /// reports the failure and tries again. An unset or refused runtime dir, a
@@ -417,11 +438,14 @@ impl Doors {
 
     /// Launches a door the user has confirmed. Its banner, its identity and its
     /// token path are checked before its record is written. A door that fails
-    /// such a check is signalled through its own pidfd, is not recorded, and the
+    /// such a check is signalled through its own pidfd, is not recorded, and
+    /// the
     /// error names its pid and log. Once the record is written, a stream that
-    /// does not open starts the watch unattached, which reports it. A launch for
+    /// does not open starts the watch unattached, which reports it. A launch
+    /// for
     /// which no watch can start keeps the record and returns
-    /// `DoorsError::Unwatched` with the launch id. Nothing is sent on the channel.
+    /// `DoorsError::Unwatched` with the launch id. Nothing is sent on the
+    /// channel.
     pub fn launch(&mut self, plan: &LaunchPlan) -> Result<String, DoorsError> {
         check_runtime(&self.pins.runtime)?;
         self.exec.door_env(&self.pins.runtime)?;
@@ -498,11 +522,13 @@ impl Doors {
         self.race = Some(turn);
     }
 
-    /// After this turn: an idle door closes now, a running one is marked, and an
+    /// After this turn: an idle door closes now, a running one is marked, and
+    /// an
     /// unknown one is refused, since its state is not known. A turn that starts
     /// after the idle read and before the close arms the mark instead. A close
     /// that fails with an error on an idle door leaves no mark: this call arms
-    /// none, and the caller gets the error and may retry. A mark armed before the
+    /// none, and the caller gets the error and may retry. A mark armed before
+    /// the
     /// call stays armed.
     pub fn close_after_turn(&mut self, id: &str) -> Result<Close, DoorsError> {
         let link = self.watch(id)?.link.clone();
@@ -588,9 +614,11 @@ impl Doors {
         Ok(self.watch(id)?.link.state.lock().unwrap().asks.values().cloned().collect())
     }
 
-    /// Prepares an answer to an ask this door's stream carries. Nothing is sent.
+    /// Prepares an answer to an ask this door's stream carries. Nothing is
+    /// sent.
     /// It refuses when no watched door carries the ask, or the ask does not
-    /// offer the label, so an answer aimed at another door never gets a request.
+    /// offer the label, so an answer aimed at another door never gets a
+    /// request.
     pub fn prepare_answer(&self, id: &str, ask_id: u64, label: &str) -> Result<Prepared, DoorsError> {
         let watch = self.watch(id)?;
         let ask = watch.link.state.lock().unwrap().asks.get(&ask_id).cloned();
@@ -606,7 +634,8 @@ impl Doors {
 
     /// Sends a prepared answer to the door that carried its ask, once the door
     /// passes its checks. The dialog is built again from the stored ask, and
-    /// `shown` must permit it (`asks::permits`): a yes goes only under the digest
+    /// `shown` must permit it (`asks::permits`): a yes goes only under the
+    /// digest
     /// of the dialog on screen, and a capped yes only from the app's own pane.
     pub fn send_answer(&self, prepared: &Prepared, shown: Shown) -> Result<Sent, DoorsError> {
         let entry = self.watch(&prepared.launch_id)?.entry.clone();
@@ -652,12 +681,14 @@ impl Doors {
     /// `Idle` is `Busy`, and the watch is left as it was; with `arm_on_busy`
     /// (the idle arm of `close_after_turn`) it arms the mark and is `Armed`. An
     /// idle turn sets `closing` and shuts its stream, so the door can drain.
-    /// SIGTERM goes through the pidfd; a signal that fails, but for a door already gone,
+    /// SIGTERM goes through the pidfd; a signal that fails, but for a door
+    /// already gone,
     /// clears `closing` and returns its error, keeping the mark. The exit is
     /// awaited for `EXIT_BOUND`. An exit writes the store without the record,
     /// then drops the watch. A store write that fails keeps the record and the
     /// watch, clears `closing`, and returns the error, with the mark as it was.
-    /// A door still live clears `closing` and withdraws an armed mark, and keeps
+    /// A door still live clears `closing` and withdraws an armed mark, and
+    /// keeps
     /// its record and its watch.
     fn close_now(&mut self, id: &str, arm_on_busy: bool) -> Result<Close, DoorsError> {
         let (entry, link, pidfd) = {
@@ -728,7 +759,8 @@ impl Doors {
 
     /// Re-attaches one record: its checks, then its stream, then its watch. A
     /// check that fails for any reason but identity still starts the watch,
-    /// unattached, and the watch reports the failure and tries again. The pidfd is
+    /// unattached, and the watch reports the failure and tries again. The pidfd
+    /// is
     /// opened before the checks, so they describe the process it names.
     fn reattach(&mut self, entry: &Entry) -> Result<(), Check> {
         let pidfd = match open_pidfd(entry.pid) {
@@ -767,7 +799,8 @@ impl Doors {
         Ok(())
     }
 
-    /// Starts the watch thread, which holds the door's pidfd. With a stream open
+    /// Starts the watch thread, which holds the door's pidfd. With a stream
+    /// open
     /// it reads that stream first; without one it begins by reconnecting.
     fn start_watch(
         &self,
@@ -798,9 +831,12 @@ impl Doors {
 /// The checks that need no connection, in order: the working directory, the
 /// pid's state and start time, its command line, the recorded address, and the
 /// token file as the path of its port. The command line must be the record's
-/// `program` with the launch's arguments. A failure of the pid, the start time or
-/// the command line is an identity failure. Any other is not. The pin is checked
-/// at launch alone, by `launch_plan`, so a door keeps the program it was spawned
+/// `program` with the launch's arguments. A failure of the pid, the start time
+/// or
+/// the command line is an identity failure. Any other is not. The pin is
+/// checked
+/// at launch alone, by `launch_plan`, so a door keeps the program it was
+/// spawned
 /// with.
 fn verify(pins: &Pins, entry: &Entry) -> Result<(), Check> {
     check_cwd(Path::new(&entry.cwd)).map_err(Check::Other)?;
@@ -912,7 +948,8 @@ struct Link {
 struct Shared {
     turn: TurnState,
     armed: bool,
-    /// Set by a close that is taking the door down, until it clears this flag or
+    /// Set by a close that is taking the door down, until it clears this flag
+    /// or
     /// drops the watch. While it stands, the stream's end is the close's.
     closing: bool,
     stop: bool,
@@ -942,7 +979,8 @@ impl Drop for Ended {
     }
 }
 
-/// The watch thread's half: it reads, updates the shared state, and delivers what
+/// The watch thread's half: it reads, updates the shared state, and delivers
+/// what
 /// it finds. It holds the door's pidfd, which says whether the process lives.
 struct Worker {
     link: Arc<Link>,
@@ -951,7 +989,8 @@ struct Worker {
     store: Store,
     out: SyncSender<Event>,
     pidfd: Arc<OwnedFd>,
-    /// Whether the last reconnect failed, so `Unwatched` is sent once per streak.
+    /// Whether the last reconnect failed, so `Unwatched` is sent once per
+    /// streak.
     failing: Cell<bool>,
 }
 
@@ -970,15 +1009,18 @@ enum Next {
     Stream(Events),
     /// A close set `closing` while the stream opened. The watch waits for it.
     Hold,
-    /// The reconnect failed for a reason other than identity. The watch tries again.
+    /// The reconnect failed for a reason other than identity. The watch tries
+    /// again.
     Retry,
     Stop,
 }
 
 impl Worker {
     /// Reads the first stream when one is open, then reconnects after each end
-    /// while the door lives. A stream that ends while a close holds `closing` is
-    /// the close's: the reader waits for `closing` to clear. A door that is gone
+    /// while the door lives. A stream that ends while a close holds `closing`
+    /// is
+    /// the close's: the reader waits for `closing` to clear. A door that is
+    /// gone
     /// takes its record with it.
     fn run(self, first: Option<Events>) {
         let _ended = Ended(self.link.clone());
@@ -1008,7 +1050,8 @@ impl Worker {
         !pidfd_exited(&self.pidfd)
     }
 
-    /// Forwards one stream's frames, each through `deliver`, so the watch waits for
+    /// Forwards one stream's frames, each through `deliver`, so the watch waits
+    /// for
     /// room rather than losing a frame. The asks are cleared first, and the
     /// stream's replay rebuilds them.
     fn drain(&self, events: Events) {
@@ -1069,9 +1112,12 @@ impl Worker {
         seen
     }
 
-    /// Ends a stream. A new stream's turn is unknown, so an armed mark is withdrawn
-    /// and the caller hears so, unless a close holds it, since that close shut this
-    /// stream itself, or the door has exited, which the watch reports as `Gone`.
+    /// Ends a stream. A new stream's turn is unknown, so an armed mark is
+    /// withdrawn
+    /// and the caller hears so, unless a close holds it, since that close shut
+    /// this
+    /// stream itself, or the door has exited, which the watch reports as
+    /// `Gone`.
     fn end_stream(&self) {
         let alive = self.alive();
         let withdrawn = {
@@ -1102,14 +1148,16 @@ impl Worker {
         shared.stop
     }
 
-    /// Waits one reopen interval, or until the watch is stopped. Returns whether it was stopped.
+    /// Waits one reopen interval, or until the watch is stopped. Returns
+    /// whether it was stopped.
     fn pause(&self) -> bool {
         let shared = self.link.state.lock().unwrap();
         let (shared, _) = self.link.moved.wait_timeout_while(shared, REOPEN, |s| !s.stop).unwrap();
         shared.stop
     }
 
-    /// Re-checks the door, then opens its stream and checks its hello, before the
+    /// Re-checks the door, then opens its stream and checks its hello, before
+    /// the
     /// stream is used.
     fn reconnect(&self) -> Next {
         let opened = match verify(&self.pins, &self.entry) {
@@ -1136,8 +1184,10 @@ impl Worker {
         Next::Stream(events)
     }
 
-    /// Handles a failed reconnect. An identity failure drops the record and ends the
-    /// watch, and says so. Any other failure is reported once per streak, and the
+    /// Handles a failed reconnect. An identity failure drops the record and
+    /// ends the
+    /// watch, and says so. Any other failure is reported once per streak, and
+    /// the
     /// watch tries again.
     fn failed(&self, check: Check) -> Next {
         match check {
@@ -1166,11 +1216,14 @@ impl Worker {
         self.deliver(Event::Gone { launch_id: id });
     }
 
-    /// Sends one event, waiting for room. Each try takes the state lock, returns if
+    /// Sends one event, waiting for room. Each try takes the state lock,
+    /// returns if
     /// the watch is stopped, and calls `try_send` under that lock. On a full
-    /// channel the lock is dropped and the try is retried after `POLL`. `try_send`
+    /// channel the lock is dropped and the try is retried after `POLL`.
+    /// `try_send`
     /// never blocks, and `detach` sets `stop` under the same lock, so no event
-    /// follows a detach. A channel whose receiver is gone takes the event as sent.
+    /// follows a detach. A channel whose receiver is gone takes the event as
+    /// sent.
     fn deliver(&self, event: Event) {
         let mut event = event;
         loop {
@@ -1190,7 +1243,8 @@ impl Worker {
     }
 }
 
-/// A door a launch has started and not yet recorded. Its pidfd was opened as its
+/// A door a launch has started and not yet recorded. Its pidfd was opened as
+/// its
 /// pid arrived, so a failure before the record signals the process that pid
 /// named then.
 struct Unrecorded {
@@ -1208,7 +1262,8 @@ impl Unrecorded {
         Unrecorded { pid, log, pidfd, starttime }
     }
 
-    /// SIGTERMs the door through its pidfd, then waits up to `EXIT_BOUND` for its
+    /// SIGTERMs the door through its pidfd, then waits up to `EXIT_BOUND` for
+    /// its
     /// exit. Without a pidfd it signals nothing, and the error says so.
     fn refuse(&self, why: String) -> DoorsError {
         let why = match &self.pidfd {
@@ -1309,7 +1364,8 @@ fn open_log(log: &Path) -> io::Result<File> {
     OpenOptions::new().read(true).custom_flags(libc::O_NOFOLLOW).open(log)
 }
 
-/// Whether the door's pid is still the door: not a zombie, and started at `starttime`.
+/// Whether the door's pid is still the door: not a zombie, and started at
+/// `starttime`.
 fn live(pid: u32, starttime: u64) -> bool {
     stat_of(pid).is_ok_and(|s| s.state != 'Z' && s.starttime == starttime)
 }

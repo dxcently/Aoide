@@ -10,7 +10,7 @@ const UNKNOWN: &str = "the config could not be read";
 fn base() -> Vec<(OsString, OsString)> {
     [
         ("PATH", "/usr/bin"),
-        ("HOME", "/home/khoa"),
+        ("HOME", "/home/user"),
         ("AOIDE_SESSION_ID", "sess-1"),
         ("AOIDE_MELETE_KEY", "melete-key"),
         ("AOIDE_MELETE_DB", "/db"),

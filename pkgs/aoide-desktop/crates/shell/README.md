@@ -204,7 +204,7 @@ asks.rs     Doors::prepare_answer(launch, ask, label)
   KiB or 60 lines the dialog is capped. A same-id ask that the door sends again
   replaces the stored one; a change to any of those fields gives it a new
   digest, so a yes confirmed on the earlier text is refused.
-- A yes binds the call that was shown, under ruling 163. The residual: a door
+- A yes binds the call that was shown. The residual: a door
   that changes its pending ask after the check in `send_answer` and before the
   answer lands applies the yes to the change. The shell cannot see that change,
   so only Eidolon can close it.

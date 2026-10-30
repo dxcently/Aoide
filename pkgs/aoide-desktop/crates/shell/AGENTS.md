@@ -118,7 +118,8 @@ are in README.md.
   `Unknown` turn. Its idle arm re-reads the turn under the lock: a turn that
   started since the read arms the mark (`Armed`), so no request is refused for a
   turn that is running. The fakes-only `race_turn_between_locks` is the test
-  seam for that window. A stop now takes the cancel's own answer: 409 means idle, and
+  seam for that window. A stop now takes the cancel's own answer: 409 means
+  idle, and
   204 waits up to 10 s for the frames that say the turn ended. If none come,
   the result is `NoTurnEnd`, and the door keeps running, its record stays, and
   nothing is signalled. After a reconnect the turn is `Unknown`, so a turn that

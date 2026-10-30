@@ -35,11 +35,12 @@ and each crate's own invariants are in its AGENTS.md (`crates/door/AGENTS.md`,
 ## The gate
 
 - The deciding run has two parts. First, `nix flake check`'s `pkg-aoide-desktop`
-  builds this directory from the git-tracked files, dirty ones included, in its own sandbox: it lints
+  builds this directory from the git-tracked files, dirty ones included, in its
+  own sandbox: it lints
   the product configuration, then the gate's form, with `-D warnings`
   (`preCheck`), and it runs every test of the workspace with every feature
   (`checkPhase`), except the names listed in `checkFlags` in `default.nix`.
-  No pipeline runs the listed tests yet; the lane's gate runs them in snowglobe
+  No pipeline runs the listed tests yet; the lane's gate runs them in its
   VMs, never on the host. A run outside the sandbox is a pre-check: it may read
   a stale dep-info file that an earlier build left beside the test binary, and
   it proves nothing about the commit.
@@ -48,7 +49,9 @@ and each crate's own invariants are in its AGENTS.md (`crates/door/AGENTS.md`,
   (`--exact`), so a test that shares a listed name is skipped too, and a test
   not on the list is never skipped. A name added to the list is skipped
   silently. A new test whose spawn should succeed and reaches the pin rule, and
-  that is not on the list, turns the sandbox run red.
+  that is not on the list, turns the sandbox run red. The setuid test is listed
+  because the sandbox refuses its setuid chmod (EPERM at exec lib.rs:1053)
+  before any pin check.
 - The lints are the guard. The root manifest's `[workspace.lints]` forbids
   `unsafe_code`, `disallowed_methods` and `disallowed_types`. Door and shell
   take that table with `[lints] workspace = true`, so no attribute in either
@@ -78,8 +81,10 @@ and each crate's own invariants are in its AGENTS.md (`crates/door/AGENTS.md`,
   `aoided.sock`, `"dispatch"`, `"subscribe"`, `/api/launch`, `sh -c` and
   `SIGKILL`. A second scan bars `extern` and `#[link` in every file under door's
   and shell's `src`, whatever its extension, so an `include!` of a `.inc` file
-  is read too; exec is not scanned, since it is the one member that allows
-  unsafe code. Each word opens foreign code the lints do not see. It reads the raw text, so a split spelling passes it. The scan
+  is read too. Every member but exec is scanned: exec is the one member that
+  allows unsafe code. A `#[link]` block needs no `unsafe` in edition 2021, and
+  its constructor runs at load, outside any dep-info, so the lints do not see
+  either word. It reads the raw text, so a split spelling passes it. The scan
   reads source text, not expansions, so it does not see a lift a macro writes;
   the forbid refuses one that a `macro_rules!` macro writes; a proc macro comes
   only from a new member or a changed manifest, which moves a golden manifest,
@@ -91,8 +96,9 @@ and each crate's own invariants are in its AGENTS.md (`crates/door/AGENTS.md`,
   - the root's `clippy.toml` is the only clippy config: a `clippy.toml` below
     the root, or a `.clippy.toml` anywhere, fails
     (`only_the_roots_clippy_config_is_read`);
-  - no `.cargo/config` or `.cargo/config.toml` lies in this directory, in any
-    ancestor up to `/`, or in the cargo home (`$CARGO_HOME`, or `$HOME/.cargo`
+  - no `.cargo/config` or `.cargo/config.toml` lies in the root directory, or in
+    any ancestor of it up to `/`, or in the cargo home (`$CARGO_HOME`, or
+    `$HOME/.cargo`
     when that is unset), with one exception: the file
     `$NIX_BUILD_TOP/.cargo/config.toml`, which the pinned nixpkgs' cargo setup
     hook writes to point cargo at the vendored crates. The test accepts that
@@ -125,7 +131,9 @@ and each crate's own invariants are in its AGENTS.md (`crates/door/AGENTS.md`,
   template. A target whose path lies outside it would change a golden manifest.
 - Dependencies are not linted. The lints and the scan cover the members only.
   `aoide-protocol` is a path dependency outside this workspace, and it starts
-  processes of its own. The app reaches it only through the exec crate's
+  processes of its own; its `#[path]` module `feed.rs:62` is compiled under
+  protocol's own table, not this one. The app reaches it only through the exec
+  crate's
   `untrusted` re-export.
 - A run outside the sandbox sets its own environment; the deciding run's is the
   nix sandbox's. No test scans the environment for words. The config test reads
