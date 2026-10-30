@@ -1514,6 +1514,27 @@ mod tests {
     }
 
     #[test]
+    fn a_reader_blocked_on_a_full_queue_returns_once_its_follow_is_dropped() {
+        let (tx, rx) = mpsc::channel();
+        let room = Arc::new(Room::default());
+        let out = Out { tx, room: Arc::clone(&room) };
+        let mut bytes = Vec::new();
+        for _ in 0..16 {
+            bytes.extend(std::iter::repeat(b'a').take(512 * 1024));
+            bytes.push(b'\n');
+        }
+        let (done_tx, done) = mpsc::channel();
+        thread::spawn(move || {
+            let _ = read_lines(bytes.as_slice(), &out);
+            let _ = done_tx.send(());
+        });
+        thread::sleep(Duration::from_millis(300));
+        drop(rx);
+        room.close();
+        done.recv_timeout(Duration::from_secs(5)).expect("the reader returns within 5 s");
+    }
+
+    #[test]
     fn a_command_keeps_its_brief_doors_marks_and_kind() {
         let text = r#"{"commands":[
             {"path":["send"],"summary":"Long.","brief":"Send text.","args":[],"flags":[],

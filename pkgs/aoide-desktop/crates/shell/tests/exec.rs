@@ -332,6 +332,18 @@ fn what_a_child_prints_after_its_interrupt_is_capped_and_its_overflow_is_counted
 }
 
 #[test]
+fn ending_a_follow_with_sixteen_unread_lines_returns_within_the_bound() {
+    let lines: Vec<Vec<u8>> = (0..16).map(|_| vec![b'a'; 512 * 1024]).collect();
+    let (exec, _) = held("unread16", &lines, &[]);
+    let follow = exec.follow(&["session", "trace"], &[FOLLOW], &["ab"]).expect("the follow starts");
+    std::thread::sleep(Duration::from_millis(800));
+    let started = Instant::now();
+    let ended = follow.end().expect("the follow ends");
+    assert!(started.elapsed() < Duration::from_secs(5), "the end returns within its bound");
+    assert!(ended.status.is_some(), "the child exits within the bound");
+}
+
+#[test]
 fn dropping_a_follow_interrupts_its_child_and_reaps_it() {
     let (exec, _) = held("drop", &[b"one".to_vec()], &[]);
     let follow = exec.follow(&["session", "trace"], &[FOLLOW], &["ab"]).expect("the follow starts");
