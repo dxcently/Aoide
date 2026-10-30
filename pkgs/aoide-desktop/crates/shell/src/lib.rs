@@ -3,7 +3,6 @@
 //! `exec`.
 
 pub mod asks;
-pub mod blocking;
 pub mod chat;
 pub mod doors;
 pub mod palette;

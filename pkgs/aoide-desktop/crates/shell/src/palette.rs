@@ -7,7 +7,6 @@ use serde::Serialize;
 
 use crate::exec::untrusted::visible;
 use crate::exec::{CommandSpec, Exec, ExecError, Flag, Output, Schema};
-use crate::blocking;
 
 /// The main window's grant set: every path the schema declares. The main window is
 /// the person's own, so its palette is the schema less the floor. A frame passes a
@@ -46,10 +45,13 @@ pub const FLOOR: &[(&str, &[&str])] = &[
 /// Why a call from the palette is refused.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Refusal {
-    /// The path never ends on its own (`blocking::PATHS`).
+    /// The verb is `watch` or `serve`: the path runs until something ends it.
     Blocking(String),
     /// The schema declares no command at this path.
     Unknown(String),
+    /// The schema names no verb for the path, so the palette cannot tell whether
+    /// it blocks. Refused, never guessed.
+    Unverified(String),
     /// The floor holds the command, granted or not.
     Floored { path: String, why: &'static str },
     /// The main window is not granted the command.
@@ -110,17 +112,19 @@ fn row(path: &[String], spec: &CommandSpec) -> Row {
 }
 
 /// Whether the main window may run `words` with `flags`. Each refusal is checked
-/// in this order: a blocking path, a `--node` or `--typed` flag, an undeclared
-/// command, the floor, and last the grant.
+/// in this order: a `--node` or `--typed` flag, an undeclared command, a verb
+/// that blocks or is missing, the floor, and last the grant.
 pub fn check(schema: &Schema, grants: &[Vec<&str>], words: &[&str], flags: &[Flag<'_>]) -> Result<(), Refusal> {
     let path = words.join(" ");
-    if blocking::is_blocking(words) {
-        return Err(Refusal::Blocking(path));
-    }
     if flags.iter().any(|f| f.name == "node" || f.name == "typed") {
         return Err(Refusal::Floored { path, why: "--node and --typed never run from the palette" });
     }
     let spec = schema.command(words).ok_or_else(|| Refusal::Unknown(path.clone()))?;
+    match spec.verb.as_deref() {
+        Some("watch" | "serve") => return Err(Refusal::Blocking(path)),
+        Some(_) => {}
+        None => return Err(Refusal::Unverified(path)),
+    }
     if let Some(why) = floor_reason(words, spec) {
         return Err(Refusal::Floored { path, why });
     }

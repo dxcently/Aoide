@@ -1,13 +1,12 @@
 # pkgs/aoide-desktop/default.nix — the desktop workspace's gate.
 #
 # `nix flake check` builds this package (`pkg-aoide-desktop`) from the
-# git-tracked
-# files, dirty ones included. `preCheck` lints the product configuration and the
-# gate's form with
-# clippy, then `checkPhase` runs every test of the workspace, with every
-# feature, over that fresh build, except the names in `checkFlags`. No pipeline
-# runs those listed tests yet. A run outside the sandbox is a pre-check: it may
-# read a stale dep-info file, and it proves nothing about the commit.
+# git-tracked files, dirty ones included. `preCheck` lints the product
+# configuration and the gate's form with clippy, then `checkPhase` runs every
+# test of the workspace, with every feature, over that fresh build, except the
+# names in `checkFlags`. No pipeline runs those listed tests yet. A run outside
+# the sandbox is a pre-check: it may read a stale dep-info file, and it proves
+# nothing about the commit.
 {
   lib,
   stdenv,

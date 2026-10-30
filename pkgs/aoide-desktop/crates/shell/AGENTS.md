@@ -249,7 +249,7 @@ are in README.md.
 - A record write that fails before the record is written, which refuses the
   launch: no seam makes the rename fail in a directory the test's uid owns.
 
-## The palette and the floor (palette.rs, blocking.rs)
+## The palette and the floor (palette.rs)
 
 - A call from the palette goes through `palette::call`, which runs `check`
   before `Exec::call`. A refused call starts no child. Each check in
@@ -261,16 +261,14 @@ are in README.md.
   main palette is the schema less the floor. It is the person's own window and
   the floor is the only gate on it. A frame's grant set is its own list, passed
   to `palette` and `check`; the grant set's shape is stated in README.md.
-- `blocking::PATHS` is pinned until the kinds lane marks watch verbs in the
-  schema. That list is deleted when the marks land, and `palette::check`'s
-  blocking arm goes with it. The list is a hand list checked against
-  `aoide schema --json` at 839911a5; it is deleted when the kinds lane's `verb`
-  lands. No test reads the schema for it.
+- A path whose schema verb is `watch` or `serve` is refused as `Blocking`,
+  and one with no verb is refused as `Unverified`. The palette keeps no hand
+  list of blocking paths: the verb in the schema is the only source.
 
 ## Extension points
 
-- A palette floor class is one entry in `FLOOR` (`palette.rs`), and a blocking
-  path is one entry in `PATHS` (`blocking.rs`) until the kinds lane deletes it.
+- A palette floor class is one entry in `FLOOR` (`palette.rs`). A blocking
+  path needs no entry: a command declares `serve` or `watch` in the core.
 - A follow case is one entry in `CASES` (`chat/cases.rs`), and its verb must
   be declared by the schema. Adding one changes `chat/cases.rs` and the
   README's "How a chat is followed" list, in one commit.

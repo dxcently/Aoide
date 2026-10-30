@@ -3,7 +3,7 @@
 //! A yes on an approval is confirmed on a dialog that shows the whole call, so
 //! a yes is never given on a view that is cut short. Above the cap the native
 //! confirm offers no yes; the app's own pane shows the whole input and takes the
-//! yes there, under the digest of exactly what it showed (ruling 163).
+//! yes there, under the digest of exactly what it showed.
 //!
 //! The rules are Eidolon's, from `crates/web/src/user.rs`. An approval offers
 //! `yes` and `no`, and a question offers its option labels. Only an approval's

@@ -5,6 +5,7 @@
   "commands": [
     {
       "path": ["config", "set"],
+      "verb": "act",
       "summary": "Set a key.",
       "args": [],
       "flags": [],
@@ -12,6 +13,7 @@
     },
     {
       "path": ["config"],
+      "verb": "show",
       "summary": "Show the effective runtime config.",
       "args": [],
       "flags": [
@@ -21,6 +23,7 @@
     },
     {
       "path": ["send"],
+      "verb": "act",
       "summary": "Inject text into a conducted session.",
       "args": [
         {"name": "text", "type": "string", "required": true, "description": "The text to inject."}
@@ -34,6 +37,7 @@
     },
     {
       "path": ["session", "trace"],
+      "verb": "watch",
       "summary": "Show a session's trace.",
       "args": [
         {"name": "id", "type": "string", "required": true, "description": "The session."}
@@ -46,6 +50,7 @@
     },
     {
       "path": ["session", "watch"],
+      "verb": "watch",
       "summary": "Watch a session's run.",
       "args": [
         {"name": "id", "type": "string", "required": true, "description": "The session."}
@@ -56,6 +61,7 @@
     },
     {
       "path": ["melete", "status"],
+      "verb": "show",
       "summary": "Show the melete store.",
       "args": [],
       "flags": [

@@ -25,11 +25,6 @@ sha2 (a dialog's digest), the door crate, and the exec crate.
   passes its own narrower set. `FLOOR` lists the named classes the floor
   refuses. A command is offered only when the grant set names it and the floor
   does not hold it, and the floor is checked on every call, granted or not.
-- `blocking.rs`: `PATHS`, the paths of the core commands that never end on
-  their own (the serve family, the daemon, the conductor, the melete adapter,
-  the watches, and trace `--follow`). They run only as held children, never
-  through `palette::call`. The list is a hand list checked against the core's
-  schema at 839911a5, and is deleted when the kinds lane's `verb` lands.
 - `chat/`: `say` sends to a session, and `follow` opens its stream as a `Chat`
   whose `next` yields a `Push`. `chat/cases.rs` holds the follow cases, one
   entry each. `chat/record.rs` is the one place a stream line is parsed.
@@ -245,9 +240,10 @@ asks.rs     Doors::prepare_answer(launch, ask, label)
 ```
 palette::call(exec, grants, words, flags, positionals)
   check(exec.schema(), grants, words, flags)
-    1. blocking::is_blocking(words)          -> Refusal::Blocking
-    2. a --node or --typed flag              -> Refusal::Floored
-    3. schema.command(words) is None         -> Refusal::Unknown
+    1. a --node or --typed flag              -> Refusal::Floored
+    2. schema.command(words) is None         -> Refusal::Unknown
+    3. the verb: watch or serve              -> Refusal::Blocking
+       no verb in the schema                 -> Refusal::Unverified
     4. the floor: a schema mark (approves,
        launches, internal, or not
        implemented), then FLOOR's prefixes   -> Refusal::Floored

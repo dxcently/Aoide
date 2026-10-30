@@ -173,8 +173,9 @@ pub struct CommandSpec {
     pub internal: bool,
     /// False for a stub. An omitted `implemented` reads false too.
     pub implemented: bool,
-    /// The command's kind, when the schema names one.
-    pub kind: Option<String>,
+    /// The command's verb, when the schema names one (`list`, `show`, `watch`,
+    /// `act`, `serve` or `none`).
+    pub verb: Option<String>,
 }
 
 /// One positional argument of a command.
@@ -218,7 +219,7 @@ struct CommandDoc {
     #[serde(default)]
     implemented: bool,
     #[serde(default)]
-    kind: Option<String>,
+    verb: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -248,7 +249,7 @@ impl Schema {
                     launches: c.launches,
                     internal: c.internal,
                     implemented: c.implemented,
-                    kind: c.kind,
+                    verb: c.verb,
                 };
                 (c.path, spec)
             })
@@ -1535,11 +1536,11 @@ mod tests {
     }
 
     #[test]
-    fn a_command_keeps_its_brief_doors_marks_and_kind() {
+    fn a_command_keeps_its_brief_doors_marks_and_verb() {
         let text = r#"{"commands":[
             {"path":["send"],"summary":"Long.","brief":"Send text.","args":[],"flags":[],
              "approves":true,"launches":false,"internal":false,"implemented":true,
-             "kind":"act","doors":["mcp"]},
+             "verb":"act","doors":["mcp"]},
             {"path":["spawn"],"summary":"Start one.","args":[],"flags":[],"launches":true,
              "implemented":true},
             {"path":["session","hook"],"summary":"Hook.","args":[],"flags":[],"internal":true,
@@ -1552,7 +1553,7 @@ mod tests {
         assert_eq!(send.brief, "Send text.");
         assert_eq!(send.doors, ["mcp"]);
         assert!(send.approves && !send.launches && !send.internal && send.implemented);
-        assert_eq!(send.kind.as_deref(), Some("act"));
+        assert_eq!(send.verb.as_deref(), Some("act"));
         let spawn = schema.command(&["spawn"]).expect("spawn is declared");
         assert!(spawn.launches && !spawn.approves);
         assert!(schema.command(&["session", "hook"]).expect("declared").internal);
@@ -1561,7 +1562,7 @@ mod tests {
         let config = schema.command(&["config"]).expect("config is declared");
         assert_eq!(config.brief, "Show config.", "an omitted brief reads the summary");
         assert_eq!(config.doors, ["cli", "daemon"], "omitted doors read the CLI's pair");
-        assert_eq!(config.kind, None);
+        assert_eq!(config.verb, None);
         assert!(!config.approves && !config.launches && !config.internal);
         assert_eq!(schema.commands().count(), 5);
     }

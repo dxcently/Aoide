@@ -18,8 +18,7 @@ are in README.md.
   `crates/web/src/serve.rs` compares a request's Host with that address, so a
   dual-stack listener's accepted socket is in `tcp6`, finds no row, and is
   refused, which is fail-closed. The check proves the listener runs as this
-  user. It does not prove the process is `eidolon`: a same-uid listener passes
-  (ruling 29).
+  user. It does not prove the process is `eidolon`: a same-uid listener passes.
 - The token is read on every request. The runtime directory and its `eidolon`
   directory must be real directories (no symlinks), owned by the effective uid,
   at mode 0700. The token file must be exactly

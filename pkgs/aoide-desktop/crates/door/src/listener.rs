@@ -7,7 +7,7 @@
 //!
 //! What it proves: the listener that answered this connection runs as this
 //! user. It does not prove the process is `eidolon`, and a same-uid listener
-//! passes it (ruling 29).
+//! passes it.
 //!
 //! A V4 door's row is in `tcp`, since Eidolon binds one loopback address and its
 //! accepted socket is an IPv4 socket. A dual-stack listener (an IPv6 socket that

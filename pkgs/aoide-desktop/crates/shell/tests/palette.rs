@@ -2,7 +2,6 @@ use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use aoide_desktop_shell::blocking::{is_blocking, PATHS};
 use aoide_desktop_shell::exec::{Exec, Flag, Schema};
 use aoide_desktop_shell::palette::{call, check, main_grants, palette, CallError, Refusal, FLOOR};
 
@@ -71,14 +70,47 @@ fn every_named_floor_class_and_every_marked_command_is_refused_and_absent_from_t
     }
 }
 
+/// A schema of one command, `widget go`, declared with `verb`. `None` leaves the
+/// verb off, as an older aoide's schema does.
+fn one_verb(verb: Option<&str>) -> Schema {
+    let mut command = serde_json::json!({
+        "path": ["widget", "go"], "summary": "A fixture.", "args": [], "flags": [], "implemented": true
+    });
+    if let Some(verb) = verb {
+        command["verb"] = serde_json::json!(verb);
+    }
+    Schema::parse(&serde_json::json!({ "commands": [command] }).to_string()).expect("the verb fixture parses")
+}
+
 #[test]
-fn every_blocking_path_is_refused_as_blocking_and_is_not_offered() {
-    let s = schema();
-    let grants = main_grants(&s);
-    for words in PATHS {
-        let refused = check(&s, &grants, words, &[]);
-        assert!(matches!(refused, Err(Refusal::Blocking(_))), "{words:?}: {refused:?}");
-        assert!(!offered(&s).contains(&words.join(" ")), "{words:?} is offered");
+fn a_watch_verb_is_refused_as_blocking_and_is_not_offered() {
+    let s = one_verb(Some("watch"));
+    let refused = check(&s, &main_grants(&s), &["widget", "go"], &[]);
+    assert!(matches!(refused, Err(Refusal::Blocking(_))), "{refused:?}");
+    assert!(offered(&s).is_empty(), "a watch is not offered");
+}
+
+#[test]
+fn a_serve_verb_is_refused_as_blocking_and_is_not_offered() {
+    let s = one_verb(Some("serve"));
+    let refused = check(&s, &main_grants(&s), &["widget", "go"], &[]);
+    assert!(matches!(refused, Err(Refusal::Blocking(_))), "{refused:?}");
+    assert!(offered(&s).is_empty(), "a serve is not offered");
+}
+
+#[test]
+fn a_command_with_no_verb_is_refused_and_is_not_offered() {
+    let s = one_verb(None);
+    let refused = check(&s, &main_grants(&s), &["widget", "go"], &[]);
+    assert_eq!(refused, Err(Refusal::Unverified("widget go".to_owned())), "no verb is refused, never guessed");
+    assert!(offered(&s).is_empty(), "a command with no verb is not offered");
+}
+
+#[test]
+fn a_list_show_or_act_verb_is_offered() {
+    for verb in ["list", "show", "act"] {
+        let s = one_verb(Some(verb));
+        assert_eq!(offered(&s), ["widget go"], "{verb} is offered");
     }
 }
 
@@ -221,7 +253,8 @@ fn every_floor_case_is_refused_by_its_class() {
     let commands: Vec<serde_json::Value> = FLOOR_CASES
         .iter()
         .map(|(_, path)| {
-            serde_json::json!({"path": path, "summary": "x", "args": [], "flags": [], "implemented": true})
+            let verb = if *path == ["daemon"] { "serve" } else { "act" };
+            serde_json::json!({"path": path, "verb": verb, "summary": "x", "args": [], "flags": [], "implemented": true})
         })
         .collect();
     let text = serde_json::json!({"commands": commands}).to_string();
@@ -229,7 +262,7 @@ fn every_floor_case_is_refused_by_its_class() {
     let grants = main_grants(&s);
     for (class, path) in FLOOR_CASES {
         let refused = check(&s, &grants, path, &[]);
-        if is_blocking(path) {
+        if *path == ["daemon"] {
             assert!(matches!(refused, Err(Refusal::Blocking(_))), "{path:?} is blocking: {refused:?}");
         } else {
             assert_eq!(
@@ -239,30 +272,4 @@ fn every_floor_case_is_refused_by_its_class() {
             );
         }
     }
-}
-
-#[test]
-fn the_blocking_list_is_exactly_the_core_commands_that_never_end() {
-    // A hand list of the core commands that run until the app ends them, checked
-    // against `aoide schema --json` at 839911a5. Deleted when the kinds lane's
-    // `verb` lands. A new one goes here and in `blocking::PATHS` in one commit.
-    let expected: &[&[&str]] = &[
-        &["session", "trace"],
-        &["session", "watch"],
-        &["events", "tail"],
-        &["secrets", "watch"],
-        &["pair", "watch"],
-        &["a2a", "serve"],
-        &["daemon"],
-        &["mcp", "serve"],
-        &["mail", "serve"],
-        &["secrets", "serve"],
-        &["conductor"],
-        &["adapter", "melete"],
-    ];
-    let mut got: Vec<&[&str]> = PATHS.to_vec();
-    let mut want: Vec<&[&str]> = expected.to_vec();
-    got.sort_unstable();
-    want.sort_unstable();
-    assert_eq!(got, want);
 }
