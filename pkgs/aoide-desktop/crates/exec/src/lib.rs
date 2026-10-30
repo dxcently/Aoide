@@ -1520,7 +1520,7 @@ mod tests {
         let out = Out { tx, room: Arc::clone(&room) };
         let mut bytes = Vec::new();
         for _ in 0..16 {
-            bytes.extend(std::iter::repeat(b'a').take(512 * 1024));
+            bytes.extend(std::iter::repeat_n(b'a', 512 * 1024));
             bytes.push(b'\n');
         }
         let (done_tx, done) = mpsc::channel();
