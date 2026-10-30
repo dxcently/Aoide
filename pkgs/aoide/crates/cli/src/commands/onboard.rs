@@ -41,6 +41,7 @@ pub fn register(r: &mut Registry) {
         handler: handle_onboard,
         brief: "First boot: register the clone, wire harness hooks, print the guide.",
         doors: &[Door::Cli],
+        kind: "none", verb: "none",
     ));
 }
 

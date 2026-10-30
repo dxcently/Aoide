@@ -18,8 +18,8 @@
 # no service, no session anchor claimed.
 # `test-two-components` — the `bar` and `dock` slots filled by their strillix
 # providers, no strillix and no quickshell dendrite: the runtime both import by path
-# lands once (one shell unit, one shellbridge unit, no doubled environment, one
-# declaration of its home half), both components are recorded, and both facts
+# lands once (one shell unit, one shellbridge unit, no doubled environment, its home
+# half's activation present once), both components are recorded, and both facts
 # the runtime sets are true.
 # `test-rice-without-strillix` — a rice and no performer: MUST fail, with the
 # platform assertion's own message.
@@ -131,7 +131,7 @@ else
   check "two: exactly one shell unit"           "1" "$(t .shellUnits)"
   check "two: exactly one shellbridge unit"     "1" "$(t .bridgeUnits)"
   check "two: no duplicate shell environment"   "0" "$(t .envDuplicates)"
-  check "two: the home half is declared once"   "1" "$(t .homeDeclarations)"
+  check "two: the home half is present once"   "1" "$(t .homeActivation)"
   check "two: both components recorded"         "bar,dock" "$(t '.components | join(",")')"
   check "two: the strillix fact is set"             "true" "$(t .strillix)"
   check "two: the quickshell fact is set"       "true" "$(t .quickshell)"

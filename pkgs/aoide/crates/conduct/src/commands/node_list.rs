@@ -30,5 +30,6 @@ pub fn register(r: &mut Registry) {
             "node list",
             "node list --json",
         ],
+        kind: "node", verb: "list",
     ));
 }

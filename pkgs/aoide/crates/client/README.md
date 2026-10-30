@@ -25,7 +25,8 @@ never the inbound/serve half (that's `aoide-server`).
   portable `context` config. The CLI requires aoided; MCP/A2A are refused.
   Its CLI reply wait is bounded at 120 seconds for the sequential 15-second
   HTTP requests and cleanup; timeout is incomplete, never retried. Other
-  daemon dispatch callers retain their two-second bound.
+  daemon dispatch callers retain their ten-second bound, long enough for a
+  daemon under load to finish the call and write its reply.
   Configure the named `tokenEnv` in **aoided's environment**: caller secrets
   are not forwarded in an invocation. Missing bindings, mappings, credentials,
   or note references fail explicitly. No cache, prompt insertion, or write.

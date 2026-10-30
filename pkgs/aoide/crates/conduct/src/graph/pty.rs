@@ -2617,15 +2617,15 @@ mod resolve_tests {
         let args = vec!["-c".to_string(), "sleep 5; true".to_string()];
         let (child, _master) =
             spawn_on_pty("sh", &args, "argv0-probe", None, None).expect("a pty child starts");
-        let mut cmdline = Vec::new();
-        for _ in 0..20 {
-            if let Ok(bytes) = std::fs::read(format!("/proc/{}/cmdline", child.id())) {
-                cmdline = bytes;
-                break;
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let argv0 = loop {
+            let cmdline = std::fs::read(format!("/proc/{}/cmdline", child.id())).unwrap_or_default();
+            let argv0 = cmdline.split(|b| *b == 0).next().unwrap_or_default().to_vec();
+            if argv0 == b"sh" || std::time::Instant::now() >= deadline {
+                break argv0;
             }
             std::thread::sleep(std::time::Duration::from_millis(25));
-        }
-        let argv0 = cmdline.split(|b| *b == 0).next().unwrap_or_default();
+        };
         assert_eq!(argv0, b"sh", "argv[0] is the name the spawn was given");
     }
 }

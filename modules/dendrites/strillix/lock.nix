@@ -4,11 +4,16 @@
 # locks with. The declared lock dress (`$STRILLIX_ROOT/declared/hyprlock.conf`) is
 # staging data and is seeded by the runtime, not here.
 { config, pkgs, ... }:
+let
+  claim = {
+    components.lock.provider = "strillix";
+    surfaces.lockscreen.owner = "quickshell";
+  };
+in
 {
   imports = [ ./runtime.nix ];
+  habit.home.strillix = claim;
   habit.home.imports = [ ./runtime-home.nix ];
-  strillix.components.lock.provider = "strillix";
-  strillix.surfaces.lockscreen.owner = "quickshell";
 
   # ── The lock (`strillix lock`) ──────────────────────────────────────────────
   # `strillix lock` runs one of two lockers, and this provider carries both and
@@ -99,4 +104,5 @@
   '';
 
   environment.systemPackages = [ pkgs.hyprlock ];
+  strillix = claim;
 }

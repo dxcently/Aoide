@@ -46,6 +46,7 @@ pub fn register(r: &mut Registry) {
             "graph --focus session:<id>",
         ],
         doors: &[Door::Cli, Door::Daemon, Door::Mcp],
+        kind: "graph", verb: "show",
     ));
     r.insert(cmd!(
         path: ["project", "add"],
@@ -70,6 +71,7 @@ pub fn register(r: &mut Registry) {
             "project add aoide ~/Aoide --new",
         ],
         launches: true,
+        kind: "project", verb: "act",
     ));
     r.insert(cmd!(
         path: ["project", "remove"],
@@ -84,6 +86,7 @@ pub fn register(r: &mut Registry) {
         gated: false,
         implemented: true,
         handler: crate::graph::project_remove,
+        kind: "project", verb: "act",
     ));
     r.insert(cmd!(
         path: ["project", "list"],
@@ -93,6 +96,7 @@ pub fn register(r: &mut Registry) {
         gated: false,
         implemented: true,
         handler: crate::graph::project_list,
+        kind: "project", verb: "list",
     ));
     r.insert(cmd!(
         path: ["graph", "link"],
@@ -106,6 +110,7 @@ pub fn register(r: &mut Registry) {
         implemented: true,
         handler: crate::graph::link,
         approves: true,
+        kind: "graph", verb: "act",
     ));
     r.insert({
         let mut c = cmd!(
@@ -123,6 +128,7 @@ pub fn register(r: &mut Registry) {
             implemented: true,
             handler: crate::graph::session_start,
             approves: true,
+            kind: "session", verb: "act",
         );
         // Hook-plumbing, not an operator command — a harness's own lifecycle
         // drives it, never a human typing it directly (task #101 R1). Hidden
@@ -142,6 +148,7 @@ pub fn register(r: &mut Registry) {
             gated: false,
             implemented: true,
             handler: crate::graph::session_phase,
+            kind: "session", verb: "act",
         );
         c.internal = true;
         c
@@ -155,6 +162,7 @@ pub fn register(r: &mut Registry) {
             gated: false,
             implemented: true,
             handler: crate::graph::session_end,
+            kind: "session", verb: "act",
         );
         c.internal = true;
         c
@@ -171,6 +179,7 @@ pub fn register(r: &mut Registry) {
             implemented: true,
             handler: crate::graph::session_hook,
             approves: true,
+            kind: "session", verb: "act",
         );
         c.internal = true;
         c
@@ -202,6 +211,7 @@ pub fn register(r: &mut Registry) {
         brief: "Spawn an agent command as a detached, conducted session.",
         doors: &[Door::Cli, Door::Daemon, Door::Mcp],
         approves: true, launches: true,
+        kind: "session", verb: "act",
     ));
     r.insert(cmd!(
         path: ["resurrect"],
@@ -223,6 +233,7 @@ pub fn register(r: &mut Registry) {
         ],
         brief: "Revive sessions from the project's record.",
         approves: true, launches: true,
+        kind: "session", verb: "act",
     ));
     r.insert(cmd!(
         path: ["send"],
@@ -249,6 +260,7 @@ pub fn register(r: &mut Registry) {
         brief: "Inject text into a conducted session (held for approval unless --yes).",
         doors: &[Door::Cli, Door::Daemon, Door::Mcp],
         approves: true,
+        kind: "session", verb: "act",
     ));
     r.insert(cmd!(
         path: ["session", "pending", "list"],
@@ -259,6 +271,7 @@ pub fn register(r: &mut Registry) {
         implemented: true,
         handler: crate::graph::pending_list,
         examples: ["session pending list"],
+        kind: "hold", verb: "list",
     ));
     r.insert(cmd!(
         path: ["session", "trace"],
@@ -278,15 +291,16 @@ pub fn register(r: &mut Registry) {
             "session trace Aoide-7d23 --follow",
             "session trace brave-otter --json",
         ],
+        kind: "session", verb: "watch",
     ));
     r.insert(cmd!(
         path: ["session", "watch"],
-        summary: "Watch a managed task run (`snapshot`/live): the instructions it was started with, its live output, the CHILD's own unread queue (the letters sent TO the subagent), and where it stands — LIVE by default, until the run ends or Ctrl-C. --snapshot returns ONE frame instead (the bounded mode a door that must return asks for); --tail N widens the output window (default 50); --json returns the frame in the registry's structured envelope. Read-only by construction: no stage write, no lock, no cursor — mail is read with `mail::unread_for` (a reader-selected PEEK), so watching advances neither the child's nor the observer's unread state, and the run's own report never lands in the child's inbox (it goes to its report mailbox). The footer's report line is read from the report lane's cursor, never inferred from a letter; a process exit is never rendered as task success, and a killed run's absent exitCode is reported as absent, never 0. Refusals: an unknown id, a `sub:` card, and a record that keeps no conduct-owned PTY.",
+        summary: "Watch a managed task run (`snapshot`/live): the instructions it was started with, its live output, the CHILD's own unread queue (the letters sent TO the subagent), and where it stands — LIVE by default, until the run ends or Ctrl-C. --snapshot returns ONE frame instead (the bounded mode a door that must return asks for); --tail N widens the output window (default 50); --json returns the frame in the registry's structured envelope; live, --json prints one JSON object per line, each tagged by `type` (`frame`, `output`, `mail`, `read`, `end`), then the outcome envelope on one line, so every stdout line is one JSON object. Read-only by construction: no stage write, no lock, no cursor — mail is read with `mail::unread_for` (a reader-selected PEEK), so watching advances neither the child's nor the observer's unread state, and the run's own report never lands in the child's inbox (it goes to its report mailbox). The footer's report line is read from the report lane's cursor, never inferred from a letter; a process exit is never rendered as task success, and a killed run's absent exitCode is reported as absent, never 0. Refusals: an unknown id, a `sub:` card, and a record that keeps no conduct-owned PTY.",
         args: [arg!("id", "string", true, "Session to watch: a local session id, its tail4, or its petname (resolved by the same resolver `send --to` uses).")],
         flags: [
             flag!("tail", "int", "Show the last N lines of the run's output (default 50). A non-numeric or zero value is a usage error, never a silently empty view."),
             flag!("snapshot", "bool", "Print ONE frame and return, instead of following. The only bounded mode: live following is the default, and a door that must return (MCP/stdin) is told to ask for this rather than being silently narrowed."),
-            flag!("json", "bool", "Return the frame in the registry's structured envelope (sanitized), instead of the rendered block."),
+            flag!("json", "bool", "Structured output (sanitized), instead of the rendered block: with --snapshot, the frame in the registry's envelope; live, one JSON object per line, each tagged by `type`."),
         ],
         gated: false,
         implemented: true,
@@ -298,6 +312,7 @@ pub fn register(r: &mut Registry) {
             "session watch fix-flaky --snapshot --json",
         ],
         doors: &[Door::Cli, Door::Daemon, Door::Mcp],
+        kind: "session", verb: "watch",
     ));
     r.insert(cmd!(
         path: ["session", "pending", "approve"],
@@ -309,6 +324,7 @@ pub fn register(r: &mut Registry) {
         handler: crate::graph::pending_approve,
         examples: ["session pending approve 0 --expect <fingerprint>"],
         approves: true, launches: true,
+        kind: "hold", verb: "act",
     ));
     r.insert(cmd!(
         path: ["session", "pending", "deny"],
@@ -320,6 +336,7 @@ pub fn register(r: &mut Registry) {
         handler: crate::graph::pending_deny,
         examples: ["session pending deny 0 --expect <fingerprint>"],
         approves: true,
+        kind: "hold", verb: "act",
     ));
     r.insert(cmd!(
         path: ["session", "permit"],
@@ -334,6 +351,7 @@ pub fn register(r: &mut Registry) {
         implemented: true,
         handler: crate::graph::session_permit,
         approves: true,
+        kind: "session", verb: "act",
     ));
     r.insert(cmd!(
         path: ["session", "prune"],
@@ -343,6 +361,7 @@ pub fn register(r: &mut Registry) {
         gated: false,
         implemented: true,
         handler: crate::graph::prune,
+        kind: "session", verb: "act",
     ));
     r.insert(cmd!(
         path: ["session", "reap"],
@@ -360,6 +379,7 @@ pub fn register(r: &mut Registry) {
             "session reap --announce",
             "session reap --now",
         ],
+        kind: "session", verb: "act",
     ));
     // ── conduct: the PTY-backed conductable wrap (concepts/Conductor-Channel) ─
     r.insert(cmd!(
@@ -382,6 +402,7 @@ pub fn register(r: &mut Registry) {
         handler: crate::graph::session_conduct,
         brief: "Run an agent command on its own PTY as a conductable session.",
         approves: true, launches: true,
+        kind: "session", verb: "act",
     ));
     // ── bare `session`: the ROSTER (session-surface redesign, command-defrag
     // lane X, 2026-08-28 — supersedes both the U3 undying picker that used
@@ -407,6 +428,7 @@ pub fn register(r: &mut Registry) {
             "session --hosts --all",
         ],
         doors: &[Door::Cli, Door::Daemon, Door::Mcp],
+        kind: "session", verb: "list",
     ));
     // ── session grant: the GRANT family (session-surface redesign,
     // command-defrag lane X) — a POSITIONAL <kind> grammar (`secrets
@@ -436,6 +458,7 @@ pub fn register(r: &mut Registry) {
             "session grant exempt on --self",
             "session grant exempt off --id <session-id>",
         ],
+        kind: "session", verb: "act",
     ));
     r.insert(cmd!(
         path: ["session", "window", "attach"],
@@ -451,6 +474,7 @@ pub fn register(r: &mut Registry) {
         implemented: true,
         handler: crate::graph::session_window_attach,
         examples: ["session window attach s-1 0x55d0c2a1 --workspace 3"],
+        kind: "session", verb: "act",
     ));
     r.insert(cmd!(
         path: ["session", "window", "closed"],
@@ -463,6 +487,7 @@ pub fn register(r: &mut Registry) {
         implemented: true,
         handler: crate::graph::session_window_closed,
         examples: ["session window closed 0x55d0c2a1"],
+        kind: "session", verb: "act",
     ));
     r.insert(cmd!(
         path: ["session", "window", "roster"],
@@ -473,6 +498,7 @@ pub fn register(r: &mut Registry) {
         implemented: true,
         handler: crate::graph::session_window_roster,
         examples: ["session window roster"],
+        kind: "session", verb: "act",
     ));
     r.insert(cmd!(
         path: ["session", "codex", "sync"],
@@ -483,6 +509,7 @@ pub fn register(r: &mut Registry) {
         implemented: true,
         handler: crate::graph::session_codex_sync,
         examples: ["session codex sync"],
+        kind: "session", verb: "act",
     ));
     r.insert(cmd!(
         path: ["session", "show"],
@@ -493,6 +520,7 @@ pub fn register(r: &mut Registry) {
         implemented: true,
         handler: crate::graph::session_show,
         examples: ["session show 7e3f5976-98b2-44a4-827c-c687a0d9526e"],
+        kind: "session", verb: "show",
     ));
     r.insert(cmd!(
         path: ["session", "bind"],
@@ -506,6 +534,7 @@ pub fn register(r: &mut Registry) {
         implemented: true,
         handler: crate::graph::session_bind,
         examples: ["session bind --id executor-1 --agent-id 7e3f5976-98b2-44a4-827c-c687a0d9526e"],
+        kind: "session", verb: "act",
     ));
     r.insert(cmd!(
         path: ["project", "edit"],
@@ -524,6 +553,7 @@ pub fn register(r: &mut Registry) {
             "project edit aoide ~/Aoide ~/Aoide-docs",
             "project edit aoide ~/Aoide",
         ],
+        kind: "project", verb: "act",
     ));
     r.insert(cmd!(
         path: ["project", "lead"],
@@ -542,6 +572,7 @@ pub fn register(r: &mut Registry) {
             "project lead aoide 7e3f5976-98b2-44a4-827c-c687a0d9526e",
             "project lead aoide --none",
         ],
+        kind: "project", verb: "act",
     ));
     r.insert(cmd!(
         path: ["session", "find"],
@@ -565,6 +596,7 @@ pub fn register(r: &mut Registry) {
             "session find --related brave-otter",
         ],
         doors: &[Door::Cli, Door::Daemon, Door::Mcp],
+        kind: "session", verb: "list",
     ));
 }
 
@@ -589,6 +621,7 @@ pub fn register_mail_ring(r: &mut Registry) {
         handler: crate::graph::mail_ring,
         examples: ["mail ring --for claude-mail"],
         approves: true,
+        kind: "mailbox", verb: "act",
     ));
     r.insert(cmd!(
         path: ["session", "project"],
@@ -598,6 +631,7 @@ pub fn register_mail_ring(r: &mut Registry) {
         gated: false,
         implemented: true,
         handler: crate::graph::session_project,
+        kind: "session", verb: "act",
     ));
     r.insert(cmd!(
         path: ["session", "kill"],
@@ -607,6 +641,7 @@ pub fn register_mail_ring(r: &mut Registry) {
         gated: true,
         implemented: true,
         handler: crate::graph::session_kill,
+        kind: "session", verb: "act",
     ));
     // The workspace ↔ project binding (core-seams §B). Appended last: the
     // registry's order is byte-stable, so a family that is not moving a
@@ -629,6 +664,7 @@ pub fn register_mail_ring(r: &mut Registry) {
             "workspace set 3 aoide",
             "workspace set 4 cadenza --new",
         ],
+        kind: "workspace", verb: "act",
     ));
     r.insert(cmd!(
         path: ["workspace", "clear"],
@@ -639,6 +675,7 @@ pub fn register_mail_ring(r: &mut Registry) {
         implemented: true,
         handler: crate::graph::workspace_clear,
         examples: ["workspace clear 3"],
+        kind: "workspace", verb: "act",
     ));
     r.insert(cmd!(
         path: ["workspace", "list"],
@@ -649,6 +686,7 @@ pub fn register_mail_ring(r: &mut Registry) {
         implemented: true,
         handler: crate::graph::workspace_list,
         examples: ["workspace list", "workspace list --json"],
+        kind: "workspace", verb: "list",
     ));
     r.insert(cmd!(
         path: ["workspace", "root"],
@@ -659,6 +697,7 @@ pub fn register_mail_ring(r: &mut Registry) {
         implemented: true,
         handler: crate::graph::workspace_root,
         examples: ["workspace root 3"],
+        kind: "workspace", verb: "show",
     ));
 }
 

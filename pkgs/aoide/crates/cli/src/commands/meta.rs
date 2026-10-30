@@ -17,6 +17,7 @@ pub fn register(r: &mut Registry) {
         implemented: true,
         handler: handle_guide,
         doors: &[Door::Cli, Door::Daemon, Door::Mcp],
+        kind: "none", verb: "none",
     ));
     r.insert(cmd!(
         path: ["schema"],
@@ -28,6 +29,7 @@ pub fn register(r: &mut Registry) {
         handler: handle_schema,
         brief: "Print every command and state shape as JSON, for machines.",
         doors: &[Door::Cli, Door::Daemon, Door::Mcp],
+        kind: "none", verb: "none",
     ));
 }
 

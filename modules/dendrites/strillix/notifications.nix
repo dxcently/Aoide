@@ -9,9 +9,15 @@
 # Stylix's stand-down keys on "not stylix", so its dunst/mako targets stay
 # disabled either way — which is still what we want, since a Stylix-generated
 # dunstrc would fight the dendrite's.
+let
+  claim = {
+    components.notifications.provider = "strillix";
+    surfaces.notifications.owner = "quickshell";
+  };
+in
 {
   imports = [ ./runtime.nix ];
+  habit.home.strillix = claim;
   habit.home.imports = [ ./runtime-home.nix ];
-  strillix.components.notifications.provider = "strillix";
-  strillix.surfaces.notifications.owner = "quickshell";
+  strillix = claim;
 }

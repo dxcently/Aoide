@@ -1372,6 +1372,7 @@ pub fn register(r: &mut Registry) {
         handler: handle_mesh,
         examples: ["mesh", "mesh --json"],
         brief: "Show where declared meshes and the node registry disagree.",
+        kind: "mesh", verb: "list",
     ));
     r.insert(cmd!(
         path: ["mesh", "pair"],
@@ -1386,6 +1387,7 @@ pub fn register(r: &mut Registry) {
         handler: handle_mesh_pair,
         examples: ["mesh pair", "mesh pair home", "mesh pair home --wait 0", "mesh pair home --yes --json"],
         brief: "Pair every declared node this box has no verified record of.",
+        kind: "mesh", verb: "act",
     ));
 }
 

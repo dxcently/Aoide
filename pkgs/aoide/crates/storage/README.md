@@ -146,7 +146,7 @@ by decision — no embedded database yet
   once and never writes a watched path from inside it. A stage write that does
   not go through `atomic_write` is invisible to the seam, so a watcher reads it
   as a hand edit. `fs::seed_if_absent`'s absent-path seed is one such write: it
-  renames a `.seed.<pid>` temp into place with `rename_no_replace`, and it runs
+  renames a `<stem>.<n>.seed.<pid>` temp into place with `rename_no_replace`, and it runs
   before `aoided` registers its watch, so the baseline takes it.
 
   **The host split inside `fs`.** Two places, and both are seams rather than

@@ -10,7 +10,7 @@ file covers only the strillix lane.
   else of it: `imports = [ ./runtime.nix ]` (or `../strillix/runtime.nix`) and
   `habit.home.imports = [ ./runtime-home.nix ]`. The module system lands a
   path once however many lanes import it; an inline copy or a let-bound
-  attrset of either is a second module that declares `strillix.home` twice.
+  attrset of either is a second module that declares the home half twice.
 - **The home import is a list, never `habit.home = ./runtime-home.nix`.** habit
   unifies a bare path into a module with no key, so two lanes that wrote it
   that way would apply the home half twice.
@@ -21,11 +21,17 @@ file covers only the strillix lane.
   path is applied twice. `default.nix` is the catalogue's renderer and imports
   neither half: a host that selects `strillix` alone gets the rice seams and no
   shell, and the shell comes only with a `strillix` provider.
-- **The home half lives in `strillix.home`.** It is an internal
-  `deferredModule` that `runtime.nix` sets, closing over the system config
-  (`config.aoide.root`, the built-in set, the derivations in its `let`), and
-  `runtime-home.nix` imports through `osConfig`. Home Manager's `pkgs` is the
-  system's (habit sets `useGlobalPkgs`), so the lane's overlays reach it.
+- **The home half is a plain home module, `runtime-home.nix`.** It reads its own
+  module arguments (`aoideInputs`, `ricesRoot`) and the forwarded `aoide.*` and
+  `strillix.*` options, never `osConfig`. The options are declared once, in
+  `modules/nucleus/options.nix` and the core's `pkgs/aoide/module/options.nix`,
+  and imported at both levels (`homeNucleus` in `lib/strillix.nix` for Home
+  Manager). A NixOS host forwards every option those two files declare, minus
+  facts, by a list derived from the declarations (`lib/strillix.nix`), so adding
+  an option needs no second edit. Facts are not forwarded: each owner file sets
+  its fact at both levels. The NixOS-only parts
+  (`home.packages`, the session variables and the shellbridge unit) are gated on
+  `strillix.runtime.nixos`, so a standalone home gets them from this file instead.
 - **`runtime.nix` reads rices through the registry, never through `rices`
   alone.** The hook hands it `ricesDirs` (name to rice directory); the
   lane's rices library and every per-rice path come from that map, so a
@@ -33,12 +39,13 @@ file covers only the strillix lane.
   lane discovers `rices` itself.
 - **`runtime.nix` sets `strillix.enable` and `strillix.quickshell.config`,** and
   brings the shell by importing `../quickshell/system.nix`; `runtime-home.nix`
-  imports `../quickshell/home.nix` beside `strillix.home`. `mkFact` accepts
+  imports `../quickshell/home.nix` beside its own body. `mkFact` accepts
   both facts because each is written from its owner's directory.
-- **`package.nix` is the installed strillix.** It wraps `pkgs.aoide.strillix` with
+- **`package.nix` is the installed strillix.** It wraps the aoide input's `strillix` output with
   `STRILLIX_TEMPLATES` defaulting to the shipped rices, and `strx` links to the
-  wrapper. `runtime.nix` installs it, and `runtime.nix` and `shellbridge.nix` exec
-  it. Core's `aoided` unit names no strillix variable: this dendrite writes nothing
+  wrapper. On NixOS `runtime.nix` installs it; a standalone home installs it from
+  `runtime-home.nix`. `shellbridge.nix` on NixOS and the home half's bridge unit both
+  exec it. Core's `aoided` unit names no strillix variable: this dendrite writes nothing
   onto it. Login shells reach the shipped rices through the installed strillix on
   PATH, not through `environment.sessionVariables`.
 
@@ -47,7 +54,7 @@ file covers only the strillix lane.
   look (500) and the behaviour (1000). It reads `rice.hyprland.*` (its own
   options), Home Manager's `wayland.windowManager.hyprland` state (`enable`,
   `finalPackage`, `configType`, `importantPrefixes`, `sourceFirst`), and
-  `osConfig.aoide.root`. It never sets `strillix.enable`: that fact means
+  `config.aoide.root` (the forwarded core option). It never sets `strillix.enable`: that fact means
   "the strillix runtime is present", and only `runtime.nix` can say so.
 - **Render order is fixed: the rice's `hyprland.conf` first, the Nix settings
   last.** A setting in `rice.hyprland.settings` therefore overrides the rice's
@@ -80,7 +87,7 @@ file covers only the strillix lane.
 - A new rice seam is one more `rice.hyprland.*` option in `default.nix`, and
   it belongs in the rendered file's place in the order above.
 - A new unit or activation step of the runtime's home half goes in
-  `strillix.home` in `runtime.nix`, not in a new `habit.home`.
+  `runtime-home.nix`, not in a new `habit.home`.
 
 ## Docs in the same commit
 

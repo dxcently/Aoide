@@ -43,7 +43,7 @@
     # Its nixpkgs only feeds habit's own checks; the library takes `lib` from
     # whoever applies it.
     habit = {
-      url = "github:dxcently/habit/v0.7.0";
+      url = "github:dxcently/habit/v0.7.1";
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
@@ -257,6 +257,10 @@
         nucleus = strillix.nucleusModule;
       }
       // registry.catalogue;
+
+      # The option contract for Home Manager (lib/strillix.nix `standaloneNucleus`): a
+      # standalone home imports it beside the habit selection.
+      homeModules.nucleus = strillix.standaloneNucleus;
 
       # The base package overlay: every `pkgs/<name>` this tree discovers plus
       # `aoide`, the self-flaked core — the same set the `packages` output names
