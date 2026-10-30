@@ -707,9 +707,10 @@ Contract guarantees:
   object a command is about, and what it does to that object. `kind` is one name
   from `KINDS` in `aoide-protocol`'s `registry.rs`; `verb` is one of `VERBS`:
   `list` a set, `show` one object, `watch` a stream a person reads, `act` on
-  one, `serve` a command that runs until something ends it and is not a stream
-  (a daemon, a listener, the adapters). A command about no object says `none`
-  for its kind, and `none` or `serve` for its verb; no other kind takes either.
+  one, and `serve`: the command runs until something ends it and is not a stream
+  of records (that is `watch`). A daemon, a listener and an adapter are `serve`.
+  A command about no object says `none` for its kind, and `none` or `serve` for
+  its verb; no other kind takes either.
   aoide's registry checks the value sets
   with `aoide-test-support`'s `every_command_has_a_kind` (the cli crate's test),
   and the core golden in cli/src/registry.rs pins every command's pair and each

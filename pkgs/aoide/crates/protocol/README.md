@@ -30,10 +30,10 @@ other crate in this workspace sits above.
   desktop app's floor reads through `schema --json`; `Command::check` never
   reads them. `Command` declares `kind` (the object a command is about) and
   `verb` (`list`, `show`, `watch`, `act`, `serve`, or `none`), each checked
-  against `KINDS`/`VERBS`. `serve` marks a command that runs until something
-  ends it and is not a stream a person reads (a stream is `watch`); a new
-  long-runner declares it. A new kind is one name in `KINDS`, then the commands that
-  carry it, and the core golden in cli/src/registry.rs moves with them.
+  against `KINDS`/`VERBS`. `serve`: the command runs until something ends it and
+  is not a stream of records (that is `watch`). A new long-runner declares it. A
+  new kind is one name in `KINDS`, then the commands that carry it, and the core
+  golden in cli/src/registry.rs moves with them.
   `Command::check` enforces the declarations (the door gate first, then the
   argument rules with defaults applied) and `Command::invoke` is
   check-then-handler, the entry every `dispatch()` uses. A door the command

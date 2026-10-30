@@ -42,10 +42,10 @@ pub const KINDS: &[&str] = &[
     "secret", "secret-hold", "session", "usage", "workspace",
 ];
 /// The verbs (CONTRACTS.md §3, `verb`): `list` a set, `show` one, `watch` a
-/// stream a person reads, `act` on one, `serve` a command that runs until
-/// something ends it and is not a stream. Kind `none` takes verb `none` or
-/// `serve`, and no other kind takes either: `none` is "about no object", and
-/// `serve` is a long-runner about no object.
+/// stream a person reads, `act` on one, and `serve`: the command runs until
+/// something ends it and is not a stream of records (that is `watch`). Kind
+/// `none` takes verb `none` or `serve`, and no other kind takes either: `none`
+/// is "about no object", and `serve` is a long-runner about no object.
 pub const VERBS: &[&str] = &["list", "show", "watch", "act", "serve", "none"];
 /// The Aoide RELEASE version (prebeta `0.0.X`, root README.md's
 /// "Versioning" section) — derives from THIS crate's own Cargo.toml, which
