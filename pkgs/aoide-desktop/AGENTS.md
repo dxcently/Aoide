@@ -35,19 +35,20 @@ and each crate's own invariants are in its AGENTS.md (`crates/door/AGENTS.md`,
 ## The gate
 
 - The deciding run has two parts. First, `nix flake check`'s `pkg-aoide-desktop`
-  builds this directory from the committed tree, in its own sandbox: it lints
+  builds this directory from the git-tracked files, dirty ones included, in its own sandbox: it lints
   the product configuration, then the gate's form, with `-D warnings`
   (`preCheck`), and it runs every test of the workspace with every feature
   (`checkPhase`), except the names listed in `checkFlags` in `default.nix`.
-  Second, the lane's gate, `dk.sh`, runs the listed tests. Lane test runs happen
-  in snowglobe VMs, never on the host. A `dk.sh` run is a pre-check: it may read
+  No pipeline runs the listed tests yet; the lane's gate runs them in snowglobe
+  VMs, never on the host. A run outside the sandbox is a pre-check: it may read
   a stale dep-info file that an earlier build left beside the test binary, and
   it proves nothing about the commit.
 - The listed names are the tests that fail in the sandbox, whose `/` belongs to
   uid 65534, which the exec crate's pin rule refuses. Each name matches exactly
   (`--exact`), so a test that shares a listed name is skipped too, and a test
-  not on the list is never skipped. A new test whose spawn reaches exec's pin
-  rule, and that is not on the list, turns the sandbox run red.
+  not on the list is never skipped. A name added to the list is skipped
+  silently. A new test whose spawn should succeed and reaches the pin rule, and
+  that is not on the list, turns the sandbox run red.
 - The lints are the guard. The root manifest's `[workspace.lints]` forbids
   `unsafe_code`, `disallowed_methods` and `disallowed_types`. Door and shell
   take that table with `[lints] workspace = true`, so no attribute in either
@@ -67,9 +68,10 @@ and each crate's own invariants are in its AGENTS.md (`crates/door/AGENTS.md`,
   with its golden text in `gates.rs`, so a path dropped from it, or a missing
   file, fails (`the_manifests_are_the_golden_ones`).
 - The forbids are errors on their own, and `-D warnings` makes every other
-  warning fail the gate too. The pre-check form of the second clippy pass is
-  `dk.sh clippy --offline --workspace --all-targets
-  --all-features -- -D warnings`.
+  warning fail the gate too. The sandbox lints the release product only; the
+  debug-only code is linted by the out-of-sandbox gate's debug clippy run, not
+  by the sandbox. The pre-check form of that run is `cargo clippy --offline
+  --workspace --all-targets --all-features -- -D warnings`.
 - The text scan is a tripwire, not the guard. `crates/shell/tests/gates.rs`
   reads every `.rs` file under this directory, and every file under `ui/` once
   that exists, skipping the root's `target`. It bars six words in each one:
@@ -123,13 +125,6 @@ and each crate's own invariants are in its AGENTS.md (`crates/door/AGENTS.md`,
   `aoide-protocol` is a path dependency outside this workspace, and it starts
   processes of its own. The app reaches it only through the exec crate's
   `untrusted` re-export.
-- A `dk.sh` run's environment is set by `dk.sh`, and the deciding run's is the
-  nix sandbox's. `dk.sh` runs cargo under `nix develop -i -k PATH`, so the tests
-  see only the dev shell's variables and PATH. It then unsets
-  `AOIDE_SESSION_ID`, `AOIDE_ROOT`, `LIBRARY_PATH`, `RUSTFLAGS`,
-  `CARGO_ENCODED_RUSTFLAGS`, `CARGO_BUILD_RUSTFLAGS`, the x86_64 Linux target's
-  `RUSTFLAGS`, `CLIPPY_CONF_DIR`, `RUSTC_BOOTSTRAP`, `RUSTC_WRAPPER`,
-  `RUSTC_WORKSPACE_WRAPPER`, `CARGO_BUILD_RUSTC_WRAPPER`,
-  `CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER`, `RUSTC` and `CARGO_BUILD_RUSTC`, and it
-  sets `HOME`, `CARGO_HOME`, `CARGO_BUILD_JOBS`, `TMPDIR`, `XDG_RUNTIME_DIR` and
-  `CARGO_TARGET_DIR`. Nothing scans the environment.
+- A run outside the sandbox sets its own environment; the deciding run's is the
+  nix sandbox's. No test scans the environment for words. The config test reads
+  `NIX_BUILD_TOP`, `CARGO_HOME` and `HOME`.

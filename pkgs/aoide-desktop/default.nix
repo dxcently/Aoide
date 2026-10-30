@@ -1,11 +1,11 @@
 # pkgs/aoide-desktop/default.nix — the desktop workspace's gate.
 #
-# `nix flake check` builds this package (`pkg-aoide-desktop`) from the committed
-# tree. `preCheck` lints the product configuration and the gate's form with
+# `nix flake check` builds this package (`pkg-aoide-desktop`) from the git-tracked
+# files, dirty ones included. `preCheck` lints the product configuration and the gate's form with
 # clippy, then `checkPhase` runs every test of the workspace, with every
-# feature, over that fresh build, except the names in `checkFlags`. A dk.sh run
-# is a pre-check: it may read a stale dep-info file, and it proves nothing about
-# the commit.
+# feature, over that fresh build, except the names in `checkFlags`. No pipeline
+# runs those listed tests yet. A run outside the sandbox is a pre-check: it may
+# read a stale dep-info file, and it proves nothing about the commit.
 {
   lib,
   stdenv,
@@ -52,8 +52,9 @@ rustPlatform.buildRustPackage {
   ];
 
   # The tests that fail in this sandbox, skipped by exact name (`--exact`). Its
-  # `/` belongs to uid 65534, which the exec crate's pin rule refuses. The
-  # gate's `dk.sh` runs these tests. A test not listed here runs in the sandbox.
+  # `/` belongs to uid 65534, which the exec crate's pin rule refuses. No
+  # pipeline runs these tests yet. A test not listed here runs in the sandbox,
+  # and a name added here is skipped silently.
   checkFlags = [
     "--exact"
     "--skip"
@@ -63,6 +64,7 @@ rustPlatform.buildRustPackage {
     "--skip"
     "tests::a_program_in_a_private_dir_under_a_sticky_other_writable_dir_is_pinned"
     "--skip"
+    # The sandbox refuses the setuid chmod (EPERM at exec lib.rs:1053) before any pin check.
     "tests::a_setuid_or_setgid_program_is_refused"
     "--skip"
     "an_exec_failure_is_reported_as_an_error"
