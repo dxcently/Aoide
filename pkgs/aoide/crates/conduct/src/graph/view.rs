@@ -77,6 +77,7 @@ const BLOCK_LINES_MAX: usize = 400;
 /// log can never pull an unbounded amount of bytes into a render buffer.
 const LOG_TAIL_BYTES: u64 = 64 * 1024;
 
+/// Tests that set it, and every test that runs a follow loop, hold env_lock.
 static INTERRUPTED: AtomicBool = AtomicBool::new(false);
 
 extern "C" fn on_sigint(_signum: libc::c_int) {
@@ -1438,6 +1439,7 @@ mod tests {
     /// follow does.
     #[test]
     fn a_remote_json_watch_closes_its_stream_with_an_end_object() {
+        let _lock = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let node = remote_node();
         let mut ended = wire_frame();
         ended.presence = "exited".to_string();
@@ -2482,6 +2484,7 @@ mod tests {
     /// frame, then one emit per CHANGED frame).
     #[test]
     fn a_remote_live_watch_ends_on_the_far_records_presence_and_emits_only_changes() {
+        let _lock = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let node = remote_node();
         let calls = std::sync::atomic::AtomicUsize::new(0);
         let ended = || {
@@ -2536,6 +2539,7 @@ mod tests {
     /// own escapes in the text.
     #[test]
     fn a_failed_remote_poll_ends_the_watch_with_its_reason() {
+        let _lock = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let node = remote_node();
         let calls = std::sync::atomic::AtomicUsize::new(0);
         let out = follow_remote(
