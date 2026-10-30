@@ -8,9 +8,15 @@
 //! no line. The record's `timestamp` is not read: the protocol has no timestamp
 //! parser yet, so these lines carry `ts: None`.
 //!
-//! The fixture `tests/fixtures/docs-claude-transcript.jsonl` is written from
-//! Claude Code's public transcript docs. Real-session fixtures replace it when
-//! Rook's probe (ruling 198) runs.
+//! A turn is several records: each assistant content block arrives as its own
+//! record, sharing a `requestId`, and each projects under its own `uuid`. A
+//! thinking block is empty in print mode (text blank, signature only), so an
+//! empty one emits no line.
+//!
+//! Fixtures: `tests/fixtures/docs-claude-transcript.jsonl` is written from
+//! Claude Code's public transcript docs; `claude-real-read-tool.jsonl` is a real
+//! session (a throwaway project, one prompt, one Read), sanitised by Rook's probe
+//! (ruling 198). Unknown keys on any record are ignored.
 
 use super::{ChatLine, Role};
 use serde_json::Value;
@@ -46,8 +52,11 @@ fn content_lines(session: &str, id: &str, content: Option<&Value>, speaker: Role
                     let line = |role| ChatLine::new(session, &id_at(id, i, n), None, role);
                     match b.get("type").and_then(Value::as_str)? {
                         "text" => Some(line(speaker).text(field(b, "text"))),
+                        // Print mode writes thinking empty, with only a signature: an
+                        // empty block is no message, so it emits no line.
                         "thinking" if matches!(speaker, Role::Agent) => {
-                            Some(line(Role::Agent).thinking().text(field(b, "thinking")))
+                            let thought = field(b, "thinking");
+                            (!thought.is_empty()).then(|| line(Role::Agent).thinking().text(thought))
                         }
                         "tool_use" => {
                             let input = b.get("input").map(Value::to_string);

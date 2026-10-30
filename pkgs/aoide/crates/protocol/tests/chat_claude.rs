@@ -6,7 +6,10 @@ use aoide_protocol::agents::agent_profile;
 use aoide_protocol::chat::{ChatLine, ChatSupport};
 use serde_json::{json, Value};
 
+// `docs-*` is written from Claude Code's public transcript docs; `claude-real-*`
+// is a real session (a throwaway project, one prompt, one Read), sanitised.
 const FIXTURE: &str = include_str!("fixtures/docs-claude-transcript.jsonl");
+const REAL: &str = include_str!("fixtures/claude-real-read-tool.jsonl");
 
 fn project(line: &str) -> Vec<Value> {
     let profile = agent_profile("claude").expect("claude has a profile");
@@ -14,6 +17,10 @@ fn project(line: &str) -> Vec<Value> {
         panic!("claude has a chat adapter");
     };
     (adapter.project)("s-1", line).iter().map(ChatLine::json).collect()
+}
+
+fn real(n: usize) -> &'static str {
+    REAL.lines().nth(n).expect("real fixture line")
 }
 
 fn line(n: usize) -> &'static str {
@@ -78,4 +85,50 @@ fn a_string_assistant_reply_is_one_agent_line() {
 fn a_profile_names_claude_as_an_adapter_reading_the_transcript() {
     let profile = agent_profile("claude").expect("claude has a profile");
     assert!(matches!(profile.chat, ChatSupport::Adapter(_)));
+}
+
+#[test]
+fn a_turn_spans_records_that_share_a_request_and_each_projects_its_own_lines() {
+    // Records 3 and 4 are one assistant turn (one requestId), two records with
+    // two uuids: each projects on its own, under its own id.
+    let thinking: Value = serde_json::from_str(real(3)).unwrap();
+    let text: Value = serde_json::from_str(real(4)).unwrap();
+    assert_eq!(thinking["requestId"], text["requestId"]);
+    assert_ne!(thinking["uuid"], text["uuid"]);
+    let got = project(real(4));
+    assert_eq!(got.len(), 1, "{got:?}");
+    assert_eq!(got[0]["role"], json!("agent"));
+    assert_eq!(got[0]["id"], text["uuid"]);
+    assert!(!got[0]["text"].as_str().unwrap_or("").is_empty());
+}
+
+#[test]
+fn the_real_prompt_is_a_string_and_the_tool_result_is_an_array() {
+    let prompt = project(real(0));
+    assert_eq!(prompt.len(), 1, "{prompt:?}");
+    assert_eq!(prompt[0]["role"], json!("user"));
+    assert!(!prompt[0]["text"].as_str().unwrap_or("").is_empty());
+
+    let result = project(real(2));
+    assert_eq!(result.len(), 1, "{result:?}");
+    assert_eq!(result[0]["role"], json!("tool"));
+    assert!(result[0]["tool"]["result"].is_string(), "{result:?}");
+}
+
+#[test]
+fn an_empty_thinking_block_emits_no_line() {
+    // Print mode writes the thinking text empty, with only a signature. The
+    // record is a thinking block and nothing else: no line at all.
+    let thinking: Value = serde_json::from_str(real(3)).unwrap();
+    assert_eq!(thinking["message"]["content"][0]["thinking"], json!(""));
+    assert!(project(real(3)).is_empty(), "an empty thinking block is not a message");
+}
+
+#[test]
+fn extra_keys_on_real_records_are_ignored_and_no_record_fails() {
+    for n in 0..5 {
+        let _ = project(real(n));
+    }
+    let lines: usize = (0..5).map(|n| project(real(n)).len()).sum();
+    assert_eq!(lines, 4, "five records, one of them an empty thinking block");
 }
