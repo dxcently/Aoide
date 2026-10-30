@@ -377,10 +377,10 @@ pub fn suggestion_or_list(bin: &str, registry: &Registry) {
 
 /// Every command declares a `kind` and a `verb`, each from the protocol's
 /// vocabulary (`KINDS`, `VERBS`; CONTRACTS.md §3). A blank kind is "not decided
-/// yet", and core refuses it; a `none` kind pairs with verb `none`, and any
-/// other kind takes list, show, watch or act. aoide's registry calls this, from
-/// the cli crate's test. Strillix does not call it yet: once strx tags its
-/// commands, its registry test makes the one call.
+/// yet", and core refuses it; a `none` kind pairs with verb `none` or `serve`,
+/// and any other kind takes list, show, watch or act. aoide's registry calls
+/// this, from the cli crate's test. Strillix does not call it yet: once strx
+/// tags its commands, its registry test makes the one call.
 pub fn every_command_has_a_kind(registry: &Registry) {
     for c in registry.commands() {
         let path = c.dotted();
@@ -388,7 +388,13 @@ pub fn every_command_has_a_kind(registry: &Registry) {
         assert!(KINDS.contains(&c.kind), "`{path}`: kind `{}` is not in aoide_protocol::registry::KINDS", c.kind);
         assert!(!c.verb.is_empty(), "`{path}` has no verb: declare `verb:` on its cmd!");
         assert!(VERBS.contains(&c.verb), "`{path}`: verb `{}` is not in aoide_protocol::registry::VERBS", c.verb);
-        assert_eq!(c.kind == "none", c.verb == "none", "`{path}`: kind `{}` and verb `{}` disagree about `none`", c.kind, c.verb);
+        assert_eq!(
+            c.kind == "none",
+            matches!(c.verb, "none" | "serve"),
+            "`{path}`: kind `{}` and verb `{}` disagree: kind none takes verb none or serve, and no other kind does",
+            c.kind,
+            c.verb
+        );
     }
 }
 
@@ -427,6 +433,7 @@ mod kind_tests {
     fn a_declared_kind_and_verb_pass() {
         every_command_has_a_kind(&one("session", "list"));
         every_command_has_a_kind(&one("none", "none"));
+        every_command_has_a_kind(&one("none", "serve"));
     }
 
     #[test]
@@ -454,8 +461,14 @@ mod kind_tests {
     }
 
     #[test]
-    #[should_panic(expected = "disagree about `none`")]
+    #[should_panic(expected = "disagree:")]
     fn kind_none_with_a_real_verb_fails() {
         every_command_has_a_kind(&one("none", "act"));
+    }
+
+    #[test]
+    #[should_panic(expected = "disagree:")]
+    fn a_serve_verb_on_a_kind_fails() {
+        every_command_has_a_kind(&one("session", "serve"));
     }
 }

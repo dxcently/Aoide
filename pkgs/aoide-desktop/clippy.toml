@@ -1,0 +1,12 @@
+# The desktop gate's clippy run. A call through an alias of any path below
+# fails it. The exec crate's lints table allows these lints, and every other
+# member forbids them.
+disallowed-types = [
+    { path = "std::process::Command", reason = "only the exec crate starts a process" },
+]
+disallowed-methods = [
+    { path = "std::process::Command::new", reason = "only the exec crate starts a process" },
+    { path = "std::os::unix::process::CommandExt::pre_exec", reason = "only the exec crate runs code between fork and exec" },
+    { path = "std::os::unix::process::CommandExt::exec", reason = "only the exec crate replaces a process image" },
+    { path = "std::process::Child::kill", reason = "it sends the uncatchable signal; a child is signalled through the exec crate" },
+]

@@ -1,0 +1,33 @@
+[package]
+name = "aoide-desktop-exec"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+# A doctest is a separate crate that no clippy run lints; no member runs them.
+doctest = false
+
+[features]
+# The fakes the door and shell tests run on: `test_doors` and `make_fifo`.
+fakes = []
+
+[dependencies]
+# The one member that depends on aoide-protocol, which starts processes too.
+# The app reaches it only through this crate's re-export of `untrusted`.
+aoide-protocol = { path = "../../../aoide/crates/protocol" }
+libc.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+# The one member whose table allows the three lints the workspace forbids.
+# Every other member forbids them, so `unsafe`, a process start and a signal
+# appear only here, in src/lib.rs, and in aoide-protocol, which this table
+# does not cover. It takes no `[lints] workspace = true`:
+# cargo refuses that next to its own table.
+[lints.rust]
+unsafe_code = "allow"
+
+[lints.clippy]
+disallowed_methods = "allow"
+disallowed_types = "allow"

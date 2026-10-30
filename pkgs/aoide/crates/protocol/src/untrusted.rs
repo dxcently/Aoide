@@ -53,6 +53,139 @@ pub fn is_unsafe(c: char) -> bool {
     c.is_control() || is_format(c) || is_invisible(c) || matches!(c, '\u{2028}' | '\u{2029}')
 }
 
+/// The one predicate for "[`visible`] spells this character": a backslash, every
+/// [`is_unsafe`] character, every whitespace but a plain space, and the marks and
+/// ignorables. `visible_char` and the JSON writers below all read it, so the
+/// table is never copied.
+fn would_spell(c: char) -> bool {
+    c == '\\' || is_unsafe(c) || (c.is_whitespace() && c != ' ') || is_mark_or_ignorable(c)
+}
+
+/// One character as a human reads it: itself when it is safe to print, else a
+/// visible escape. A backslash is doubled, so an escape in the output is never
+/// mistaken for text that spelled one (`printf '\x1b'` and a real ESC read
+/// differently).
+fn visible_char(c: char) -> String {
+    if !would_spell(c) {
+        return c.to_string();
+    }
+    match c {
+        '\\' => "\\\\".to_string(),
+        '\n' => "\\n".to_string(),
+        '\r' => "\\r".to_string(),
+        '\t' => "\\t".to_string(),
+        c if c.is_ascii() && c.is_control() => format!("\\x{:02x}", c as u32),
+        c => format!("\\u{{{:x}}}", c as u32),
+    }
+}
+
+/// Text someone else wrote, shown to a human who is about to act on it: every
+/// character [`is_unsafe`] says a terminal must not be handed, and every
+/// whitespace but a plain space (a no-break space reads as one and is not),
+/// spelled as a visible escape (`\n`, `\x1b`, `\u{202e}`) instead of being
+/// stripped or printed. What replays is what is shown, never a cleaner
+/// version of it. `pub` so the conductor's approval views, and the desktop
+/// app's ask dialog, reach the one rule.
+pub fn visible(s: &str) -> String {
+    s.chars().map(visible_char).collect()
+}
+
+/// [`visible`] for a held launch, every non-ASCII character spelled too: a
+/// Cyrillic `а` or a combining mark looks like the ASCII text it imitates, so an
+/// approver of a command reads only the ASCII it is shown. A held spawn's
+/// command goes through this, and nothing else does.
+pub fn visible_held(s: &str) -> String {
+    s.chars()
+        .map(|c| if c.is_ascii() { visible_char(c) } else { format!("\\u{{{:x}}}", c as u32) })
+        .collect()
+}
+
+/// An untrusted JSON value as a dialog or a pane shows it: pretty, with every
+/// object's keys sorted at every depth, and every character [`visible`] would
+/// spell written as a JSON `\uXXXX` escape (a character past the BMP as its
+/// UTF-16 pair). JSON's own escapes are unchanged, so the text parses back to
+/// the same value, holds no raw character `visible` would spell, and doubles no
+/// backslash.
+pub fn visible_json(value: &serde_json::Value) -> String {
+    escape_json(&serde_json::to_string_pretty(&sorted(value)).expect("a json value serializes"))
+}
+
+/// [`visible_json`] on one line, for a command line's body.
+pub fn visible_json_line(value: &serde_json::Value) -> String {
+    escape_json(&serde_json::to_string(&sorted(value)).expect("a json value serializes"))
+}
+
+/// JSON text with each character [`would_spell`] names, inside a string, written
+/// as a JSON `\uXXXX` escape. A JSON escape is copied as it is, so no backslash
+/// is doubled, and structure outside a string (the pretty printer's newlines and
+/// indents) is never touched.
+fn escape_json(json: &str) -> String {
+    let mut out = String::with_capacity(json.len());
+    let mut in_string = false;
+    let mut chars = json.chars();
+    while let Some(c) = chars.next() {
+        match c {
+            '"' => {
+                in_string = !in_string;
+                out.push(c);
+            }
+            '\\' if in_string => {
+                out.push(c);
+                out.extend(chars.next());
+            }
+            c if in_string && would_spell(c) => {
+                let mut units = [0u16; 2];
+                for unit in c.encode_utf16(&mut units) {
+                    out.push_str(&format!("\\u{unit:04x}"));
+                }
+            }
+            c => out.push(c),
+        }
+    }
+    out
+}
+
+/// The value with every object's keys in sorted order, at every depth. The
+/// order is set here, not left to serde_json's map, which a `preserve_order`
+/// feature anywhere in the build would change.
+fn sorted(value: &serde_json::Value) -> serde_json::Value {
+    use serde_json::{Map, Value};
+    match value {
+        Value::Object(map) => {
+            let mut keys: Vec<&String> = map.keys().collect();
+            keys.sort();
+            let entries = keys.into_iter().map(|k| (k.clone(), sorted(&map[k])));
+            Value::Object(entries.collect::<Map<String, Value>>())
+        }
+        Value::Array(items) => Value::Array(items.iter().map(sorted).collect()),
+        other => other.clone(),
+    }
+}
+
+/// Marks that draw over or into their neighbours (combining diacritics, the
+/// Mn/Me blocks that carry most overlays) and the default-ignorable code points
+/// a terminal or a font may draw as nothing. A reader cannot tell these from
+/// the text around them, so they are spelled, never printed.
+fn is_mark_or_ignorable(c: char) -> bool {
+    matches!(c as u32,
+        0x034F
+        | 0x0300..=0x036F
+        | 0x115F..=0x1160
+        | 0x17B4..=0x17B5
+        | 0x180B..=0x180F
+        | 0x1AB0..=0x1AFF
+        | 0x1DC0..=0x1DFF
+        | 0x2060..=0x206F
+        | 0x20D0..=0x20FF
+        | 0x3164
+        | 0xFE00..=0xFE0F
+        | 0xFE20..=0xFE2F
+        | 0xFEFF
+        | 0xFFA0
+        | 0xFFF0..=0xFFF8
+        | 0xE0000..=0xE0FFF)
+}
+
 /// The text an audit writer stores for a character no terminal may be handed.
 /// Only what a JSON writer leaves raw is spelled here: DEL, the C1 controls,
 /// `Cf` and the invisible set. A C0 control is already a JSON escape (`\u001b`,
@@ -299,6 +432,172 @@ mod tests {
                 earlier.is_none(),
                 "{earlier:?} and {s:?} both escape to {out:?}"
             );
+        }
+    }
+
+    /// `visible` spells what `clean_line` would drop, so an approver sees
+    /// every byte that will replay: controls, the bidi override, a no-break
+    /// space. A backslash is doubled so a literal `\x1b` and a real ESC differ.
+    #[test]
+    fn visible_spells_every_unsafe_character_and_never_drops_one() {
+        assert_eq!(visible("a\nb\r\tc"), "a\\nb\\r\\tc");
+        assert_eq!(visible("\u{1b}[31m\u{7}"), "\\x1b[31m\\x07");
+        assert_eq!(visible("evil\u{202e}txt\u{200b}"), "evil\\u{202e}txt\\u{200b}");
+        assert_eq!(visible("a\u{a0}b\u{2028}c\u{85}"), "a\\u{a0}b\\u{2028}c\\u{85}");
+        assert_eq!(visible("printf '\\x1b'"), "printf '\\\\x1b'");
+        assert_ne!(visible("\\x1b"), visible("\u{1b}"), "a spelled escape is not an ESC");
+        assert_eq!(visible("plain text é 日本 — ok"), "plain text é 日本 — ok");
+        assert!(visible("a\nb\u{1b}\u{202e}").chars().all(|c| !is_unsafe(c)));
+    }
+
+    /// A combining mark and a default-ignorable are spelled, where they used to
+    /// print raw: a mark draws over its neighbour and an ignorable can hide
+    /// one, so neither may read as the text it sits in. Before the change each
+    /// of these came out byte-identical.
+    #[test]
+    fn visible_spells_combining_marks_and_default_ignorables() {
+        assert_eq!(visible("pro\u{34f}ject"), "pro\\u{34f}ject");
+        assert_eq!(visible("c\u{336}u\u{336}rl"), "c\\u{336}u\\u{336}rl");
+        assert_eq!(visible("\u{180b}x\u{fe0f}"), "\\u{180b}x\\u{fe0f}");
+        assert_eq!(visible("e\u{301}"), "e\\u{301}", "a precomposed-free accent is spelled too");
+        assert_eq!(visible("é 日本"), "é 日本", "plain letters and CJK are not marks");
+    }
+
+    /// A held launch's view is ASCII: a Cyrillic letter that looks like an ASCII
+    /// one is spelled, so the approver reads the command as it runs.
+    #[test]
+    fn visible_held_spells_every_non_ascii_character() {
+        assert_eq!(visible_held("/home/khoa/pr\u{43e}ject"), "/home/khoa/pr\\u{43e}ject");
+        assert_eq!(visible_held("a b\nc"), "a b\\nc");
+        assert_eq!(visible("/home/khoa/pr\u{43e}ject"), "/home/khoa/pr\u{43e}ject", "the general view keeps letters");
+    }
+
+    /// The characters a JSON writer must spell: ESC, CR, LF and TAB (JSON's own
+    /// escapes for the last three, `\u001b` for ESC), DEL, U+009B and the two
+    /// line separators (each raw in serde_json), a bidi override, a zero-width
+    /// space, a combining mark, a tag character past the BMP, a backslash and a
+    /// quote.
+    const JSON_SPELLED: [char; 14] = [
+        '\u{1b}', '\r', '\n', '\t', '\u{7f}', '\u{9b}', '\u{2028}', '\u{2029}', '\u{202e}', '\u{200b}', '\u{301}',
+        '\u{e0001}', '\\', '"',
+    ];
+
+    /// The characters of `json` that [`would_spell`] names and that stand as
+    /// themselves: inside a string, outside a JSON escape.
+    fn raw_spelled(json: &str) -> Vec<char> {
+        let mut found = Vec::new();
+        let mut in_string = false;
+        let mut chars = json.chars();
+        while let Some(c) = chars.next() {
+            match c {
+                '"' => in_string = !in_string,
+                '\\' if in_string => {
+                    chars.next();
+                }
+                c if in_string && would_spell(c) => found.push(c),
+                _ => {}
+            }
+        }
+        found
+    }
+
+    /// Each character `visible` would spell, in a key and in a string, comes out
+    /// as one JSON escape: the output parses back to the input, holds no raw
+    /// spelled character, and shows a backslash once, never four times. The
+    /// backslash and the quote are JSON's own escapes.
+    #[test]
+    fn visible_json_escapes_each_spelled_character_in_a_key_and_a_string() {
+        for c in JSON_SPELLED {
+            let mut map = serde_json::Map::new();
+            map.insert(format!("k{c}"), serde_json::Value::String(format!("v{c}")));
+            let value = serde_json::Value::Object(map);
+            for out in [visible_json(&value), visible_json_line(&value)] {
+                assert_eq!(serde_json::from_str::<serde_json::Value>(&out).unwrap(), value, "{c:?}: {out}");
+                assert!(raw_spelled(&out).is_empty(), "{c:?}: {out}");
+                assert!(!out.contains(r"\\\\"), "{c:?}: {out}");
+                if c == '\\' {
+                    assert!(out.contains(r"\\"), "{c:?}: {out}");
+                }
+                if c == '"' {
+                    assert!(out.contains(r#"\""#), "{c:?}: {out}");
+                }
+            }
+        }
+    }
+
+    /// DEL and the two line separators are each written as a JSON `\u` escape, in
+    /// a key and in a string, in both forms. The check names the escape itself,
+    /// not [`would_spell`], so a character that stopped being spelled fails here.
+    #[test]
+    fn visible_json_writes_del_and_the_line_separators_as_u_escapes() {
+        for (c, escape) in [('\u{7f}', r"\u007f"), ('\u{2028}', r"\u2028"), ('\u{2029}', r"\u2029")] {
+            let mut map = serde_json::Map::new();
+            map.insert(format!("k{c}"), serde_json::Value::String(format!("v{c}")));
+            let value = serde_json::Value::Object(map);
+            for out in [visible_json(&value), visible_json_line(&value)] {
+                assert_eq!(out.matches(escape).count(), 2, "{c:?}: {out}");
+                assert!(!out.contains(c), "{c:?}: {out}");
+            }
+        }
+    }
+
+    /// A character past the BMP is written as its UTF-16 pair, as JSON needs.
+    #[test]
+    fn visible_json_writes_a_character_past_the_bmp_as_a_surrogate_pair() {
+        assert_eq!(visible_json_line(&serde_json::json!("\u{e0001}")), r#""\udb40\udc01""#);
+    }
+
+    /// A backslash in a value is one JSON escape, and the escaper leaves it be.
+    #[test]
+    fn visible_json_does_not_double_a_backslash() {
+        assert_eq!(visible_json_line(&serde_json::json!({"path": "C:\\x"})), r#"{"path":"C:\\x"}"#);
+    }
+
+    /// The pretty form keeps its layout, with the newlines and indents outside
+    /// its strings, and the line form has no newline at all.
+    #[test]
+    fn visible_json_is_pretty_and_the_line_form_is_one_line() {
+        let value = serde_json::json!({"a": [1, {"b": "x\ny"}]});
+        let pretty = visible_json(&value);
+        assert!(pretty.contains("\n  \"a\": ["), "{pretty}");
+        assert!(pretty.contains(r#""x\ny""#), "{pretty}");
+        assert_eq!(serde_json::from_str::<serde_json::Value>(&pretty).unwrap(), value);
+        assert!(!visible_json_line(&value).contains('\n'));
+    }
+
+    /// Keys come out sorted at every depth. A serde_json map is a BTreeMap unless
+    /// the `preserve_order` feature is on, so this test exercises the sort only
+    /// where that feature is on, which neither lock enables today.
+    #[test]
+    fn visible_json_sorts_keys_at_every_depth() {
+        let value = serde_json::json!({"b": 1, "a": {"d": 2, "c": [{"z": 0, "y": 0}]}});
+        let out = visible_json_line(&value);
+        assert!(out.find(r#""a""#) < out.find(r#""b""#), "{out}");
+        assert!(out.find(r#""c""#) < out.find(r#""d""#), "{out}");
+        assert!(out.find(r#""y""#) < out.find(r#""z""#), "{out}");
+    }
+
+    /// A two-key object prints its keys in sorted order, in both forms, whichever
+    /// order it was built in.
+    #[test]
+    fn visible_json_prints_a_two_key_object_sorted() {
+        let mut map = serde_json::Map::new();
+        map.insert("zeta".to_string(), serde_json::json!(1));
+        map.insert("alpha".to_string(), serde_json::json!(2));
+        let value = serde_json::Value::Object(map);
+        assert_eq!(visible_json_line(&value), r#"{"alpha":2,"zeta":1}"#);
+        let pretty = visible_json(&value);
+        assert!(pretty.find(r#""alpha""#) < pretty.find(r#""zeta""#), "{pretty}");
+    }
+
+    /// `visible` spells a character exactly when [`would_spell`] names it, for
+    /// every scalar value. The JSON writers read that same predicate.
+    #[test]
+    fn visible_spells_exactly_the_characters_would_spell_names() {
+        for n in 0..=0x10_ffff_u32 {
+            let Some(c) = char::from_u32(n) else { continue };
+            let spelled = visible(&c.to_string()) != c.to_string();
+            assert_eq!(spelled, would_spell(c), "U+{n:04X}");
         }
     }
 }

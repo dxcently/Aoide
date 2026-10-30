@@ -452,6 +452,7 @@
       # distrobox works from this shell with no host configuration — a
       # dendrite was considered and rejected: test tooling is developer
       # environment, not a host capability.
+      # `desktop`: the GTK and WebKit inputs for pkgs/aoide-desktop, not `default`.
       devShells = forAllSystems (
         system:
         let
@@ -487,6 +488,29 @@
             packages = with pkgs; [
               distrobox
               podman
+            ];
+          };
+
+          desktop = pkgs.mkShell {
+            name = "aoide-desktop";
+            nativeBuildInputs = with pkgs; [
+              pkg-config
+              cargo
+              rustc
+              clippy
+            ];
+            buildInputs = with pkgs; [
+              webkitgtk_4_1
+              gtk3
+              libsoup_3
+              glib
+              cairo
+              pango
+              gdk-pixbuf
+              at-spi2-atk
+              harfbuzz
+              librsvg
+              openssl
             ];
           };
         }

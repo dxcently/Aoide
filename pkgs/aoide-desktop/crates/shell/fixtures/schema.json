@@ -1,0 +1,73 @@
+{
+  "schemaVersion": "0",
+  "aoide": "0.0.26",
+  "stageNotesVersion": "1",
+  "commands": [
+    {
+      "path": ["config", "set"],
+      "verb": "act",
+      "summary": "Set a key.",
+      "args": [],
+      "flags": [],
+      "implemented": true
+    },
+    {
+      "path": ["config"],
+      "verb": "show",
+      "summary": "Show the effective runtime config.",
+      "args": [],
+      "flags": [
+        {"name": "json", "type": "bool", "description": "Structured I/O."}
+      ],
+      "implemented": true
+    },
+    {
+      "path": ["send"],
+      "verb": "act",
+      "summary": "Inject text into a conducted session.",
+      "args": [
+        {"name": "text", "type": "string", "required": true, "description": "The text to inject."}
+      ],
+      "flags": [
+        {"name": "json", "type": "bool", "description": "Structured I/O."},
+        {"name": "yes", "type": "bool", "description": "Deliver without the gate."},
+        {"name": "submit", "type": "bool", "description": "Press enter after the text."},
+        {"name": "id", "type": "string", "description": "Target session id.", "value": "session-id"}
+      ]
+    },
+    {
+      "path": ["session", "trace"],
+      "verb": "watch",
+      "summary": "Show a session's trace.",
+      "args": [
+        {"name": "id", "type": "string", "required": true, "description": "The session."}
+      ],
+      "flags": [
+        {"name": "json", "type": "bool", "description": "Structured I/O."},
+        {"name": "follow", "type": "bool", "description": "Keep printing new records."},
+        {"name": "tail", "type": "int", "description": "Records to start from.", "value": "n"}
+      ]
+    },
+    {
+      "path": ["session", "watch"],
+      "verb": "watch",
+      "summary": "Watch a session's run.",
+      "args": [
+        {"name": "id", "type": "string", "required": true, "description": "The session."}
+      ],
+      "flags": [
+        {"name": "json", "type": "bool", "description": "Structured I/O."}
+      ]
+    },
+    {
+      "path": ["melete", "status"],
+      "verb": "show",
+      "summary": "Show the melete store.",
+      "args": [],
+      "flags": [
+        {"name": "json", "type": "bool", "description": "Structured I/O."},
+        {"name": "limit", "type": "int", "description": "Rows to show."}
+      ]
+    }
+  ]
+}

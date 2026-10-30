@@ -795,16 +795,36 @@ mod tests {
         aoide_test_support::registry_walk::follow_is_a_watch(&crate::commands::all());
     }
 
+    /// A command that runs until something ends it, and is not a stream a person
+    /// reads, carries verb `serve`; a stream is `watch`. A new long-runner
+    /// declares `serve` on its own `cmd!`.
+    #[test]
+    fn the_long_runners_are_serves() {
+        let r = crate::commands::all();
+        for path in [
+            "a2a.serve",
+            "adapter.melete",
+            "conductor",
+            "daemon",
+            "mail.serve",
+            "mcp.serve",
+            "secrets.serve",
+        ] {
+            let c = r.commands().find(|c| c.dotted() == path).expect(path);
+            assert_eq!(c.verb, "serve", "`{path}` runs until something ends it, so its verb is serve");
+        }
+    }
+
     #[test]
     fn kinds_match_the_golden_snapshot() {
         let r = crate::commands::all();
         let mut got: Vec<String> = r.commands().map(|c| format!("{} {} {}", c.dotted(), c.kind, c.verb)).collect();
         got.sort();
         let mut expected: Vec<&str> = vec![
-            "a2a.serve none none",
-            "adapter.melete none none",
+            "a2a.serve none serve",
+            "adapter.melete none serve",
             "conduct session act",
-            "conductor none none",
+            "conductor none serve",
             "config config show",
             "config.set config act",
             "content.approve content act",
@@ -813,7 +833,7 @@ mod tests {
             "content.query content list",
             "content.register content act",
             "context note show",
-            "daemon none none",
+            "daemon none serve",
             "events.tail event watch",
             "graph graph show",
             "graph.link graph act",
@@ -838,10 +858,10 @@ mod tests {
             "mail.rm letter act",
             "mail.route mesh show",
             "mail.send letter act",
-            "mail.serve none none",
+            "mail.serve none serve",
             "mail.show letter show",
             "make none none",
-            "mcp.serve none none",
+            "mcp.serve none serve",
             "melete.call melete act",
             "melete.graph melete show",
             "melete.status melete show",
@@ -889,7 +909,7 @@ mod tests {
             "secrets.put secret act",
             "secrets.revoke secret act",
             "secrets.rm secret act",
-            "secrets.serve none none",
+            "secrets.serve none serve",
             "secrets.set-totp secret act",
             "secrets.status secret list",
             "secrets.watch secret-hold watch",

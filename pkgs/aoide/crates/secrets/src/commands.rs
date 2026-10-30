@@ -206,7 +206,7 @@ pub fn register(r: &mut Registry) {
         examples: ["secrets serve"],
         brief: "Run the secrets broker (unix socket, resolves by policy).",
         doors: &[Door::Cli],
-        kind: "none", verb: "none",
+        kind: "none", verb: "serve",
     ));
     r.insert(cmd!(
         path: ["secrets", "exec"],
