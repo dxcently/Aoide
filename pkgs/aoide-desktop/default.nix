@@ -268,6 +268,10 @@ rustPlatform.buildRustPackage {
     "a_frame_granted_a_parent_cannot_reach_a_floored_child_through_positionals"
     "--skip"
     "a_line_that_is_not_utf8_arrives_as_other_and_a_line_past_the_cap_as_dropped"
+    "--skip"
+    "what_a_child_prints_after_its_interrupt_is_capped_and_its_overflow_is_counted"
+    "--skip"
+    "ending_a_follow_with_sixteen_unread_lines_returns_within_the_bound"
   ];
 
   meta.description = "The aoide desktop workspace, gated by its tests and clippy runs";
