@@ -323,8 +323,12 @@ blank one is refused too.
   gate, so `--yes` does not pass it. A harness's own wrap is unchanged.
 - **A native send (chat-core, commit 8)** — a target whose profile names a
   `native_send` (eidolon) is delivered through that CLI, `eidolon send --from
-  aoide --wake [--operator] <id> -` with the text on stdin
-  (`send.rs::native_deliver`), not through the control socket. The gate, the
+  aoide --wake [--operator] -- <id> -` with the text on stdin
+  (`send.rs::native_deliver`), not through the control socket. The `--` ends
+  the flags, so an id that begins with `-` stays positional. The call has a
+  10-second deadline (`NATIVE_DEADLINE`): past it the child is killed and reaped,
+  and the send is an error. The deadline is this crate's own choice; no
+  harness declares one. The gate, the
   pending queue and the audit run first, as for every send. `--operator` is set
   only when the calling process has no sealed session in its `/proc` ancestry
   (`send.rs::production_person`: this process on the CLI door, the door's own

@@ -1293,6 +1293,9 @@ pub(in crate::graph) fn session_send_held(inv: &Invocation, id: &str, operator: 
     deliver_local_as(inv, id, real_attested_sender, move |_| operator)
 }
 
+/// The longest a native send may run before its child is killed and reaped.
+const NATIVE_DEADLINE: std::time::Duration = std::time::Duration::from_secs(10);
+
 /// Runs a harness's native send (`eidolon send … -`) with `message` on stdin.
 /// Exit 0 is accepted; anything else is its stderr, as the refusal.
 fn native_deliver(argv: &[String], message: &str) -> Result<(), String> {
@@ -1305,13 +1308,35 @@ fn native_deliver(argv: &[String], message: &str) -> Result<(), String> {
         .stderr(Stdio::piped())
         .spawn()
         .map_err(|e| format!("cannot run eidolon: {e}"))?;
-    child
-        .stdin
-        .take()
-        .expect("piped stdin")
-        .write_all(message.as_bytes())
-        .map_err(|e| e.to_string())?;
+    let mut stdin = child.stdin.take().expect("piped stdin");
+    let text = message.to_owned();
+    // The write runs beside the wait: a child that never reads its stdin is
+    // held by the deadline, and killing it closes the pipe under the writer.
+    let writer = std::thread::spawn(move || stdin.write_all(text.as_bytes()));
+    let end = std::time::Instant::now() + NATIVE_DEADLINE;
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => break,
+            Ok(None) if std::time::Instant::now() < end => std::thread::sleep(std::time::Duration::from_millis(20)),
+            Ok(None) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                let _ = writer.join();
+                return Err(format!("eidolon did not return within {}s and was killed", NATIVE_DEADLINE.as_secs()));
+            }
+            Err(e) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                let _ = writer.join();
+                return Err(e.to_string());
+            }
+        }
+    }
     let out = child.wait_with_output().map_err(|e| e.to_string())?;
+    writer
+        .join()
+        .unwrap_or_else(|_| Err(std::io::Error::other("the stdin writer panicked")))
+        .map_err(|e| e.to_string())?;
     if out.status.success() {
         Ok(())
     } else {
@@ -4820,6 +4845,33 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    /// A native CLI that never returns is killed at the deadline, and its child
+    /// is reaped: its pid is gone from the process table, not left a zombie.
+    /// Red on the base, which waited on it without bound.
+    #[test]
+    fn a_native_send_that_hangs_is_killed_at_the_deadline_and_reaped() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let bin = unique_stage("fake-eidolon-hang");
+        std::fs::create_dir_all(&bin).unwrap();
+        let script = bin.join("eidolon");
+        let pid_file = bin.join("pid");
+        std::fs::write(&script, format!("#!/bin/sh\necho $$ > '{}'\nexec sleep 60\n", pid_file.display())).unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        with_fake_eidolon(&bin, || {
+            let (tx, rx) = std::sync::mpsc::channel();
+            std::thread::spawn(move || {
+                let _ = tx.send(native_deliver(&["send".to_string()], "hello"));
+            });
+            let got = rx.recv_timeout(std::time::Duration::from_secs(30));
+            let result = got.expect("a hung native send returns within the deadline");
+            assert!(result.is_err(), "a killed native send is an error: {result:?}");
+        });
+        let pid = std::fs::read_to_string(&pid_file).unwrap();
+        assert!(!std::path::Path::new(&format!("/proc/{}", pid.trim())).exists(), "the child is reaped");
+        let _ = std::fs::remove_dir_all(&bin);
+    }
+
     #[test]
     fn an_eidolon_send_goes_through_its_native_send_with_the_text_on_stdin() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -4839,7 +4891,7 @@ mod tests {
         // so `--operator` is on the native call.
         assert_eq!(
             std::fs::read_to_string(bin.join("record.argv")).unwrap(),
-            format!("send\n--from\naoide\n--wake\n--operator\n{id}\n-\n")
+            format!("send\n--from\naoide\n--wake\n--operator\n--\n{id}\n-\n")
         );
         assert_eq!(std::fs::read_to_string(bin.join("record.stdin")).unwrap(), "hello there");
         assert!(nothing_connected(&listener), "an eidolon send takes the native path, not the socket");

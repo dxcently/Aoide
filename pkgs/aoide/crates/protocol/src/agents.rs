@@ -3028,6 +3028,8 @@ fn eidolon_native_send(to: &str, operator: bool) -> Vec<String> {
     if operator {
         argv.push("--operator".to_string());
     }
+    // `--` ends the flags, so an id that begins with `-` stays a positional.
+    argv.push("--".to_string());
     argv.push(to.to_string());
     argv.push("-".to_string());
     argv
@@ -4300,11 +4302,11 @@ mod tests {
         let send = EIDOLON_PROFILE.native_send.expect("eidolon has a native transport");
         assert_eq!(
             send("fixture-target-1", false),
-            vec!["send", "--from", "aoide", "--wake", "fixture-target-1", "-"]
+            vec!["send", "--from", "aoide", "--wake", "--", "fixture-target-1", "-"]
         );
         assert_eq!(
             send("fixture-target-1", true),
-            vec!["send", "--from", "aoide", "--wake", "--operator", "fixture-target-1", "-"]
+            vec!["send", "--from", "aoide", "--wake", "--operator", "--", "fixture-target-1", "-"]
         );
     }
 
