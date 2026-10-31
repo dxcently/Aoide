@@ -162,6 +162,9 @@ are in README.md.
   each pass, so the bin holds no libc call and no `unsafe`. `block_sigint` and
   `wait_sigint` are the SIGINT pair the fake aoide's held children use, with
   the same rule.
+- `test_doors::start` is for the smoke harness alone. It starts a program
+  that is not a door: it takes an absolute path, clears the environment, sets
+  exactly the given variables, and gives stdin /dev/null. Nothing else calls it.
 - The two hostile children in this crate's tests are shell scripts that the
   test writes, pins and runs through `run`: a grandchild that holds stdout, and
   a child that ignores SIGTERM. Each is bounded and exits by itself within 8 s.

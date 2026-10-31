@@ -1276,6 +1276,7 @@ pub mod test_doors {
     use std::fs;
     use std::io;
     use std::path::Path;
+    use std::process::{Child, Command, Stdio};
 
     use super::{Exec, ExecError, Pinned};
 
@@ -1293,6 +1294,30 @@ pub mod test_doors {
     /// Sends SIGTERM to `pid`, as the app does to a child it started.
     pub fn terminate(pid: u32) -> io::Result<()> {
         super::terminate(pid)
+    }
+
+    /// Starts `program` with `args`, its environment exactly `env` (cleared
+    /// first), its stdin /dev/null, and its stdout and stderr as given. The
+    /// program's path must be absolute. Only the smoke harness starts a child
+    /// this way: a door is started by `spawn_door`, which pins it first.
+    pub fn start(
+        program: &Path,
+        args: &[OsString],
+        env: &[(OsString, OsString)],
+        stdout: Stdio,
+        stderr: Stdio,
+    ) -> io::Result<Child> {
+        if !program.is_absolute() {
+            return Err(io::Error::new(io::ErrorKind::InvalidInput, "a started program's path is absolute"));
+        }
+        Command::new(program)
+            .args(args)
+            .env_clear()
+            .envs(env.iter().map(|(name, value)| (name, value)))
+            .stdin(Stdio::null())
+            .stdout(stdout)
+            .stderr(stderr)
+            .spawn()
     }
 
     /// Copies `from` to `to` through a child, `cat "$1" > "$2"`, which must succeed.
@@ -1425,6 +1450,22 @@ mod tests {
     use std::os::unix::process::ExitStatusExt;
 
     use super::*;
+
+    #[cfg(feature = "fakes")]
+    #[test]
+    fn a_started_program_gets_exactly_its_env_and_a_relative_one_is_refused() {
+        let dir = std::env::temp_dir().join(format!("exec-start-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).expect("a scratch dir is made");
+        let out = fs::File::create(dir.join("out")).expect("the output file is made");
+        let env = vec![(OsString::from("ONLY_THIS"), OsString::from("1"))];
+        let mut child = test_doors::start(Path::new("/usr/bin/env"), &[], &env, Stdio::from(out), Stdio::null())
+            .expect("the program starts");
+        assert!(child.wait().expect("the child is waited").success());
+        assert_eq!(fs::read_to_string(dir.join("out")).expect("the output is read"), "ONLY_THIS=1\n");
+        let refused = test_doors::start(Path::new("env"), &[], &[], Stdio::null(), Stdio::null());
+        assert_eq!(refused.expect_err("a relative path is refused").kind(), io::ErrorKind::InvalidInput);
+    }
 
     #[test]
     fn a_positional_cannot_extend_a_path_into_a_longer_declared_one() {

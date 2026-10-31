@@ -37,7 +37,9 @@ reaches aoide-protocol only through here, and of it only `untrusted`.
   blocks and waits for SIGTERM (`block_sigterm` and `wait_sigterm`), which is
   how the fake eidolon takes its signal without a libc call of its own. The
   SIGINT pair (`block_sigint` and `wait_sigint`) does the same for the fake
-  aoide's held children.
+  aoide's held children. `start` starts a plain child with an exact
+  environment; the smoke harness is its only caller. It is not a door and
+  pins nothing.
 
 ## How a child starts
 
