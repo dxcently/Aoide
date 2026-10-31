@@ -177,6 +177,11 @@ pub struct PendingSend {
     /// shown only under that name.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub claimed: Option<String>,
+    /// Whether the send was the person's own, judged when it was held over the
+    /// process that made the call. A legacy entry reads `false`: a peer, when in
+    /// doubt. Approval re-drives with this fact, never the approver's.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub operator: bool,
     /// Set on a held spawn, whose `text` is the command line shown to the
     /// approver and whose `session_id` is the id its child will register
     /// under. Nothing is typed for one: approving it launches it.
@@ -819,6 +824,7 @@ fn record_pending(
     text: &str,
     submit: bool,
     origin: &PendingOrigin,
+    operator: bool,
     spawn: Option<PendingSpawn>,
     log: &HoldLog,
 ) -> Result<(), HoldRefused> {
@@ -829,6 +835,7 @@ fn record_pending(
         queued_at: now_iso_utc(),
         from: origin.from.clone(),
         claimed: origin.claimed.clone(),
+        operator,
         spawn,
     };
     let now = super::conduct::unix_ts() as i64;
@@ -865,7 +872,7 @@ pub fn hold_pending(
 ) -> Result<(), HoldRefused> {
     let origin = PendingOrigin { from: from.map(str::to_string), claimed: None };
     let log = HoldLog { door: Door::A2a, path: audit_log.to_path_buf() };
-    record_pending(id, text, submit, &origin, None, &log)
+    record_pending(id, text, submit, &origin, false, None, &log)
 }
 
 /// Park a spawn the MCP door could not attribute, to launch only when a human
@@ -876,7 +883,7 @@ pub fn hold_pending(
 pub fn hold_spawn(id: &str, command: &str, spawn: PendingSpawn, audit_log: &Path) -> Result<(), HoldRefused> {
     let origin = PendingOrigin { from: Some(MCP_SOURCE.to_string()), claimed: None };
     let log = HoldLog { door: Door::Mcp, path: audit_log.to_path_buf() };
-    record_pending(id, command, false, &origin, Some(spawn), &log)
+    record_pending(id, command, false, &origin, false, Some(spawn), &log)
 }
 
 /// Auto-rename: write `title` onto the session record and re-stage the graph so
@@ -1091,6 +1098,33 @@ pub(in crate::graph) fn real_attested_sender(sessions: &[SessionRecord]) -> Opti
     })
 }
 
+/// Is the process that made this call the person's own, not an agent's? The
+/// person is a process with no sealed session in its `/proc` ancestry, judged
+/// with the live daemon key. A daemon that cannot be asked, or a call with no
+/// process to walk, is an agent: when in doubt, a peer.
+fn real_caller_is_person(pid: i32, sessions: &[SessionRecord]) -> bool {
+    let Some(pubkey) = aoide_client::daemon::daemon_seal_pubkey_hex() else {
+        return false;
+    };
+    crate::graph::identity::attested_sender(pid, sessions, |rec| {
+        crate::graph::identity::verify_seal_over(rec, &pubkey)
+    })
+    .is_none()
+}
+
+/// The person test for one call ([`real_caller_is_person`]) over the process
+/// that actually made it: this process on the CLI door, the door's own peer on
+/// the daemon door (aoided's ancestry is never the caller's). The MCP, A2A and
+/// pair doors act on an agent's behalf, so no process of theirs is the person.
+fn production_person(inv: &Invocation) -> impl Fn(&[SessionRecord]) -> bool {
+    let pid = match inv.door {
+        Door::Cli => Some(std::process::id() as i32),
+        Door::Daemon => door_pid(inv),
+        Door::Mcp | Door::A2a | Door::Pair => None,
+    };
+    move |sessions| pid.is_some_and(|pid| real_caller_is_person(pid, sessions))
+}
+
 /// The REAL attested-wrap resolution [`hook_ensure_session`] uses in
 /// production (P-QOL-C §1): the same live daemon-key fetch
 /// [`real_attested_sender`] makes, delegated to
@@ -1243,6 +1277,13 @@ fn deliver_local(inv: &Invocation, id: &str) -> Outcome {
     deliver_local_with(inv, id, real_attested_sender)
 }
 
+/// Re-drives a held send on approval. `operator` is the fact the hold recorded
+/// about its sender, never the approver's: the approver's own process is not the
+/// sender of a send an agent held.
+pub(in crate::graph) fn session_send_held(inv: &Invocation, id: &str, operator: bool) -> Outcome {
+    deliver_local_as(inv, id, real_attested_sender, move |_| operator)
+}
+
 /// Runs a harness's native send (`eidolon send … -`) with `message` on stdin.
 /// Exit 0 is accepted; anything else is its stderr, as the refusal.
 fn native_deliver(argv: &[String], message: &str) -> Result<(), String> {
@@ -1313,6 +1354,18 @@ pub(in crate::graph) fn deliver_local_with(
     inv: &Invocation,
     id: &str,
     resolve_sender_id: impl Fn(&[SessionRecord]) -> Option<String>,
+) -> Outcome {
+    deliver_local_as(inv, id, resolve_sender_id, production_person(inv))
+}
+
+/// [`deliver_local_with`] with the person test given: `person` answers whether
+/// the sender of this send is the person (`--operator` on a native call, and
+/// the fact a hold records). Tests and a re-drive on approval name the answer.
+pub(in crate::graph) fn deliver_local_as(
+    inv: &Invocation,
+    id: &str,
+    resolve_sender_id: impl Fn(&[SessionRecord]) -> Option<String>,
+    person: impl Fn(&[SessionRecord]) -> bool,
 ) -> Outcome {
     let cmd = "send";
     // Accept the exact `session:<id>` form `graph --json` emits for a
@@ -1470,7 +1523,7 @@ pub(in crate::graph) fn deliver_local_with(
                 return out;
             }
         };
-        match record_pending(&id, &text, submit, &origin, None, &HoldLog::of(inv)) {
+        match record_pending(&id, &text, submit, &origin, person(&file.sessions), None, &HoldLog::of(inv)) {
             Ok(()) => {}
             Err(HoldRefused::Stage(e)) => return stage_error(cmd, e),
             Err(HoldRefused::Full) => {
@@ -1619,10 +1672,10 @@ pub(in crate::graph) fn deliver_local_with(
     // A harness with a native send (eidolon) takes the text through its own CLI,
     // on stdin, never the socket. The attributed sender rides only in the audit
     // line: the native call names the sender `aoide`, and `--operator` marks a
-    // send by the person (no `AOIDE_SESSION_ID` in this process).
+    // send by the person, judged over the calling process ([`production_person`]),
+    // never over `AOIDE_SESSION_ID`.
     if let Some(native) = agent_profile(&rec.agent).and_then(|p| p.native_send) {
-        let operator = std::env::var_os("AOIDE_SESSION_ID").is_none();
-        if let Err(e) = native_deliver(&native(&id, operator), &text) {
+        if let Err(e) = native_deliver(&native(&id, person(&file.sessions)), &text) {
             let out = Outcome::error(cmd, format!("native send to `{id}` failed: {e}"))
                 .with_data(json!({ "reason": "native-send-failed", "id": id, "agent": rec.agent }));
             audit_send(inv, "error", &out.message, &text);
@@ -4745,12 +4798,14 @@ mod tests {
         let out = {
             let mut out = None;
             with_fake_eidolon(&bin, || {
-                out = Some(session_send(&send_on(Door::Cli, &["hello there"], &[("id", &id), ("yes", "true")])));
+                let inv = send_on(Door::Cli, &["hello there"], &[("id", &id), ("yes", "true")]);
+                out = Some(deliver_local_as(&inv, &id, |_| None, |_| true));
             });
             out.unwrap()
         };
         assert_eq!(out.status, aoide_protocol::output::Status::Ok, "{}", out.message);
-        // The operator's send (no AOIDE_SESSION_ID): `--operator` is on the native call.
+        // The person's own send: the process that made it has no sealed ancestor,
+        // so `--operator` is on the native call.
         assert_eq!(
             std::fs::read_to_string(bin.join("record.argv")).unwrap(),
             format!("send\n--from\naoide\n--wake\n--operator\n{id}\n-\n")
@@ -4767,9 +4822,12 @@ mod tests {
         let (root, id, _listener) = door_fixture("eidolon-peer", None);
         set_wrap(&id, |r| r.agent = "eidolon".into());
         let bin = fake_eidolon("peer");
+        // The env names an agent, but the verdict is the verified process's: an
+        // attested sealed ancestor (here, `|_| false`) makes the send a peer.
         std::env::set_var("AOIDE_SESSION_ID", "agent-7");
         with_fake_eidolon(&bin, || {
-            let out = session_send(&send_on(Door::Cli, &["ping"], &[("id", &id), ("yes", "true")]));
+            let inv = send_on(Door::Cli, &["ping"], &[("id", &id), ("yes", "true")]);
+            let out = deliver_local_as(&inv, &id, |_| Some("agent-7".to_string()), |_| false);
             assert_eq!(out.status, aoide_protocol::output::Status::Ok, "{}", out.message);
         });
         std::env::remove_var("AOIDE_SESSION_ID");
@@ -4777,6 +4835,42 @@ mod tests {
         assert!(!argv.contains("--operator"), "an agent's send goes as a peer: {argv}");
         let _ = std::fs::remove_dir_all(&root);
         let _ = std::fs::remove_dir_all(&bin);
+    }
+
+    #[test]
+    fn an_agent_send_dispatched_through_the_daemon_goes_as_a_peer() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (root, id, _listener) = door_fixture("daemon-peer", None);
+        set_wrap(&id, |r| r.agent = "eidolon".into());
+        let bin = fake_eidolon("daemon-peer");
+        let peer_pid = std::process::id().to_string();
+        with_fake_eidolon(&bin, || {
+            let inv = send_on(
+                Door::Daemon,
+                &["ping"],
+                &[("id", &id), ("yes", "true"), (DAEMON_PEER_PID_FLAG, &peer_pid)],
+            );
+            let out = session_send(&inv);
+            assert_eq!(out.status, aoide_protocol::output::Status::Ok, "{}", out.message);
+        });
+        let argv = std::fs::read_to_string(bin.join("record.argv")).unwrap();
+        assert!(!argv.contains("--operator"), "an agent's send through the daemon goes as a peer: {argv}");
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&bin);
+    }
+
+    #[test]
+    fn a_held_send_records_the_person_fact_it_was_held_as() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (root, id, _listener) = door_fixture("held-fact", None);
+        set_wrap(&id, |r| r.agent = "eidolon".into());
+        let person = deliver_local_as(&send_on(Door::Cli, &["from me"], &[("id", &id)]), &id, |_| None, |_| true);
+        assert_eq!(person.data.as_ref().unwrap()["state"], "pending", "{}", person.message);
+        let agent = deliver_local_as(&send_on(Door::Cli, &["from agent"], &[("id", &id)]), &id, |_| None, |_| false);
+        assert_eq!(agent.data.as_ref().unwrap()["state"], "pending", "{}", agent.message);
+        let file: PendingFile = load_stage(&pending_path()).unwrap();
+        assert_eq!(file.pending.iter().map(|p| p.operator).collect::<Vec<_>>(), vec![true, false]);
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

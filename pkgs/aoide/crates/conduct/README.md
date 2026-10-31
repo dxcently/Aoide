@@ -324,8 +324,12 @@ blank one is refused too.
   aoide --wake [--operator] <id> -` with the text on stdin
   (`send.rs::native_deliver`), not through the control socket. The gate, the
   pending queue and the audit run first, as for every send. `--operator` is set
-  only when this process has no `AOIDE_SESSION_ID` (the person's send); an
-  agent's send goes as a peer. Dropped by the native call: the attributed
+  only when the calling process has no sealed session in its `/proc` ancestry
+  (`send.rs::production_person`: this process on the CLI door, the door's own
+  peer on the daemon door), judged with the live daemon key. The MCP, A2A and
+  pair doors never send as the person, and an unverifiable caller is a peer. A
+  held send records that fact in its `operator` field, and approval re-drives
+  with the recorded fact, never the approver's. Dropped by the native call: the attributed
   sender's session (it names only in the audit line) and the provenance prefix.
   A claude wrap still takes the socket.
 - **`send.rs::write_delivery`** is the one place a delivered payload actually
