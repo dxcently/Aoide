@@ -305,11 +305,25 @@ impl ChatLine {
     }
 }
 
+/// What one read of a chat source hands the printer.
+pub struct Chunk {
+    /// The source's complete lines, in order.
+    pub lines: Vec<String>,
+    /// Where the next read resumes: the byte offset after the last complete
+    /// line. `None` for a source with no byte offsets, which the printer
+    /// dedupes by line id.
+    pub resume: Option<u64>,
+    /// Whether lines before these were left out (a read starts past the
+    /// start of the source, or after a cursor that no longer lines up).
+    pub skipped: bool,
+}
+
 /// A harness's chat adapter: how its source is read, and how one source line
 /// becomes chat lines. A profile names its adapter once, in its `chat` field.
 pub struct ChatAdapter {
-    /// The source's whole lines, off its end, within the trace budget.
-    pub read: fn(&Path) -> Option<Vec<String>>,
+    /// The source's complete lines from `from` (a `resume` an earlier read
+    /// returned) to its end. `None` is the first read: the recent end.
+    pub read: fn(&Path, from: Option<u64>) -> Option<Chunk>,
     /// One source line, under the aoide `session`, as its chat lines. A line
     /// the chat does not show projects to none.
     pub project: fn(session: &str, line: &str) -> Vec<ChatLine>,

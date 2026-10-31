@@ -482,10 +482,50 @@ fn transcript_tail(path: &Path) -> Vec<String> {
     transcript_tail_bounded(path, TRANSCRIPT_TAIL_BYTES)
 }
 
-/// Claude's chat read: the transcript's tail lines, or none when the path is not
-/// a file.
-fn claude_chat_read(path: &Path) -> Option<Vec<String>> {
-    path.is_file().then(|| transcript_tail(path))
+/// The chat's budgets. A first read takes the transcript's last
+/// `CHAT_FIRST_BYTES`; a later read takes everything after its cursor up to
+/// `CHAT_TICK_BYTES`. Past that, the read starts at the recent end and says so.
+const CHAT_FIRST_BYTES: u64 = 8 * 1024 * 1024;
+const CHAT_TICK_BYTES: u64 = 8 * 1024 * 1024;
+
+/// Claude's chat read, from a byte cursor: every complete line after `from`
+/// (the last line's end an earlier read returned), with an unterminated last
+/// line held back until it ends. A record bigger than any window is read whole;
+/// nothing is cut by a fixed tail. `None` when the path is not a file.
+fn claude_chat_read(path: &Path, from: Option<u64>) -> Option<crate::chat::Chunk> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut f = std::fs::File::open(path).ok()?;
+    let len = f.metadata().ok()?.len();
+    let start = match from {
+        Some(off) if off <= len && len - off <= CHAT_TICK_BYTES => off,
+        Some(off) if off <= len => len - CHAT_TICK_BYTES,
+        _ => len.saturating_sub(CHAT_FIRST_BYTES),
+    };
+    let resumed = from == Some(start);
+    f.seek(SeekFrom::Start(start)).ok()?;
+    let mut buf = Vec::with_capacity((len - start) as usize);
+    f.take(len - start).read_to_end(&mut buf).ok()?;
+    let end = buf.iter().rposition(|&b| b == b'\n').map_or(0, |i| i + 1);
+    let whole = &buf[..end];
+    // A cut that did not land on a resumed line's end starts mid-line: that
+    // partial head goes, and the reader says the lines before it were skipped.
+    let body = match (resumed, start) {
+        (false, s) if s > 0 => whole.iter().position(|&b| b == b'\n').map_or(&whole[..0], |i| &whole[i + 1..]),
+        _ => whole,
+    };
+    let lines = String::from_utf8_lossy(body)
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .map(str::to_string)
+        .collect();
+    Some(crate::chat::Chunk { lines, resume: Some(start + end as u64), skipped: !resumed && start > 0 })
+}
+
+/// The eidolon chat read: its trace lines in the trace budget, with no byte
+/// cursor. A journal is read through the producer's export, so the chat dedupes
+/// these lines by id instead.
+fn eidolon_chat_read(path: &Path, _from: Option<u64>) -> Option<crate::chat::Chunk> {
+    eidolon_trace_tail(path).map(|lines| crate::chat::Chunk { lines, resume: None, skipped: false })
 }
 
 /// The transcript tail's own budget, named once because eidolon's journal arm
@@ -3077,7 +3117,7 @@ pub static EIDOLON_PROFILE: AgentProfile = AgentProfile {
     // install eidolon` never reads or writes this path, unlike pi's own
     // Declarative entry, which names a real aoide-authored extension file.
     chat: crate::chat::ChatSupport::Adapter(crate::chat::ChatAdapter {
-        read: eidolon_trace_tail,
+        read: eidolon_chat_read,
         project: crate::chat::eidolon::project,
     }),
     hook_settings: SettingsSpec {
@@ -5533,6 +5573,31 @@ mod tests {
                 "a stale leftover mirror never becomes the session's state"
             );
         });
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A tool result bigger than the old 32 KiB chat window is read whole: its
+    /// head is in the read, not cut by a fixed tail. Red on the base, where the
+    /// tail drops the start of a 40 KB record.
+    #[test]
+    fn a_chat_read_delivers_a_record_bigger_than_the_old_window_whole() {
+        let dir = std::env::temp_dir().join(format!("aoide-chat-big-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("big.jsonl");
+        let marker = "HEAD-OF-A-FORTY-KILOBYTE-RESULT";
+        let big = format!("{marker}{}", "x".repeat(40 * 1024));
+        let result = serde_json::json!({"type": "user", "uuid": "u1", "message": {"role": "user",
+            "content": [{"type": "tool_result", "tool_use_id": "t1", "content": big}]}});
+        let after = serde_json::json!({"type": "assistant", "uuid": "a1", "message": {"role": "assistant",
+            "content": [{"type": "text", "text": "after"}]}});
+        std::fs::write(&path, format!("{result}\n{after}\n")).unwrap();
+
+        let chunk = claude_chat_read(&path, None).expect("the transcript is a file");
+        let shown: Vec<_> = chunk.lines.iter().flat_map(|l| crate::chat::claude::project("s-1", l)).collect();
+        assert!(
+            shown.iter().any(|c| c.json().to_string().contains(marker)),
+            "a 40 KB tool result is delivered whole, its head included"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

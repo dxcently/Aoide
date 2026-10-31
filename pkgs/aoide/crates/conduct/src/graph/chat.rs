@@ -77,14 +77,53 @@ pub(super) fn ask_of(session: &str, state: &str, card: Option<&Notification>) ->
 #[derive(Default)]
 pub(super) struct Printed {
     path: Option<PathBuf>,
+    /// The file the byte offset belongs to: its device and inode.
+    ident: Option<(u64, u64)>,
+    /// Where the next byte-cursor read resumes, when the source has one.
+    offset: Option<u64>,
     cursor: Option<String>,
 }
 
+/// A transcript file's identity: device and inode. A replaced file gets a new
+/// one, so a byte offset from the old file is never resumed in the new.
+fn file_identity(path: &Path) -> Option<(u64, u64)> {
+    use std::os::unix::fs::MetadataExt;
+    std::fs::metadata(path).ok().map(|m| (m.dev(), m.ino()))
+}
+
 impl Printed {
-    /// The lines this tick prints, of the window `chat` read from `path`.
+    /// Where the read of `path` resumes: the byte offset after the last line
+    /// printed, or none when the file is new to this run or was replaced.
+    fn resume_from(&self, path: &Path, ident: Option<(u64, u64)>) -> Option<u64> {
+        let same = self.path.as_deref() == Some(path) && self.ident == ident;
+        if same {
+            self.offset
+        } else {
+            None
+        }
+    }
+
+    /// Whether `path` is a different file from the one printed so far.
+    fn replaced(&self, path: &Path, ident: Option<(u64, u64)>) -> bool {
+        self.path.as_deref().is_some_and(|p| p != path || self.ident != ident)
+    }
+
+    /// A byte-cursor read printed `chat`, all of it new, and resumes at `resume`.
+    fn advance(&mut self, path: &Path, ident: Option<(u64, u64)>, resume: u64, chat: &[ChatLine]) -> Vec<ChatLine> {
+        self.path = Some(path.to_path_buf());
+        self.ident = ident;
+        self.offset = Some(resume);
+        self.cursor = None;
+        chat.to_vec()
+    }
+
+    /// The lines this tick prints, of the window `chat` read from `path`, for a
+    /// source with no byte offsets.
     pub(super) fn tick(&mut self, path: &Path, chat: &[ChatLine]) -> Vec<ChatLine> {
         if self.path.as_deref() != Some(path) {
             self.path = Some(path.to_path_buf());
+            self.ident = None;
+            self.offset = None;
             self.cursor = None;
         }
         let fresh = cursor_tail(chat, self.cursor.as_deref()).to_vec();
@@ -93,6 +132,12 @@ impl Printed {
         }
         fresh
     }
+}
+
+/// The chat line that says lines before this one were left out.
+fn gap_line(id: &str, at: &str) -> ChatLine {
+    ChatLine::new(id, &format!("gap:{at}"), None, Role::System)
+        .text("earlier lines of this transcript were not read")
 }
 
 /// One line as the terminal shows it: its role, then its text, tool call or ask.
@@ -194,11 +239,21 @@ fn read_tick(
     let Some(path) = (profile.transcript.locate)(id, Some(&cwd), hint.as_deref()) else {
         return wait("transcript");
     };
-    let Some(raw) = (adapter.read)(&path) else {
+    let ident = file_identity(&path);
+    let from = printed.resume_from(&path, ident);
+    let replaced = printed.replaced(&path, ident);
+    let Some(chunk) = (adapter.read)(&path, from) else {
         return wait("transcript");
     };
-    let chat: Vec<ChatLine> = raw.iter().flat_map(|l| (adapter.project)(id, l)).collect();
-    let mut lines = printed.tick(&path, &chat);
+    let chat: Vec<ChatLine> = chunk.lines.iter().flat_map(|l| (adapter.project)(id, l)).collect();
+    let mut lines = Vec::new();
+    if replaced || chunk.skipped {
+        lines.push(gap_line(id, &chunk.resume.map_or_else(String::new, |r| r.to_string())));
+    }
+    match chunk.resume {
+        Some(resume) => lines.extend(printed.advance(&path, ident, resume, &chat)),
+        None => lines.extend(printed.tick(&path, &chat)),
+    }
 
     if last_state.as_deref() != Some(state.as_str()) {
         if let Some(st) = state_of(&state) {
