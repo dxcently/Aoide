@@ -211,7 +211,9 @@ blank one is refused too.
   `resurrect`'s restore delivery passes). The result says which it was:
   `delivered`, `delivered-unverified` (no declared fact for that name — the
   text went out once output settled and whether it submitted is unknown), or
-  `not-ready` (nothing typed). `--undying` (P-C3, durable-sessions
+  `not-ready` (nothing typed). A native send never reports `delivered`: the CLI
+  says nothing about the landing, so its outcome and its audit line are
+  `delivered-unverified`, and the spawn path says the same. `--undying` (P-C3, durable-sessions
   plan) marks the spawned id in `state/undying.json` once — and only once —
   the registration wait actually succeeds; an id that never registers has no
   live session behind it, so nothing is marked.
@@ -219,6 +221,13 @@ blank one is refused too.
   harness_session_id` (P-D7) from the raw hook payload's own `session_id`
   on every event that carries one, mapped-to-an-action or not — see
   `CONTRACTS.md`'s `sessions.json` entry for the full field contract.
+- `session hook` also records the payload's `transcript_path` as
+  `SessionRecord.transcript_path` only through `send.rs`'s
+  `admit_transcript_path`, which asks the profile's `TranscriptSpec.admit`
+  (`protocol/src/agents.rs`). A refusal is audited and nothing is stamped.
+  A profile with an admission (claude) reads only the admitted path. A profile
+  with none (pi) still reads the raw hook path, so its say/tool/title read is
+  not gated by any admission. That is an open item for Rook.
 - **The hook door's two self-reported facts, and the ONE rule that resolves
   them.** A hook process is the only process that can read what a harness
   reports about itself, so it reads its parent claim once
@@ -309,6 +318,29 @@ blank one is refused too.
   never lands one: its send parks in `pending.json`, and a held send is filed
   when a local approver releases it. `aoide-server`'s A2A spawn holds its
   opening turn the same way, so it files nothing either.
+- **`send --harness <name>`** (opt-in: a plain send into a shell is normal use,
+  and the guard is the caller's; every chat-originated send passes it) —
+  `send.rs::deliver_local_with`
+  refuses a target that is a shell wrap (`shell: true`) or a wrap of another
+  agent, as `not-that-harness`, audited, nothing typed. The check runs before the
+  gate, so `--yes` does not pass it. A harness's own wrap is unchanged.
+- **A native send** — a target whose profile names a
+  `native_send` (eidolon) is delivered through that CLI, `eidolon send --from
+  aoide --wake [--operator] -- <id> -` with the text on stdin
+  (`send.rs::native_deliver`), not through the control socket. The `--` ends
+  the flags, so an id that begins with `-` stays positional. The call has a
+  10-second deadline (`NATIVE_DEADLINE`): past it the child is killed and reaped,
+  and the send is an error. The deadline is this crate's own choice; no
+  harness declares one. The gate, the
+  pending queue and the audit run first, as for every send. `--operator` is set
+  only when the calling process has no sealed session in its `/proc` ancestry
+  (`send.rs::production_person`: this process on the CLI door, the door's own
+  peer on the daemon door), judged with the live daemon key. The MCP, A2A and
+  pair doors never send as the person, and an unverifiable caller is a peer. A
+  held send records that fact in its `operator` field, and approval re-drives
+  with the recorded fact, never the approver's. Dropped by the native call: the attributed
+  sender's session (it names only in the audit line) and the provenance prefix.
+  A claude wrap still takes the socket.
 - **`send.rs::write_delivery`** is the one place a delivered payload actually
   reaches a target's control socket (task #124): the text write, then — on
   `--submit` — a SEPARATE, later write of the target's own submit keystroke,
@@ -1040,6 +1072,25 @@ blank one is refused too.
   `session trace` joined the `session` family at P-EIDOLON slice E6, beside
   `session pending list`; the exact path set and its count live in `cli`'s
   golden snapshot, never here.
+- **`session chat <id> [--follow] [--json]`** —
+  `graph/chat.rs::session_chat`, the conversation as chat lines
+  (`CONTRACTS.md` "The chat line — v1"). It reads through the profile's chat
+  adapter (`agent_profile(..).chat`, the same record `session trace` reads
+  through `transcript.trace`), and resolves its `<id>` through
+  `trace.rs::resolve_local`, the one resolver `session trace` now shares. A
+  harness with `ChatSupport::Unsupported` is refused with its reason. Each
+  tick re-reads the session's record, so a transcript that `/clear` or
+  `/resume` moved is followed from its first line only when the record names
+  the new transcript. The wrap's live child is not re-resolved, so `/clear` or
+  `/resume` may start a new record this follow does not switch to; open for a
+  later lane. A harness with a transcript and `Unsupported` (kimi, pi) is refused
+  with its reason: a transcript-only harness may be unsupported with a reason,
+  and the trace tests stay on the trace readers. State lines: `awaiting` is `waiting`,
+  `idle`/`stopped`/`done` are `settled`. A Claude permission prompt is an ask
+  line while the session is `awaiting` and its `permit-<id>` card stands; the
+  fingerprint is the card's `received_at`. Doors: the default (Cli and the
+  daemon hop); `--follow` is CLI-only. Kind `session`, verb `watch`, so the
+  kinds golden carries it.
 - **`session trace <id> [--tail N] [--follow] [--json] [--clip line|detail]`
   (P-EIDOLON slice E6, `docs/architecture/EIDOLON-TRACE.md`)** —
   `graph/trace.rs::session_trace`, the read surface over a harness's own TRACE:
@@ -1052,7 +1103,14 @@ blank one is refused too.
   journal's own JSON lines (raw unsafe characters removed, JSON escapes kept, so
   a decoded line holds untrusted strings; a consumer shows `data.steps`),
   `--follow` re-reads every 500ms until Ctrl-C (CLI-only), `--tail N` shows the
-  last N (default 50). The dim follows CONTRACTS's color rule (a tty only, never
+  last N (default 50). A follow resumes after the last record it printed, keyed
+  by the record's own id (a line's hash when it is not a trace record), never by
+  a line count: the window is a 1 MiB tail, so a count stops tracking the end
+  once the trace outgrows it. A trace replaced by another file (a new device and
+  inode, so its ids may repeat the printed ones) prints the new file's window
+  whole and counts one gap. A tick whose window no longer holds the cursor
+  record (records fell out between ticks) prints the window and counts one gap,
+  named on stderr and in `data.gaps`. The dim follows CONTRACTS's color rule (a tty only, never
   for `NO_COLOR`, `TERM=dumb` or `--json`, and only at the CLI door); the door's
   `--color` does not reach it, since the trace builds its text before the door
   renders. **Read-only, and so outside every other discipline in this file:** no

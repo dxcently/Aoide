@@ -243,6 +243,7 @@ pub fn register(r: &mut Registry) {
             flag!("id", "string", "Target session id (required unless --to is given); its socket is resolved from sessions.json.", value: "session-id", conflicts: &["to"]),
             flag!("submit", "bool", "Append the target harness's own submit keystroke (Enter for most agents, \\r for kimi — resolved from the target session's agent profile at delivery time). No-op for a --to remote send (the receiving node always submits its own way)."),
             flag!("yes", "bool", "Authorise delivery now (else the send is held pending approval). Never authorises over MCP, which cannot approve. No-op for a --to remote send — the receiving node gates its own delivery.", doors: aoide_protocol::registry::CLI_DOORS),
+            flag!("harness", "string", "Refuse unless the target is a wrap of this harness (claude, kimi, pi, eidolon). A shell wrap, or a wrap of another harness, is refused as `not-that-harness` and nothing is typed. Refused before the gate, so --yes does not get past it.", doors: aoide_protocol::registry::CLI_DOORS),
             flag!("from", "string", "Sender attribution override for the delivered provenance prefix (default: AOIDE_SESSION_ID). ATTRIBUTION ONLY, not authentication — unauthenticated and as spoofable as the env var it defaults from. Over MCP a send is recorded and delivered under the attested session (else the door's own source) and this rides beside it as a cleaned claim; a value spelling a source a door derives (`node:`, `addr:`, `mcp`) is refused."),
             flag!("to", "string", "Target by name instead of --id: a local session id/tail4/petname/host-role-petname line, or node/<query> to resolve against a registered node's CACHED graph and deliver over A2A message/send. Mutually exclusive with --id.", value: "target", conflicts: &["id"]),
             flag!("mesh", "string", "For a `node/<query>` target: the mesh this request acts in (P-CHARTER) — the far door reads the caller's grant in it. Absent = the node's sole granted mesh, else `[pairing] homeMesh`; required when that node is trusted in more than one mesh. Unused by a local send."),
@@ -290,6 +291,23 @@ pub fn register(r: &mut Registry) {
             "session trace 7d23 --tail 20",
             "session trace Aoide-7d23 --follow",
             "session trace brave-otter --json",
+        ],
+        kind: "session", verb: "watch",
+    ));
+    r.insert(cmd!(
+        path: ["session", "chat"],
+        summary: "Read a session's conversation as chat lines, one per message, the same shape for every harness (CONTRACTS.md \"The chat line — v1\"): the agent's text and thinking (thinking flagged), its tool calls and their results, peer and tool messages as system lines, the state (waiting, settled) and a Claude permission prompt as an ask line (its fingerprint is the permit card's received_at). The source is read through the harness's own chat adapter; a harness with none (kimi, pi) is refused with the reason. <id> resolves like `session trace` (id / tail4 / petname). --follow prints new lines until Ctrl-C, then a closing envelope; each tick re-reads the session's record, so a /clear or /resume that moves it to another transcript keeps the chat. Terminal and daemon doors only (the default doors): A2A and MCP do not reach it, and a remote `--to` is not resolved. Read-only: no stage write, no lock.",
+        args: [arg!("id", "string", true, "Session to read: a local session id, its tail4, or its petname (resolved by the same resolver `session trace` uses).")],
+        flags: [
+            flag!("follow", "bool", "Print new chat lines as they land, until Ctrl-C. CLI-only — a follow that parks a connection makes no sense over the daemon socket.", doors: &[Door::Cli]),
+        ],
+        gated: false,
+        implemented: true,
+        handler: crate::graph::session_chat,
+        examples: [
+            "session chat brave-otter",
+            "session chat Aoide-7d23 --follow",
+            "session chat brave-otter --json",
         ],
         kind: "session", verb: "watch",
     ));

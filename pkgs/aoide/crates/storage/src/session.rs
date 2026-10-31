@@ -108,6 +108,7 @@ pub fn upsert_session(
             agent: agent.unwrap_or(CLAUDE_PROFILE.name).to_string(),
             window_address: window.unwrap_or_default().to_string(),
             cwd: cwd.unwrap_or_default().to_string(),
+            transcript_path: None,
             // A freshly registered session is at rest until a prompt/tool (agent)
             // or a foreground command (shell) moves it to `working`.
             state: "idle".to_string(),

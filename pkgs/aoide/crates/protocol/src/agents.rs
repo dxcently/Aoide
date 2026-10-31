@@ -43,9 +43,51 @@ pub enum HookClass {
     Unknown,
 }
 
+/// The four checks a hook-named Claude transcript passes, in order. The first
+/// check that fails names the refusal: the transcript must be a regular file
+/// (not a symlink), owned by this user, named `<session_id>.jsonl`, and sit
+/// directly in a bucket under a `projects` directory (`CONTRACTS.md`
+/// `transcriptPath`).
+pub const CLAUDE_TRANSCRIPT_CHECKS: &[(&str, fn(&Path, &str, u32) -> bool)] = &[
+    ("not-a-regular-file", |p, _, _| {
+        std::fs::symlink_metadata(p).is_ok_and(|m| m.file_type().is_file())
+    }),
+    ("not-owned-by-this-user", |p, _, uid| {
+        std::fs::symlink_metadata(p).is_ok_and(|m| std::os::unix::fs::MetadataExt::uid(&m) == uid)
+    }),
+    ("name-is-not-the-session", |p, sid, _| {
+        p.file_name().and_then(|f| f.to_str()).is_some_and(|f| f == format!("{sid}.jsonl"))
+    }),
+    ("not-under-projects", |p, _, _| {
+        !p.components().any(|c| matches!(c, std::path::Component::ParentDir))
+            && p.parent()
+                .and_then(Path::parent)
+                .and_then(Path::file_name)
+                .is_some_and(|n| n == "projects")
+    }),
+];
+
+/// The first failing check's name for `path` as a `session_id` transcript
+/// owned by `uid`, or None when every check passes.
+pub fn transcript_refusal(path: &Path, session_id: &str, uid: u32) -> Option<&'static str> {
+    CLAUDE_TRANSCRIPT_CHECKS
+        .iter()
+        .find(|(_, ok)| !ok(path, session_id, uid))
+        .map(|(name, _)| *name)
+}
+
+/// [`transcript_refusal`] for this user's own uid: Claude's admission.
+pub fn claude_transcript_refusal(path: &Path, session_id: &str) -> Option<&'static str> {
+    transcript_refusal(path, session_id, unsafe { libc::geteuid() } as u32)
+}
+
 /// Locator + extractors for an agent's on-disk transcript (claude: the
 /// per-session JSONL Claude Code writes under `~/.claude/projects/`).
 pub struct TranscriptSpec {
+    /// Admit a hook-named transcript path for this session before it is
+    /// recorded (`CONTRACTS.md` `transcriptPath`). None when the profile has no
+    /// admission: its hook-named paths are never recorded.
+    pub admit: Option<fn(path: &Path, session_id: &str) -> Option<&'static str>>,
     /// Resolve a session's transcript path: prefer the hook-supplied
     /// `transcript_path` hint when it names a real file, else derive the
     /// canonical location. None when neither resolves to an existing file.
@@ -221,6 +263,9 @@ pub struct AgentProfile {
     /// The context-window ceiling for a model id (see `model.rs`).
     pub model_ceiling: fn(Option<&str>) -> u64,
     pub transcript: TranscriptSpec,
+    /// This harness's chat adapter, or the reason it has none. Every profile
+    /// says which: the chat reads a harness only through this field.
+    pub chat: crate::chat::ChatSupport,
     pub hook_settings: SettingsSpec,
     /// Where this harness discovers installable skills — a directory of
     /// `<skill-name>/SKILL.md` packages — relative to `$HOME` (claude:
@@ -260,7 +305,9 @@ pub struct AgentProfile {
     /// - the child's exit 0 means the message was ACCEPTED (queued or
     ///   delivered), never that the recipient has processed or even seen
     ///   it — there is no synchronous "consumed" signal on this transport.
-    pub native_send: Option<fn(to: &str) -> Vec<String>>,
+    /// The argv that sends to `to` through the harness's own CLI, with the
+    /// text on stdin. `operator` adds `--operator`: the person is the sender.
+    pub native_send: Option<fn(to: &str, operator: bool) -> Vec<String>>,
     /// What must be true before anything is typed into a process of this
     /// harness ([`Readiness`]).
     pub readiness: Readiness,
@@ -356,7 +403,7 @@ fn transcript_path_for(
 ) -> Option<PathBuf> {
     if let Some(h) = hinted.filter(|s| !s.is_empty()) {
         let p = PathBuf::from(h);
-        if p.is_file() {
+        if open_transcript(&p).is_some() {
             return Some(p);
         }
     }
@@ -365,7 +412,7 @@ fn transcript_path_for(
     let file = format!("{session_id}.jsonl");
     if let Some(cwd) = cwd.filter(|s| !s.is_empty()) {
         let p = projects.join(munge_project_dir(cwd)).join(&file);
-        if p.is_file() {
+        if open_transcript(&p).is_some() {
             return Some(p);
         }
     }
@@ -380,11 +427,25 @@ fn transcript_path_for(
     // `projects/` and a handful of stats, no directory contents walked.
     for e in std::fs::read_dir(&projects).ok()?.flatten() {
         let p = e.path().join(&file);
-        if p.is_file() {
+        if open_transcript(&p).is_some() {
             return Some(p);
         }
     }
     None
+}
+
+/// Open a transcript for reading. The open does not follow a symlink, and the
+/// owner is checked on the open descriptor (`fstat`), not on the path, so a link
+/// swapped in after the hook was admitted fails the open and is never read.
+fn open_transcript(path: &Path) -> Option<std::fs::File> {
+    use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+    let f = std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(path)
+        .ok()?;
+    let m = f.metadata().ok()?;
+    (m.file_type().is_file() && m.uid() == unsafe { libc::geteuid() } as u32).then_some(f)
 }
 
 /// Collapse a possibly-multiline string to one whitespace-normalised line,
@@ -406,7 +467,7 @@ fn one_line_clip(s: &str, max: usize) -> String {
 /// records, never the whole history.
 fn transcript_tail_bounded(path: &Path, budget: u64) -> Vec<String> {
     use std::io::{Read, Seek, SeekFrom};
-    let Ok(mut f) = std::fs::File::open(path) else {
+    let Some(mut f) = open_transcript(path) else {
         return Vec::new();
     };
     let Ok(len) = f.metadata().map(|m| m.len()) else {
@@ -422,6 +483,11 @@ fn transcript_tail_bounded(path: &Path, budget: u64) -> Vec<String> {
     }
     let text = String::from_utf8_lossy(&buf);
     let mut lines: Vec<String> = text.lines().map(str::to_string).collect();
+    // An unterminated last line is a record still being written: it waits for
+    // its newline, and the next read gets it whole.
+    if !buf.ends_with(b"\n") {
+        lines.pop();
+    }
     if start > 0 && !lines.is_empty() {
         lines.remove(0); // the seek likely split a line — drop the partial head
     }
@@ -433,6 +499,52 @@ fn transcript_tail_bounded(path: &Path, budget: u64) -> Vec<String> {
 /// `custom-title`.
 fn transcript_tail(path: &Path) -> Vec<String> {
     transcript_tail_bounded(path, TRANSCRIPT_TAIL_BYTES)
+}
+
+/// The chat's budgets. A first read takes the transcript's last
+/// `CHAT_FIRST_BYTES`; a later read takes everything after its cursor up to
+/// `CHAT_TICK_BYTES`. Past that, the read starts at the recent end and says so.
+const CHAT_FIRST_BYTES: u64 = 8 * 1024 * 1024;
+const CHAT_TICK_BYTES: u64 = 8 * 1024 * 1024;
+
+/// Claude's chat read, from a byte cursor: every complete line after `from`
+/// (the last line's end an earlier read returned), with an unterminated last
+/// line held back until it ends. A record bigger than any window is read whole;
+/// nothing is cut by a fixed tail. `None` when the path is not a file.
+fn claude_chat_read(path: &Path, from: Option<u64>) -> Option<crate::chat::Chunk> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut f = open_transcript(path)?;
+    let len = f.metadata().ok()?.len();
+    let start = match from {
+        Some(off) if off <= len && len - off <= CHAT_TICK_BYTES => off,
+        Some(off) if off <= len => len - CHAT_TICK_BYTES,
+        _ => len.saturating_sub(CHAT_FIRST_BYTES),
+    };
+    let resumed = from == Some(start);
+    f.seek(SeekFrom::Start(start)).ok()?;
+    let mut buf = Vec::with_capacity((len - start) as usize);
+    f.take(len - start).read_to_end(&mut buf).ok()?;
+    let end = buf.iter().rposition(|&b| b == b'\n').map_or(0, |i| i + 1);
+    let whole = &buf[..end];
+    // A cut that did not land on a resumed line's end starts mid-line: that
+    // partial head goes, and the reader says the lines before it were skipped.
+    let body = match (resumed, start) {
+        (false, s) if s > 0 => whole.iter().position(|&b| b == b'\n').map_or(&whole[..0], |i| &whole[i + 1..]),
+        _ => whole,
+    };
+    let lines = String::from_utf8_lossy(body)
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .map(str::to_string)
+        .collect();
+    Some(crate::chat::Chunk { lines, resume: Some(start + end as u64), skipped: !resumed && start > 0 })
+}
+
+/// The eidolon chat read: its trace lines in the trace budget, with no byte
+/// cursor. A journal is read through the producer's export, so the chat dedupes
+/// these lines by id instead.
+fn eidolon_chat_read(path: &Path, _from: Option<u64>) -> Option<crate::chat::Chunk> {
+    eidolon_trace_tail(path).map(|lines| crate::chat::Chunk { lines, resume: None, skipped: false })
 }
 
 /// The transcript tail's own budget, named once because eidolon's journal arm
@@ -794,6 +906,7 @@ pub static CLAUDE_PROFILE: AgentProfile = AgentProfile {
     normalize_payload: claude_normalize_payload,
     model_ceiling: crate::model::context_ceiling_for_model,
     transcript: TranscriptSpec {
+        admit: Some(claude_transcript_refusal),
         locate: transcript_path_for,
         tail: transcript_tail,
         say: extract_say,
@@ -806,6 +919,10 @@ pub static CLAUDE_PROFILE: AgentProfile = AgentProfile {
         // No mirrored trace — claude's own transcript IS its turn log.
         trace: None,
     },
+    chat: crate::chat::ChatSupport::Adapter(crate::chat::ChatAdapter {
+        read: claude_chat_read,
+        project: crate::chat::claude::project,
+    }),
     hook_settings: SettingsSpec {
         relative_path: ".claude/settings.json",
         format: SettingsFormat::Json,
@@ -1244,6 +1361,7 @@ pub static KIMI_PROFILE: AgentProfile = AgentProfile {
     normalize_payload: kimi_normalize_payload,
     model_ceiling: kimi_context_ceiling,
     transcript: TranscriptSpec {
+        admit: None,
         locate: kimi_transcript_locate,
         tail: kimi_wire_tail,
         say: kimi_extract_say,
@@ -1256,6 +1374,9 @@ pub static KIMI_PROFILE: AgentProfile = AgentProfile {
         // No mirrored trace: kimi's own wire log IS its turn record.
         trace: None,
     },
+    chat: crate::chat::ChatSupport::Unsupported(
+        "no chat adapter yet: kimi's transcript is not projected into chat lines",
+    ),
     hook_settings: SettingsSpec {
         relative_path: ".kimi-code/config.toml",
         format: SettingsFormat::Toml,
@@ -1580,6 +1701,7 @@ pub static PI_PROFILE: AgentProfile = AgentProfile {
     normalize_payload: normalize_identity,
     model_ceiling: crate::model::context_ceiling_for_model,
     transcript: TranscriptSpec {
+        admit: None,
         locate: pi_transcript_locate,
         tail: transcript_tail,
         say: pi_extract_say,
@@ -1592,6 +1714,9 @@ pub static PI_PROFILE: AgentProfile = AgentProfile {
         // No mirrored trace: pi's transcript IS its turn record.
         trace: None,
     },
+    chat: crate::chat::ChatSupport::Unsupported(
+        "no chat adapter yet: pi's transcript is not projected into chat lines",
+    ),
     hook_settings: SettingsSpec {
         relative_path: ".pi/agent/extensions/aoide-pi-session.ts",
         format: SettingsFormat::Declarative,
@@ -2898,15 +3023,16 @@ fn eidolon_find_subagent(_dir: &Path, _tuid: &str) -> Option<PathBuf> {
 ///   answering; it will read it on recovery` (`api.rs:199-204`) — both are
 ///   ACCEPTED, neither is a read receipt; there is no id to correlate a
 ///   later reply against (`inbox.rs:15-40`'s `Envelope` carries none).
-fn eidolon_native_send(to: &str) -> Vec<String> {
-    vec![
-        "send".to_string(),
-        "--from".to_string(),
-        "aoide".to_string(),
-        "--wake".to_string(),
-        to.to_string(),
-        "-".to_string(),
-    ]
+fn eidolon_native_send(to: &str, operator: bool) -> Vec<String> {
+    let mut argv = vec!["send".to_string(), "--from".to_string(), "aoide".to_string(), "--wake".to_string()];
+    if operator {
+        argv.push("--operator".to_string());
+    }
+    // `--` ends the flags, so an id that begins with `-` stays a positional.
+    argv.push("--".to_string());
+    argv.push(to.to_string());
+    argv.push("-".to_string());
+    argv
 }
 
 /// `eidolon tui --session <PATH>` reopens the session whose journal is PATH
@@ -2987,6 +3113,7 @@ pub static EIDOLON_PROFILE: AgentProfile = AgentProfile {
     normalize_payload: normalize_identity,
     model_ceiling: crate::model::context_ceiling_for_model,
     transcript: TranscriptSpec {
+        admit: None,
         locate: eidolon_transcript_locate,
         tail: eidolon_transcript_tail,
         say: eidolon_extract_say,
@@ -3010,6 +3137,10 @@ pub static EIDOLON_PROFILE: AgentProfile = AgentProfile {
     // true to cite; the FORMAT is what actually matters here — `hooks
     // install eidolon` never reads or writes this path, unlike pi's own
     // Declarative entry, which names a real aoide-authored extension file.
+    chat: crate::chat::ChatSupport::Adapter(crate::chat::ChatAdapter {
+        read: eidolon_chat_read,
+        project: crate::chat::eidolon::project,
+    }),
     hook_settings: SettingsSpec {
         relative_path: ".config/eidolon/config.toml",
         format: SettingsFormat::Declarative,
@@ -3842,7 +3973,7 @@ mod tests {
             // LAST text block, whitespace-normalised.
             r#"{"type":"assistant","isSidechain":false,"message":{"content":[{"type":"thinking","thinking":"hmm"},{"type":"text","text":"  the  latest\nline  "},{"type":"tool_use","name":"Bash","input":{}}]}}"#,
         ]
-        .join("\n");
+        .join("\n") + "\n";
         std::fs::write(&path, &body).unwrap();
         let say = extract_say(&transcript_tail(&path), true);
         let _ = std::fs::remove_file(&path);
@@ -3871,7 +4002,7 @@ mod tests {
             r#"{"type":"assistant","isSidechain":true,"message":{"model":"claude-haiku-4-5","content":[{"type":"text","text":"sub"}]}}"#,
             r#"{"type":"assistant","isSidechain":false,"message":{"model":"claude-sonnet-5","content":[{"type":"text","text":"latest"}]}}"#,
         ]
-        .join("\n");
+        .join("\n") + "\n";
         std::fs::write(&path, &body).unwrap();
         let model = extract_model(&transcript_tail(&path), true);
         let _ = std::fs::remove_file(&path);
@@ -3897,7 +4028,7 @@ mod tests {
             // folded into the sum (2 + 11803 + 349611 = 361416, not +459).
             r#"{"type":"assistant","isSidechain":false,"message":{"model":"claude-sonnet-5","usage":{"input_tokens":2,"cache_creation_input_tokens":11803,"cache_read_input_tokens":349611,"output_tokens":459}}}"#,
         ]
-        .join("\n");
+        .join("\n") + "\n";
         std::fs::write(&path, &body).unwrap();
         let tokens = transcript_context_tokens(&transcript_tail(&path));
         let _ = std::fs::remove_file(&path);
@@ -3948,7 +4079,7 @@ mod tests {
         .unwrap();
         std::fs::write(
             dir.join("agent-aaa111.jsonl"),
-            r#"{"type":"assistant","isSidechain":true,"message":{"content":[{"type":"text","text":"from A"}]}}"#,
+            format!("{}\n", r#"{"type":"assistant","isSidechain":true,"message":{"content":[{"type":"text","text":"from A"}]}}"#),
         )
         .unwrap();
         std::fs::write(
@@ -3958,7 +4089,7 @@ mod tests {
         .unwrap();
         std::fs::write(
             dir.join("agent-bbb222.jsonl"),
-            r#"{"type":"assistant","isSidechain":true,"message":{"content":[{"type":"text","text":"from B"}]}}"#,
+            format!("{}\n", r#"{"type":"assistant","isSidechain":true,"message":{"content":[{"type":"text","text":"from B"}]}}"#),
         )
         .unwrap();
 
@@ -3997,7 +4128,7 @@ mod tests {
                 r#"{"type":"assistant","isSidechain":true,"message":{"model":"claude-fable-5","content":[{"type":"text","text":"first"}]}}"#,
                 r#"{"type":"assistant","isSidechain":true,"message":{"model":"claude-fable-5","content":[{"type":"text","text":"from agent id"}]}}"#,
             ]
-            .join("\n"),
+            .join("\n") + "\n",
         )
         .unwrap();
 
@@ -4170,8 +4301,12 @@ mod tests {
         assert!(PI_PROFILE.native_send.is_none());
         let send = EIDOLON_PROFILE.native_send.expect("eidolon has a native transport");
         assert_eq!(
-            send("fixture-target-1"),
-            vec!["send", "--from", "aoide", "--wake", "fixture-target-1", "-"]
+            send("fixture-target-1", false),
+            vec!["send", "--from", "aoide", "--wake", "--", "fixture-target-1", "-"]
+        );
+        assert_eq!(
+            send("fixture-target-1", true),
+            vec!["send", "--from", "aoide", "--wake", "--operator", "--", "fixture-target-1", "-"]
         );
     }
 
@@ -5459,6 +5594,73 @@ mod tests {
                 "a stale leftover mirror never becomes the session's state"
             );
         });
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A tool result bigger than the old 32 KiB chat window is read whole: its
+    /// head is in the read, not cut by a fixed tail. Red on the base, where the
+    /// tail drops the start of a 40 KB record.
+    #[test]
+    fn a_chat_read_delivers_a_record_bigger_than_the_old_window_whole() {
+        let dir = std::env::temp_dir().join(format!("aoide-chat-big-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("big.jsonl");
+        let marker = "HEAD-OF-A-FORTY-KILOBYTE-RESULT";
+        let big = format!("{marker}{}", "x".repeat(40 * 1024));
+        let result = serde_json::json!({"type": "user", "uuid": "u1", "message": {"role": "user",
+            "content": [{"type": "tool_result", "tool_use_id": "t1", "content": big}]}});
+        let after = serde_json::json!({"type": "assistant", "uuid": "a1", "message": {"role": "assistant",
+            "content": [{"type": "text", "text": "after"}]}});
+        std::fs::write(&path, format!("{result}\n{after}\n")).unwrap();
+
+        let chunk = claude_chat_read(&path, None).expect("the transcript is a file");
+        let shown: Vec<_> = chunk.lines.iter().flat_map(|l| crate::chat::claude::project("s-1", l)).collect();
+        assert!(
+            shown.iter().any(|c| c.json().to_string().contains(marker)),
+            "a 40 KB tool result is delivered whole, its head included"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A transcript admitted at a hook, then swapped for a symlink before it is
+    /// read, is refused: the read opens without following the link, so nothing
+    /// behind it is read. Red on the base, where `File::open` follows the link.
+    #[test]
+    fn a_transcript_swapped_for_a_symlink_after_admission_is_refused() {
+        let root = std::env::temp_dir().join(format!("aoide-h3-{}", std::process::id()));
+        let bucket = root.join("projects").join("-w");
+        std::fs::create_dir_all(&bucket).unwrap();
+        let sid = "sess-h3";
+        let line = |text: &str| {
+            let rec = serde_json::json!({"type": "assistant", "uuid": text, "message": {"role": "assistant",
+                "content": [{"type": "text", "text": text}]}});
+            format!("{rec}\n")
+        };
+        let path = bucket.join(format!("{sid}.jsonl"));
+        std::fs::write(&path, line("admitted")).unwrap();
+        assert!(claude_transcript_refusal(&path, sid).is_none(), "the file is admitted before the swap");
+
+        let elsewhere = root.join("elsewhere.jsonl");
+        std::fs::write(&elsewhere, line("swapped in")).unwrap();
+        std::fs::remove_file(&path).unwrap();
+        std::os::unix::fs::symlink(&elsewhere, &path).unwrap();
+
+        assert!(claude_chat_read(&path, None).is_none(), "a link swapped in after admission is refused");
+        assert!(transcript_tail(&path).is_empty(), "and nothing behind the link is read");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A partial last line (a record still being written) is never read: the
+    /// tail holds it back until its newline arrives. Red on the base, where the
+    /// tail hands over the unterminated line.
+    #[test]
+    fn a_transcript_read_holds_back_an_unterminated_last_line() {
+        let dir = std::env::temp_dir().join(format!("aoide-m1-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("partial.jsonl");
+        std::fs::write(&path, "{\"type\":\"user\"}\n{\"type\":\"assis").unwrap();
+        let lines = transcript_tail(&path);
+        assert_eq!(lines, vec!["{\"type\":\"user\"}".to_string()], "the unterminated line waits for its newline");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

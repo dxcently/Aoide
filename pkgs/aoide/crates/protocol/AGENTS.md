@@ -270,6 +270,20 @@
 
 - **A new door-shared type or macro** (something every domain crate would
   otherwise reimplement) lands in the matching module here.
+- **A new harness's chat adapter** is one file, `src/chat/<name>.rs`, with a
+  `project(session, line) -> Vec<ChatLine>` and its `read(path, from) ->
+  Option<Chunk>`: the complete lines after the byte offset `from` (the
+  `resume` an earlier read returned), or `resume: None` for a source with no
+  byte offsets (the printer dedupes those by line id). A read never returns
+  an unterminated last line. The contract test
+  (`tests/chat_contract.rs`) fails when `CONTRACTS.md` is missing. The nix
+  check skips it by name (`pkgs/aoide/default.nix` `checkFlags`), since the
+  nix source holds no root `CONTRACTS.md`; the checkout gate runs it. Every transcript read opens through
+  `agents::open_transcript`: no-follow, and the owner checked on the open
+  descriptor, so a link swapped in after admission is refused. Its profile names it once in the `chat` field
+  (`ChatSupport::Adapter`), or names the reason it has none
+  (`ChatSupport::Unsupported`). A profile with a trace reader must have an
+  adapter (`tests/chat_profiles.rs`).
 - **A new agent harness** (beyond `claude`/`kimi`/`pi`/`eidolon`) is a new
   `agents::agent_profile` table entry, not a scatter of `if harness == ...`
   conditionals elsewhere. A harness need not fill every field to qualify —

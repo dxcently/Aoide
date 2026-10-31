@@ -56,7 +56,7 @@ use super::model::{
     STAGE_GRAPH_VERSION,
 };
 use super::remote::{node_record, resolve_on_node};
-use super::session_store::{
+use super::session_store::{stamp_transcript_path, 
     audit_ignored_wrap_hook, clear_stale_parent, do_hook_session_start, do_session_end,
     do_session_phase, protected_wrap, reserved_id_refusal,
     do_session_phase_if, do_subagent_end, do_subagent_rekey,
@@ -113,6 +113,49 @@ use std::path::{Path, PathBuf};
 // a keystroke spelling of its own.
 #[cfg(not(test))]
 pub const SUBMIT_KEYSTROKE_DELAY: std::time::Duration = std::time::Duration::from_millis(300);
+/// The admission a hook-named transcript meets before it is recorded: the
+/// profile's own check. Returns the admitted path, or the refusal's name.
+fn transcript_decision(profile: &AgentProfile, sid: &str, path: &str) -> (Option<String>, Option<&'static str>) {
+    match profile.transcript.admit {
+        None => (None, Some("no-transcript-admission")),
+        Some(admit) => match admit(Path::new(path), sid) {
+            None => (Some(path.to_string()), None),
+            refusal => (None, refusal),
+        },
+    }
+}
+
+/// Records an admitted hook transcript on the session and returns it, or audits
+/// the refusal, records nothing, and returns none. Every later read of the
+/// transcript starts from this admitted path, never from the hook's raw one.
+fn admit_transcript_path(profile: &AgentProfile, sid: &str, hint: &str) -> Option<String> {
+    match transcript_decision(profile, sid, hint) {
+        (Some(admitted), _) => {
+            stamp_transcript_path(sid, &admitted);
+            Some(admitted)
+        }
+        (None, refusal) => {
+            let _ = aoide_protocol::append_audit(
+                &aoide_protocol::default_audit_log(),
+                &aoide_protocol::AuditRecord {
+                    ts: super::conduct::unix_ts(),
+                    door: Door::Daemon,
+                    class: aoide_protocol::EventClass::Audit,
+                    command: "session.transcript-path".to_string(),
+                    status: "refused".to_string(),
+                    message: format!(
+                        "{}: {}",
+                        aoide_protocol::untrusted::strip_unsafe(sid),
+                        refusal.unwrap_or("refused")
+                    ),
+                    untrusted_data: Some(hint.chars().take(AUDIT_REFUSED_TEXT_MAX).collect()),
+                },
+            );
+            None
+        }
+    }
+}
+
 #[cfg(test)]
 pub const SUBMIT_KEYSTROKE_DELAY: std::time::Duration = std::time::Duration::from_millis(0);
 
@@ -143,6 +186,11 @@ pub struct PendingSend {
     /// shown only under that name.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub claimed: Option<String>,
+    /// Whether the send was the person's own, judged when it was held over the
+    /// process that made the call. A legacy entry reads `false`: a peer, when in
+    /// doubt. Approval re-drives with this fact, never the approver's.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub operator: bool,
     /// Set on a held spawn, whose `text` is the command line shown to the
     /// approver and whose `session_id` is the id its child will register
     /// under. Nothing is typed for one: approving it launches it.
@@ -785,6 +833,7 @@ fn record_pending(
     text: &str,
     submit: bool,
     origin: &PendingOrigin,
+    operator: bool,
     spawn: Option<PendingSpawn>,
     log: &HoldLog,
 ) -> Result<(), HoldRefused> {
@@ -795,6 +844,7 @@ fn record_pending(
         queued_at: now_iso_utc(),
         from: origin.from.clone(),
         claimed: origin.claimed.clone(),
+        operator,
         spawn,
     };
     let now = super::conduct::unix_ts() as i64;
@@ -831,7 +881,7 @@ pub fn hold_pending(
 ) -> Result<(), HoldRefused> {
     let origin = PendingOrigin { from: from.map(str::to_string), claimed: None };
     let log = HoldLog { door: Door::A2a, path: audit_log.to_path_buf() };
-    record_pending(id, text, submit, &origin, None, &log)
+    record_pending(id, text, submit, &origin, false, None, &log)
 }
 
 /// Park a spawn the MCP door could not attribute, to launch only when a human
@@ -842,7 +892,7 @@ pub fn hold_pending(
 pub fn hold_spawn(id: &str, command: &str, spawn: PendingSpawn, audit_log: &Path) -> Result<(), HoldRefused> {
     let origin = PendingOrigin { from: Some(MCP_SOURCE.to_string()), claimed: None };
     let log = HoldLog { door: Door::Mcp, path: audit_log.to_path_buf() };
-    record_pending(id, command, false, &origin, Some(spawn), &log)
+    record_pending(id, command, false, &origin, false, Some(spawn), &log)
 }
 
 /// Auto-rename: write `title` onto the session record and re-stage the graph so
@@ -1057,6 +1107,33 @@ pub(in crate::graph) fn real_attested_sender(sessions: &[SessionRecord]) -> Opti
     })
 }
 
+/// Is the process that made this call the person's own, not an agent's? The
+/// person is a process with no sealed session in its `/proc` ancestry, judged
+/// with the live daemon key. A daemon that cannot be asked, or a call with no
+/// process to walk, is an agent: when in doubt, a peer.
+fn real_caller_is_person(pid: i32, sessions: &[SessionRecord]) -> bool {
+    let Some(pubkey) = aoide_client::daemon::daemon_seal_pubkey_hex() else {
+        return false;
+    };
+    crate::graph::identity::attested_sender(pid, sessions, |rec| {
+        crate::graph::identity::verify_seal_over(rec, &pubkey)
+    })
+    .is_none()
+}
+
+/// The person test for one call ([`real_caller_is_person`]) over the process
+/// that actually made it: this process on the CLI door, the door's own peer on
+/// the daemon door (aoided's ancestry is never the caller's). The MCP, A2A and
+/// pair doors act on an agent's behalf, so no process of theirs is the person.
+fn production_person(inv: &Invocation) -> impl Fn(&[SessionRecord]) -> bool {
+    let pid = match inv.door {
+        Door::Cli => Some(std::process::id() as i32),
+        Door::Daemon => door_pid(inv),
+        Door::Mcp | Door::A2a | Door::Pair => None,
+    };
+    move |sessions| pid.is_some_and(|pid| real_caller_is_person(pid, sessions))
+}
+
 /// The REAL attested-wrap resolution [`hook_ensure_session`] uses in
 /// production (P-QOL-C §1): the same live daemon-key fetch
 /// [`real_attested_sender`] makes, delegated to
@@ -1209,6 +1286,64 @@ fn deliver_local(inv: &Invocation, id: &str) -> Outcome {
     deliver_local_with(inv, id, real_attested_sender)
 }
 
+/// Re-drives a held send on approval. `operator` is the fact the hold recorded
+/// about its sender, never the approver's: the approver's own process is not the
+/// sender of a send an agent held.
+pub(in crate::graph) fn session_send_held(inv: &Invocation, id: &str, operator: bool) -> Outcome {
+    deliver_local_as(inv, id, real_attested_sender, move |_| operator)
+}
+
+/// The longest a native send may run before its child is killed and reaped.
+const NATIVE_DEADLINE: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// Runs a harness's native send (`eidolon send … -`) with `message` on stdin.
+/// Exit 0 is accepted; anything else is its stderr, as the refusal.
+fn native_deliver(argv: &[String], message: &str) -> Result<(), String> {
+    use std::io::Write as _;
+    use std::process::{Command, Stdio};
+    let mut child = Command::new("eidolon")
+        .args(argv)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("cannot run eidolon: {e}"))?;
+    let mut stdin = child.stdin.take().expect("piped stdin");
+    let text = message.to_owned();
+    // The write runs beside the wait: a child that never reads its stdin is
+    // held by the deadline, and killing it closes the pipe under the writer.
+    let writer = std::thread::spawn(move || stdin.write_all(text.as_bytes()));
+    let end = std::time::Instant::now() + NATIVE_DEADLINE;
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => break,
+            Ok(None) if std::time::Instant::now() < end => std::thread::sleep(std::time::Duration::from_millis(20)),
+            Ok(None) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                let _ = writer.join();
+                return Err(format!("eidolon did not return within {}s and was killed", NATIVE_DEADLINE.as_secs()));
+            }
+            Err(e) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                let _ = writer.join();
+                return Err(e.to_string());
+            }
+        }
+    }
+    let out = child.wait_with_output().map_err(|e| e.to_string())?;
+    writer
+        .join()
+        .unwrap_or_else(|_| Err(std::io::Error::other("the stdin writer panicked")))
+        .map_err(|e| e.to_string())?;
+    if out.status.success() {
+        Ok(())
+    } else {
+        Err(String::from_utf8_lossy(&out.stderr).trim().to_string())
+    }
+}
+
 /// Write `payload` to `stream`, then — when `submit` is set — a SEPARATE,
 /// LATER write of `submit_key` alone, sleeping `delay` in between (task
 /// #124; see [`SUBMIT_KEYSTROKE_DELAY`]'s doc comment for why this must be
@@ -1254,6 +1389,18 @@ pub(in crate::graph) fn deliver_local_with(
     id: &str,
     resolve_sender_id: impl Fn(&[SessionRecord]) -> Option<String>,
 ) -> Outcome {
+    deliver_local_as(inv, id, resolve_sender_id, production_person(inv))
+}
+
+/// [`deliver_local_with`] with the person test given: `person` answers whether
+/// the sender of this send is the person (`--operator` on a native call, and
+/// the fact a hold records). Tests and a re-drive on approval name the answer.
+pub(in crate::graph) fn deliver_local_as(
+    inv: &Invocation,
+    id: &str,
+    resolve_sender_id: impl Fn(&[SessionRecord]) -> Option<String>,
+    person: impl Fn(&[SessionRecord]) -> bool,
+) -> Outcome {
     let cmd = "send";
     // Accept the exact `session:<id>` form `graph --json` emits for a
     // node id, so a copy-pasted id round-trips through `--id` — mirrors
@@ -1294,6 +1441,24 @@ pub(in crate::graph) fn deliver_local_with(
         .with_data(json!({ "reason": "codex-app-unsupported", "id": id }));
         audit_send(inv, "error", &out.message, &text);
         return out;
+    }
+    // `--harness <name>`: the target must be a wrap of that harness. A shell wrap or
+    // another harness's wrap is refused here, before the gate, so `--yes` cannot
+    // type chat text into a bare shell.
+    if let Some(harness) = inv.flags.get("harness").map(|h| h.trim()).filter(|h| !h.is_empty()) {
+        if rec.shell || rec.agent != harness {
+            let out = Outcome::error(
+                cmd,
+                format!(
+                    "`{id}` is not a `{harness}` session: it runs `{}`{}, so nothing was typed",
+                    aoide_protocol::untrusted::strip_unsafe(&rec.agent),
+                    if rec.shell { " in a shell" } else { "" }
+                ),
+            )
+            .with_data(json!({ "reason": "not-that-harness", "sessionId": id, "harness": harness, "agent": rec.agent, "shell": rec.shell }));
+            audit_send(inv, "not-that-harness", &out.message, &text);
+            return out;
+        }
     }
     let is_conductable = super::doc::is_conductable_now(rec);
     let socket = rec.socket.clone().filter(|s| !s.is_empty());
@@ -1392,7 +1557,7 @@ pub(in crate::graph) fn deliver_local_with(
                 return out;
             }
         };
-        match record_pending(&id, &text, submit, &origin, None, &HoldLog::of(inv)) {
+        match record_pending(&id, &text, submit, &origin, person(&file.sessions), None, &HoldLog::of(inv)) {
             Ok(()) => {}
             Err(HoldRefused::Stage(e)) => return stage_error(cmd, e),
             Err(HoldRefused::Full) => {
@@ -1538,22 +1703,37 @@ pub(in crate::graph) fn deliver_local_with(
     if let Some(prefix) = provenance_prefix(prefix_sender.as_deref(), &text) {
         payload = format!("{prefix}{payload}");
     }
-    match UnixStream::connect(&socket) {
-        Ok(mut stream) => {
-            if let Err(e) =
-                write_delivery(&mut stream, payload.as_bytes(), submit, submit_key, SUBMIT_KEYSTROKE_DELAY)
-            {
-                let out = Outcome::error(cmd, format!("failed to inject into `{id}`: {e}"))
-                    .with_data(json!({ "reason": "socket-write-failed", "id": id, "socket": socket }));
+    // A harness with a native send (eidolon) takes the text through its own CLI,
+    // on stdin, never the socket. The attributed sender rides only in the audit
+    // line: the native call names the sender `aoide`, and `--operator` marks a
+    // send by the person, judged over the calling process ([`production_person`]),
+    // never over `AOIDE_SESSION_ID`.
+    let native_landing = agent_profile(&rec.agent).and_then(|p| p.native_send).is_some();
+    if let Some(native) = agent_profile(&rec.agent).and_then(|p| p.native_send) {
+        if let Err(e) = native_deliver(&native(&id, person(&file.sessions)), &text) {
+            let out = Outcome::error(cmd, format!("native send to `{id}` failed: {e}"))
+                .with_data(json!({ "reason": "native-send-failed", "id": id, "agent": rec.agent }));
+            audit_send(inv, "error", &out.message, &text);
+            return out;
+        }
+    } else {
+        match UnixStream::connect(&socket) {
+            Ok(mut stream) => {
+                if let Err(e) =
+                    write_delivery(&mut stream, payload.as_bytes(), submit, submit_key, SUBMIT_KEYSTROKE_DELAY)
+                {
+                    let out = Outcome::error(cmd, format!("failed to inject into `{id}`: {e}"))
+                        .with_data(json!({ "reason": "socket-write-failed", "id": id, "socket": socket }));
+                    audit_send(inv, "error", &out.message, &text);
+                    return out;
+                }
+            }
+            Err(e) => {
+                let out = Outcome::error(cmd, format!("control socket for `{id}` unreachable: {e}"))
+                    .with_data(json!({ "reason": "socket-unreachable", "id": id, "socket": socket }));
                 audit_send(inv, "error", &out.message, &text);
                 return out;
             }
-        }
-        Err(e) => {
-            let out = Outcome::error(cmd, format!("control socket for `{id}` unreachable: {e}"))
-                .with_data(json!({ "reason": "socket-unreachable", "id": id, "socket": socket }));
-            audit_send(inv, "error", &out.message, &text);
-            return out;
         }
     }
 
@@ -1612,11 +1792,14 @@ pub(in crate::graph) fn deliver_local_with(
         }
     }
 
-    let out = Outcome::ok(cmd, format!("delivered to `{id}` ({})", gate.label()))
+    // A native send lands in the harness's own CLI, which reports nothing back:
+    // it is `delivered-unverified` here, the word the spawn path uses too.
+    let word = if native_landing { "delivered-unverified" } else { "delivered" };
+    let out = Outcome::ok(cmd, format!("{word} to `{id}` ({})", gate.label()))
         .changed(changed)
         .with_data(json!({
             "id": id,
-            "state": "delivered",
+            "state": word,
             "delivered": true,
             "submit": submit,
             "title": title,
@@ -1627,9 +1810,9 @@ pub(in crate::graph) fn deliver_local_with(
     match inv.door {
         Door::Mcp => {
             let note = pending_origin(inv, || attested.clone()).ok().and_then(|origin| origin.note());
-            audit_send_noted(inv, "delivered", &out.message, &text, note);
+            audit_send_noted(inv, word, &out.message, &text, note);
         }
-        _ => audit_send(inv, "delivered", &out.message, &text),
+        _ => audit_send(inv, word, &out.message, &text),
     }
     out
 }
@@ -2958,14 +3141,18 @@ fn hook_for_profile_gated(
             (profile.hook_event_map)(evt),
             HookClass::Stop | HookClass::PostToolUse | HookClass::PromptSubmit | HookClass::Notification
         );
+        let raw = payload.get("transcript_path").and_then(Value::as_str);
+        let mut admitted = None;
+        if !is_sub {
+            if let Some(hint) = raw {
+                admitted = admit_transcript_path(profile, sid, hint);
+            }
+        }
         if !is_sub && say_boundary {
-            refresh_transcript_fields(
-                profile,
-                sid,
-                cwd,
-                payload.get("transcript_path").and_then(Value::as_str),
-                payload_ceiling(&payload),
-            );
+            // A profile with an admission reads only the path it admitted. One
+            // without keeps the hook's own path: an open item, see the lane log.
+            let hint = if profile.transcript.admit.is_some() { admitted.as_deref() } else { raw };
+            refresh_transcript_fields(profile, sid, cwd, hint, payload_ceiling(&payload));
         }
         // A background Task keeps running after the parent's turn settles, so
         // catch its words on every one of the parent's own hooks (not just the
@@ -4545,6 +4732,263 @@ mod tests {
     }
 
     // ── Approval doors: which door may approve a gated send ─────────────────
+
+    #[test]
+    fn a_hook_names_a_transcript_only_through_the_profiles_admission() {
+        let root = std::env::temp_dir().join(format!("ao-hook-transcript-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let bucket = root.join("projects").join("-home-u-Aoide");
+        std::fs::create_dir_all(&bucket).unwrap();
+        let good = bucket.join("sid-1.jsonl");
+        std::fs::write(&good, "{}\n").unwrap();
+        let claude = aoide_protocol::agents::agent_profile("claude").unwrap();
+        assert_eq!(
+            transcript_decision(claude, "sid-1", good.to_str().unwrap()),
+            (Some(good.display().to_string()), None)
+        );
+        let other = bucket.join("other.jsonl");
+        std::fs::write(&other, "{}\n").unwrap();
+        assert_eq!(
+            transcript_decision(claude, "sid-1", other.to_str().unwrap()),
+            (None, Some("name-is-not-the-session"))
+        );
+        let kimi = aoide_protocol::agents::agent_profile("kimi").unwrap();
+        assert_eq!(
+            transcript_decision(kimi, "sid-1", good.to_str().unwrap()),
+            (None, Some("no-transcript-admission"))
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// `--harness <name>` checks the wrap before anything is typed: a shell wrap,
+    /// or a wrap of another harness, is refused as `not-that-harness`.
+    fn set_wrap(id: &str, edit: impl FnOnce(&mut SessionRecord)) {
+        let mut f: SessionsFile = load_stage(&sessions_path()).unwrap();
+        edit(f.sessions.iter_mut().find(|s| s.session_id == id).unwrap());
+        write_stage(&sessions_path(), &f).unwrap();
+    }
+
+    #[test]
+    fn a_shell_wrap_is_refused_for_harness_claude_even_with_yes() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (root, id, listener) = door_fixture("harness-shell", None);
+        set_wrap(&id, |r| r.shell = true);
+        let out = session_send(&send_on(Door::Cli, &["ls"], &[("id", &id), ("harness", "claude"), ("yes", "true")]));
+        assert_eq!(out.status, aoide_protocol::output::Status::Error, "{}", out.message);
+        assert_eq!(out.data.as_ref().unwrap()["reason"], "not-that-harness", "{}", out.message);
+        assert!(nothing_connected(&listener), "a refused send types nothing");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_wrap_of_another_harness_is_refused_for_harness_claude() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (root, id, listener) = door_fixture("harness-kimi", None);
+        set_wrap(&id, |r| r.agent = "kimi".into());
+        let out = session_send(&send_on(Door::Cli, &["ls"], &[("id", &id), ("harness", "claude"), ("yes", "true")]));
+        assert_eq!(out.data.as_ref().unwrap()["reason"], "not-that-harness", "{}", out.message);
+        assert!(nothing_connected(&listener));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_claude_wrap_passes_the_harness_check_and_reaches_its_socket() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (root, id, listener) = door_fixture("harness-claude", None);
+        let out = session_send(&send_on(Door::Cli, &["ls"], &[("id", &id), ("harness", "claude"), ("yes", "true")]));
+        assert_ne!(out.data.as_ref().and_then(|d| d["reason"].as_str()), Some("not-that-harness"), "{}", out.message);
+        assert!(!nothing_connected(&listener), "a harness wrap takes the delivery: {}", out.message);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A fake `eidolon` on a private PATH that records its argv and its stdin
+    /// into `record.argv` and `record.stdin` in its own directory.
+    fn fake_eidolon(tag: &str) -> std::path::PathBuf {
+        let dir = unique_stage(&format!("fake-eidolon-{tag}"));
+        std::fs::create_dir_all(&dir).unwrap();
+        let script = dir.join("eidolon");
+        let rec = dir.display().to_string();
+        std::fs::write(
+            &script,
+            format!("#!/bin/sh\nprintf '%s\\n' \"$@\" > '{rec}/record.argv'\ncat > '{rec}/record.stdin'\necho 'delivered to x'\n"),
+        )
+        .unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        dir
+    }
+
+    /// Runs `f` with the fake `eidolon` first on PATH, restoring PATH after.
+    fn with_fake_eidolon(dir: &std::path::Path, f: impl FnOnce()) {
+        let old = std::env::var("PATH").unwrap_or_default();
+        std::env::set_var("PATH", format!("{}:{old}", dir.display()));
+        f();
+        std::env::set_var("PATH", old);
+    }
+
+    /// The admission-refusal audit names the session by its sid; a hostile sid
+    /// reaches the log's message stripped. Red on the base, which wrote it raw.
+    #[test]
+    fn an_admission_refusal_names_its_session_stripped() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let root = unique_stage("admit-strip");
+        std::env::set_var("AOIDE_AUDIT_LOG", root.join("log"));
+        let profile = agent_profile("claude").unwrap();
+        assert!(admit_transcript_path(profile, "s\u{1b}9", "/nonexistent/x.jsonl").is_none());
+        let log = std::fs::read_to_string(root.join("log")).unwrap();
+        let last = log.lines().last().expect("the refusal is audited");
+        let message = serde_json::from_str::<serde_json::Value>(last).unwrap()["message"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        assert!(!message.contains('\u{1b}'), "{message:?}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A native CLI that never returns is killed at the deadline, and its child
+    /// is reaped: its pid is gone from the process table, not left a zombie.
+    /// Red on the base, which waited on it without bound.
+    #[test]
+    fn a_native_send_that_hangs_is_killed_at_the_deadline_and_reaped() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let bin = unique_stage("fake-eidolon-hang");
+        std::fs::create_dir_all(&bin).unwrap();
+        let script = bin.join("eidolon");
+        let pid_file = bin.join("pid");
+        std::fs::write(&script, format!("#!/bin/sh\necho $$ > '{}'\nexec sleep 60\n", pid_file.display())).unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        with_fake_eidolon(&bin, || {
+            let (tx, rx) = std::sync::mpsc::channel();
+            std::thread::spawn(move || {
+                let _ = tx.send(native_deliver(&["send".to_string()], "hello"));
+            });
+            let got = rx.recv_timeout(std::time::Duration::from_secs(30));
+            let result = got.expect("a hung native send returns within the deadline");
+            assert!(result.is_err(), "a killed native send is an error: {result:?}");
+        });
+        let pid = std::fs::read_to_string(&pid_file).unwrap();
+        assert!(!std::path::Path::new(&format!("/proc/{}", pid.trim())).exists(), "the child is reaped");
+        let _ = std::fs::remove_dir_all(&bin);
+    }
+
+    #[test]
+    fn an_eidolon_send_goes_through_its_native_send_with_the_text_on_stdin() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (root, id, listener) = door_fixture("eidolon-native", None);
+        set_wrap(&id, |r| r.agent = "eidolon".into());
+        let bin = fake_eidolon("native");
+        let out = {
+            let mut out = None;
+            with_fake_eidolon(&bin, || {
+                let inv = send_on(Door::Cli, &["hello there"], &[("id", &id), ("yes", "true")]);
+                out = Some(deliver_local_as(&inv, &id, |_| None, |_| true));
+            });
+            out.unwrap()
+        };
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "{}", out.message);
+        // The person's own send: the process that made it has no sealed ancestor,
+        // so `--operator` is on the native call.
+        assert_eq!(
+            std::fs::read_to_string(bin.join("record.argv")).unwrap(),
+            format!("send\n--from\naoide\n--wake\n--operator\n--\n{id}\n-\n")
+        );
+        assert_eq!(std::fs::read_to_string(bin.join("record.stdin")).unwrap(), "hello there");
+        assert!(nothing_connected(&listener), "an eidolon send takes the native path, not the socket");
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&bin);
+    }
+
+    /// A native send hands the text to the harness's CLI and verifies nothing
+    /// about its landing, so the outcome and the audit say `delivered-unverified`,
+    /// never `delivered`. Red on the base, which says `delivered`.
+    #[test]
+    fn a_native_send_reports_delivered_unverified_never_delivered() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (root, id, _listener) = door_fixture("eidolon-unverified", None);
+        set_wrap(&id, |r| r.agent = "eidolon".into());
+        let bin = fake_eidolon("unverified");
+        with_fake_eidolon(&bin, || {
+            let inv = send_on(Door::Cli, &["hello"], &[("id", &id), ("yes", "true")]);
+            let out = deliver_local_as(&inv, &id, |_| None, |_| true);
+            assert_eq!(out.status, aoide_protocol::output::Status::Ok, "{}", out.message);
+            assert_eq!(out.data.as_ref().unwrap()["state"], "delivered-unverified", "{:?}", out.data);
+        });
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&bin);
+    }
+
+    #[test]
+    fn an_eidolon_send_from_an_agent_session_goes_as_a_peer() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (root, id, _listener) = door_fixture("eidolon-peer", None);
+        set_wrap(&id, |r| r.agent = "eidolon".into());
+        let bin = fake_eidolon("peer");
+        // The env names an agent, but the verdict is the verified process's: an
+        // attested sealed ancestor (here, `|_| false`) makes the send a peer.
+        std::env::set_var("AOIDE_SESSION_ID", "agent-7");
+        with_fake_eidolon(&bin, || {
+            let inv = send_on(Door::Cli, &["ping"], &[("id", &id), ("yes", "true")]);
+            let out = deliver_local_as(&inv, &id, |_| Some("agent-7".to_string()), |_| false);
+            assert_eq!(out.status, aoide_protocol::output::Status::Ok, "{}", out.message);
+        });
+        std::env::remove_var("AOIDE_SESSION_ID");
+        let argv = std::fs::read_to_string(bin.join("record.argv")).unwrap();
+        assert!(!argv.contains("--operator"), "an agent's send goes as a peer: {argv}");
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&bin);
+    }
+
+    #[test]
+    fn an_agent_send_dispatched_through_the_daemon_goes_as_a_peer() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (root, id, _listener) = door_fixture("daemon-peer", None);
+        set_wrap(&id, |r| r.agent = "eidolon".into());
+        let bin = fake_eidolon("daemon-peer");
+        let peer_pid = std::process::id().to_string();
+        with_fake_eidolon(&bin, || {
+            let inv = send_on(
+                Door::Daemon,
+                &["ping"],
+                &[("id", &id), ("yes", "true"), (DAEMON_PEER_PID_FLAG, &peer_pid)],
+            );
+            let out = session_send(&inv);
+            assert_eq!(out.status, aoide_protocol::output::Status::Ok, "{}", out.message);
+        });
+        let argv = std::fs::read_to_string(bin.join("record.argv")).unwrap();
+        assert!(!argv.contains("--operator"), "an agent's send through the daemon goes as a peer: {argv}");
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&bin);
+    }
+
+    #[test]
+    fn a_held_send_records_the_person_fact_it_was_held_as() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (root, id, _listener) = door_fixture("held-fact", None);
+        set_wrap(&id, |r| r.agent = "eidolon".into());
+        let person = deliver_local_as(&send_on(Door::Cli, &["from me"], &[("id", &id)]), &id, |_| None, |_| true);
+        assert_eq!(person.data.as_ref().unwrap()["state"], "pending", "{}", person.message);
+        let agent = deliver_local_as(&send_on(Door::Cli, &["from agent"], &[("id", &id)]), &id, |_| None, |_| false);
+        assert_eq!(agent.data.as_ref().unwrap()["state"], "pending", "{}", agent.message);
+        let file: PendingFile = load_stage(&pending_path()).unwrap();
+        assert_eq!(file.pending.iter().map(|p| p.operator).collect::<Vec<_>>(), vec![true, false]);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn an_eidolon_send_held_for_approval_runs_nothing() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (root, id, _listener) = door_fixture("eidolon-held", None);
+        set_wrap(&id, |r| r.agent = "eidolon".into());
+        let bin = fake_eidolon("held");
+        with_fake_eidolon(&bin, || {
+            let out = session_send(&send_on(Door::Cli, &["later"], &[("id", &id)]));
+            assert_eq!(out.data.as_ref().unwrap()["state"], "pending", "{}", out.message);
+        });
+        assert!(!bin.join("record.argv").exists(), "a held send runs no eidolon");
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&bin);
+    }
 
     fn send_on(door: Door, args: &[&str], flags: &[(&str, &str)]) -> Invocation {
         Invocation {

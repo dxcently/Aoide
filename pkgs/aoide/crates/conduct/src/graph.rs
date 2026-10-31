@@ -89,6 +89,7 @@ pub(crate) mod testutil;
 // `docs/architecture/EIDOLON-TRACE.md`), where every other session command
 // reads the roster or acts on a session. Read-only: no stage write, no
 // daemon, no lock.
+mod chat;
 mod trace;
 mod grant;
 mod manage;
@@ -160,6 +161,7 @@ pub use self::pending::{pending_approve, pending_deny, pending_list};
 // (`docs/architecture/EIDOLON-TRACE.md`). Read-only, so it sits outside the
 // L4 dual-writer family entirely.
 pub use self::trace::session_trace;
+pub use self::chat::session_chat;
 // `session watch <id> [--tail N] [--snapshot] [--json]` — the READ-ONLY live
 // view of a managed task run: instructions, output, its mailbox, and where it
 // stands. Read-only, so it sits outside the L4 dual-writer family entirely,
