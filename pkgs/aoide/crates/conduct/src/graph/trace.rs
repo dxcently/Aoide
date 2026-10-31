@@ -1055,6 +1055,12 @@ fn record_cursor(line: &str) -> String {
     }
 }
 
+/// A trace file's identity: device and inode. A replaced trace gets a new one.
+pub(super) fn file_identity(path: &Path) -> Option<(u64, u64)> {
+    use std::os::unix::fs::MetadataExt;
+    std::fs::metadata(path).ok().map(|m| (m.dev(), m.ino()))
+}
+
 /// The lines one follow tick prints, and whether records were skipped. Without
 /// a cursor (nothing printed yet) the whole window is new. With one, the lines
 /// after its record are new. A cursor that is not in a non-empty window has
@@ -1098,6 +1104,7 @@ fn follow_trace(
     let mut cursor: Option<String> = None;
     let mut printed = 0usize;
     let mut gaps = 0usize;
+    let mut ident = file_identity(path);
     if let Some(lines) = read_trace(path) {
         for line in last_lines(&lines, tail) {
             emit(line);
@@ -1113,7 +1120,16 @@ fn follow_trace(
         let Some(lines) = read_trace(path) else {
             continue; // the file is momentarily not there — keep waiting
         };
-        let (fresh, gap) = follow_tick(&lines, cursor.as_deref());
+        // A new file (a new inode) starts over: its ids may repeat the ones
+        // printed, so the old cursor means nothing in it.
+        let now = file_identity(path);
+        let replaced = ident.is_some() && now.is_some() && now != ident;
+        ident = now;
+        let (fresh, gap) = if replaced {
+            (&lines[..], true)
+        } else {
+            follow_tick(&lines, cursor.as_deref())
+        };
         if gap {
             gaps += 1;
             eprintln!("warning: records between the last printed one and this window were not in it");
@@ -2215,6 +2231,43 @@ mod tests {
         assert_eq!(data["gaps"], 1, "{data}");
 
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The trace is replaced by a new file (a new inode) whose records reuse the
+    /// ids the follow printed: the new file prints whole, and its replacement is
+    /// a gap, even though the old cursor id is in the new window. Red on the base,
+    /// where the id alone resumes the follow inside the new file.
+    #[test]
+    fn a_follow_on_a_trace_replaced_by_overlapping_ids_says_so_and_prints_the_new_one() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let root = unique_stage("trace-follow-overlap");
+        let path = root.join("trace.jsonl");
+        write_trace(&path, 0..400);
+        SHRINK_CALLS.store(0, Ordering::SeqCst);
+        INTERRUPTED.store(false, Ordering::SeqCst);
+
+        let out = follow_trace("session.trace", "Aoide-overlap", "overlap", &path, replaced_by_a_new_file, 5, true, false);
+        assert_eq!(out.status, Status::Ok, "msg: {}", out.message);
+        let data = out.data.clone().unwrap();
+        assert_eq!(data["gaps"], 1, "a replacement is a gap even where its ids overlap: {data}");
+        assert_eq!(data["printed"], 10, "5 of the old window, then the 5 records of the new file: {data}");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Writes a fresh trace beside `path` and renames it over `path`, so the
+    /// follow sees a new inode with ids 397..402 (397 to 399 are already printed).
+    fn replaced_by_a_new_file(path: &std::path::Path) -> Option<Vec<String>> {
+        let call = SHRINK_CALLS.fetch_add(1, Ordering::SeqCst);
+        if call == 1 {
+            let fresh = path.with_extension("new");
+            write_trace(&fresh, 397..402);
+            std::fs::rename(&fresh, path).unwrap();
+        }
+        if call == 2 {
+            INTERRUPTED.store(true, Ordering::SeqCst);
+        }
+        aoide_protocol::agents::eidolon_trace_tail(path)
     }
 
     #[test]

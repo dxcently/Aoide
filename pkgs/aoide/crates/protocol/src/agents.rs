@@ -483,6 +483,11 @@ fn transcript_tail_bounded(path: &Path, budget: u64) -> Vec<String> {
     }
     let text = String::from_utf8_lossy(&buf);
     let mut lines: Vec<String> = text.lines().map(str::to_string).collect();
+    // An unterminated last line is a record still being written: it waits for
+    // its newline, and the next read gets it whole.
+    if !buf.ends_with(b"\n") {
+        lines.pop();
+    }
     if start > 0 && !lines.is_empty() {
         lines.remove(0); // the seek likely split a line — drop the partial head
     }
@@ -3966,7 +3971,7 @@ mod tests {
             // LAST text block, whitespace-normalised.
             r#"{"type":"assistant","isSidechain":false,"message":{"content":[{"type":"thinking","thinking":"hmm"},{"type":"text","text":"  the  latest\nline  "},{"type":"tool_use","name":"Bash","input":{}}]}}"#,
         ]
-        .join("\n");
+        .join("\n") + "\n";
         std::fs::write(&path, &body).unwrap();
         let say = extract_say(&transcript_tail(&path), true);
         let _ = std::fs::remove_file(&path);
@@ -3995,7 +4000,7 @@ mod tests {
             r#"{"type":"assistant","isSidechain":true,"message":{"model":"claude-haiku-4-5","content":[{"type":"text","text":"sub"}]}}"#,
             r#"{"type":"assistant","isSidechain":false,"message":{"model":"claude-sonnet-5","content":[{"type":"text","text":"latest"}]}}"#,
         ]
-        .join("\n");
+        .join("\n") + "\n";
         std::fs::write(&path, &body).unwrap();
         let model = extract_model(&transcript_tail(&path), true);
         let _ = std::fs::remove_file(&path);
@@ -4021,7 +4026,7 @@ mod tests {
             // folded into the sum (2 + 11803 + 349611 = 361416, not +459).
             r#"{"type":"assistant","isSidechain":false,"message":{"model":"claude-sonnet-5","usage":{"input_tokens":2,"cache_creation_input_tokens":11803,"cache_read_input_tokens":349611,"output_tokens":459}}}"#,
         ]
-        .join("\n");
+        .join("\n") + "\n";
         std::fs::write(&path, &body).unwrap();
         let tokens = transcript_context_tokens(&transcript_tail(&path));
         let _ = std::fs::remove_file(&path);
@@ -4072,7 +4077,7 @@ mod tests {
         .unwrap();
         std::fs::write(
             dir.join("agent-aaa111.jsonl"),
-            r#"{"type":"assistant","isSidechain":true,"message":{"content":[{"type":"text","text":"from A"}]}}"#,
+            format!("{}\n", r#"{"type":"assistant","isSidechain":true,"message":{"content":[{"type":"text","text":"from A"}]}}"#),
         )
         .unwrap();
         std::fs::write(
@@ -4082,7 +4087,7 @@ mod tests {
         .unwrap();
         std::fs::write(
             dir.join("agent-bbb222.jsonl"),
-            r#"{"type":"assistant","isSidechain":true,"message":{"content":[{"type":"text","text":"from B"}]}}"#,
+            format!("{}\n", r#"{"type":"assistant","isSidechain":true,"message":{"content":[{"type":"text","text":"from B"}]}}"#),
         )
         .unwrap();
 
@@ -4121,7 +4126,7 @@ mod tests {
                 r#"{"type":"assistant","isSidechain":true,"message":{"model":"claude-fable-5","content":[{"type":"text","text":"first"}]}}"#,
                 r#"{"type":"assistant","isSidechain":true,"message":{"model":"claude-fable-5","content":[{"type":"text","text":"from agent id"}]}}"#,
             ]
-            .join("\n"),
+            .join("\n") + "\n",
         )
         .unwrap();
 
@@ -5641,5 +5646,19 @@ mod tests {
         assert!(claude_chat_read(&path, None).is_none(), "a link swapped in after admission is refused");
         assert!(transcript_tail(&path).is_empty(), "and nothing behind the link is read");
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A partial last line (a record still being written) is never read: the
+    /// tail holds it back until its newline arrives. Red on the base, where the
+    /// tail hands over the unterminated line.
+    #[test]
+    fn a_transcript_read_holds_back_an_unterminated_last_line() {
+        let dir = std::env::temp_dir().join(format!("aoide-m1-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("partial.jsonl");
+        std::fs::write(&path, "{\"type\":\"user\"}\n{\"type\":\"assis").unwrap();
+        let lines = transcript_tail(&path);
+        assert_eq!(lines, vec!["{\"type\":\"user\"}".to_string()], "the unterminated line waits for its newline");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -11,7 +11,7 @@
 use super::common::require_args;
 use super::model::{load_stage, sessions_path, SessionsFile};
 use super::permit::summons_card_id;
-use super::trace::{on_sigint, resolve_local, INTERRUPTED};
+use super::trace::{file_identity, on_sigint, resolve_local, INTERRUPTED};
 use crate::notifications::{notifications_path, Notification, NotificationsFile};
 use aoide_protocol::agents::{agent_profile, AgentProfile};
 use aoide_protocol::chat::{Ask, AskKind, ChatAdapter, ChatLine, ChatSupport, Role, State};
@@ -84,13 +84,6 @@ pub(super) struct Printed {
     cursor: Option<String>,
 }
 
-/// A transcript file's identity: device and inode. A replaced file gets a new
-/// one, so a byte offset from the old file is never resumed in the new.
-fn file_identity(path: &Path) -> Option<(u64, u64)> {
-    use std::os::unix::fs::MetadataExt;
-    std::fs::metadata(path).ok().map(|m| (m.dev(), m.ino()))
-}
-
 impl Printed {
     /// Where the read of `path` resumes: the byte offset after the last line
     /// printed, or none when the file is new to this run or was replaced.
@@ -126,7 +119,13 @@ impl Printed {
             self.offset = None;
             self.cursor = None;
         }
-        let fresh = cursor_tail(chat, self.cursor.as_deref()).to_vec();
+        let mut fresh = cursor_tail(chat, self.cursor.as_deref()).to_vec();
+        if let (Some(c), Some(first)) = (self.cursor.as_deref(), chat.first()) {
+            if !chat.iter().any(|l| line_id(l) == c) {
+                let session = first.json()["session"].as_str().unwrap_or("").to_string();
+                fresh.insert(0, gap_line(&session, c));
+            }
+        }
         if let Some(last) = chat.last() {
             self.cursor = Some(line_id(last));
         }
@@ -346,6 +345,18 @@ mod tests {
         let chat = [line("a", "one"), line("b", "two")];
         assert_eq!(cursor_tail(&chat, None).len(), 2);
         assert_eq!(cursor_tail(&chat, Some("gone")).len(), 2);
+    }
+
+    /// A cursor whose line left the window is a gap the reader says it skipped,
+    /// as the trace follow does, never a silent reprint of the whole window.
+    #[test]
+    fn a_chat_cursor_that_fell_out_of_the_window_says_so() {
+        let mut printed = Printed::default();
+        let a = Path::new("/t/one.jsonl");
+        printed.tick(a, &[line("1", "x"), line("2", "y")]);
+        let out = printed.tick(a, &[line("9", "z")]);
+        let ids: Vec<String> = out.iter().map(line_id).collect();
+        assert!(ids.iter().any(|id| id.starts_with("gap:")), "a gone cursor is a gap: {ids:?}");
     }
 
     #[test]
