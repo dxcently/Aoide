@@ -316,6 +316,9 @@ rustPlatform.buildRustPackage {
     "a_close_whose_store_write_fails_keeps_its_watch_and_its_record"
     "--skip"
     "a_turn_that_is_unknown_at_the_lock_is_busy_and_arms_nothing"
+    # The sandbox has no compositor; the smoke run is the workspace gate's.
+    "--skip"
+    "the_smoke_scenarios_run_under_cage"
   ];
 
   meta.description = "The aoide desktop workspace, gated by its tests and clippy runs";

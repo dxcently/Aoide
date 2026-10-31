@@ -11,14 +11,26 @@ use crate::window::{FlagIn, Reply, Window};
 
 type Shared<'a> = tauri::State<'a, Arc<Window>>;
 
-async fn off_thread<T: Send + 'static>(work: impl FnOnce() -> T + Send + 'static) -> Result<T, String> {
+async fn off_thread<T: Send + 'static>(
+    name: &'static str,
+    work: impl FnOnce() -> T + Send + 'static,
+) -> Result<T, String> {
+    note_launch(name);
     tauri::async_runtime::spawn_blocking(work).await.map_err(|e| e.to_string())
 }
+
+#[cfg(feature = "smoke")]
+fn note_launch(name: &'static str) {
+    crate::smoke::record(name);
+}
+
+#[cfg(not(feature = "smoke"))]
+fn note_launch(_name: &'static str) {}
 
 #[tauri::command]
 pub async fn palette(window: Shared<'_>) -> Result<Vec<Row>, String> {
     let w = window.inner().clone();
-    off_thread(move || w.palette()).await
+    off_thread("palette", move || w.palette()).await
 }
 
 #[tauri::command]
@@ -29,13 +41,13 @@ pub async fn run(
     positionals: Vec<String>,
 ) -> Result<Reply, String> {
     let w = window.inner().clone();
-    off_thread(move || w.run(&path, &flags, &positionals)).await?
+    off_thread("run", move || w.run(&path, &flags, &positionals)).await?
 }
 
 #[tauri::command]
 pub async fn sessions(window: Shared<'_>) -> Result<Reply, String> {
     let w = window.inner().clone();
-    off_thread(move || w.sessions()).await?
+    off_thread("sessions", move || w.sessions()).await?
 }
 
 #[tauri::command]
@@ -44,17 +56,25 @@ pub async fn chat_open(window: Shared<'_>, id: String, channel: Channel<Push>) -
     let sink: Sink = Arc::new(move |push| {
         let _ = channel.send(push);
     });
-    off_thread(move || w.chat_open(&id, sink)).await?
+    off_thread("chat_open", move || w.chat_open(&id, sink)).await?
 }
 
 #[tauri::command]
 pub async fn chat_say(window: Shared<'_>, id: String, text: String) -> Result<Reply, String> {
     let w = window.inner().clone();
-    off_thread(move || w.chat_say(&id, &text)).await?
+    off_thread("chat_say", move || w.chat_say(&id, &text)).await?
 }
 
 #[tauri::command]
 pub async fn chat_close(window: Shared<'_>, id: String) -> Result<(), String> {
     let w = window.inner().clone();
-    off_thread(move || w.chat_close(&id)).await?
+    off_thread("chat_close", move || w.chat_close(&id)).await?
+}
+
+/// The smoke run's note: its text is appended to the record as data. Only a
+/// smoke build has it, and only the smoke capability grants it.
+#[cfg(feature = "smoke")]
+#[tauri::command]
+pub async fn smoke_note(note: String) -> Result<(), String> {
+    off_thread("smoke_note", move || crate::smoke::note(&note)).await?
 }

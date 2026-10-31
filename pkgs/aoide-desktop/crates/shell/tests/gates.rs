@@ -91,6 +91,11 @@ doctest = false
 name = "aoide-desktop"
 path = "src/main.rs"
 
+[[test]]
+name = "smoke"
+path = "tests/smoke.rs"
+required-features = ["smoke"]
+
 [features]
 # The headless smoke run (B2). No default or release build turns it on.
 smoke = []
@@ -313,10 +318,15 @@ fn no_door_or_shell_source_holds_a_foreign_word() {
 
 /// The one build script, the app's: tauri-build's manifest of the window's
 /// commands. Its golden text is compared without blank and comment lines.
-const BUILD_SCRIPT: &str = r##"const COMMANDS: &[&str] = &["palette", "run", "sessions", "chat_open", "chat_say", "chat_close"];
+const BUILD_SCRIPT: &str = r##"const COMMANDS: &[&str] = &["palette", "run", "sessions", "chat_open", "chat_say", "chat_close", "smoke_note"];
 
 fn main() {
-    let capabilities = "./capabilities/main.json";
+    // A smoke build reads the smoke capability too. No other build does.
+    let capabilities = if std::env::var_os("CARGO_FEATURE_SMOKE").is_some() {
+        "./capabilities/*.json"
+    } else {
+        "./capabilities/main.json"
+    };
     tauri_build::try_build(
         tauri_build::Attributes::new()
             .capabilities_path_pattern(capabilities)
@@ -382,7 +392,7 @@ fn every_tauri_command_is_an_async_fn() {
 }
 
 /// The names `generate_handler!` lists in the app's lib, the names build.rs's
-/// manifest lists, and the names capabilities/main.json grants, each as a sorted
+/// manifest lists, and the names the capabilities grant, each as a sorted
 /// list. The three must be the same set, so an unregistered command fails.
 #[test]
 fn every_handler_command_is_in_the_manifest_and_granted_to_main() {
@@ -390,10 +400,11 @@ fn every_handler_command_is_in_the_manifest_and_granted_to_main() {
     let lib = fs::read_to_string(root.join("crates/app/src/lib.rs")).expect("the app's lib is read");
     let start = lib.find("generate_handler![").expect("the lib names its handler");
     let body = &lib[start + "generate_handler![".len()..];
-    let body = &body[..body.find(']').expect("the handler list closes")];
+    let body = &body[..body.find("\n    ]").expect("the handler list closes")];
+    // An entry may carry a `#[cfg]` line before its path; the path is what counts.
     let mut handler: Vec<String> = body
         .split(',')
-        .map(str::trim)
+        .map(|entry| entry.lines().map(str::trim).filter(|l| !l.starts_with("#[")).collect::<String>())
         .filter(|e| !e.is_empty())
         .map(|e| e.trim_start_matches("commands::").to_owned())
         .collect();
@@ -410,16 +421,22 @@ fn every_handler_command_is_in_the_manifest_and_granted_to_main() {
         .collect();
     manifest.sort();
 
-    let caps: serde_json::Value = serde_json::from_str(
-        &fs::read_to_string(root.join("crates/app/capabilities/main.json")).expect("the capability is read"),
-    )
-    .expect("the capability is JSON");
-    let mut granted: Vec<String> = caps["permissions"]
-        .as_array()
-        .expect("the capability lists permissions")
-        .iter()
-        .map(|p| p.as_str().expect("a permission is a string").strip_prefix("allow-").expect("an allow permission").replace('-', "_"))
-        .collect();
+    // main.json grants the window's commands; smoke.json grants the smoke
+    // command, which only a smoke build reads. Together they are the grants.
+    let mut granted: Vec<String> = Vec::new();
+    for capability in ["crates/app/capabilities/main.json", "crates/app/capabilities/smoke.json"] {
+        let caps: serde_json::Value = serde_json::from_str(
+            &fs::read_to_string(root.join(capability)).expect("the capability is read"),
+        )
+        .expect("the capability is JSON");
+        granted.extend(
+            caps["permissions"]
+                .as_array()
+                .expect("the capability lists permissions")
+                .iter()
+                .map(|p| p.as_str().expect("a permission is a string").strip_prefix("allow-").expect("an allow permission").replace('-', "_")),
+        );
+    }
     granted.sort();
 
     let mut sources_defined: Vec<String> = Vec::new();
@@ -431,7 +448,7 @@ fn every_handler_command_is_in_the_manifest_and_granted_to_main() {
     sources_defined.sort();
 
     assert_eq!(handler, manifest, "generate_handler! and build.rs's manifest name different commands");
-    assert_eq!(handler, granted, "generate_handler! and capabilities/main.json name different commands");
+    assert_eq!(handler, granted, "generate_handler! and the capabilities name different commands");
     assert_eq!(handler, sources_defined, "every #[tauri::command] must be listed in generate_handler!");
 }
 

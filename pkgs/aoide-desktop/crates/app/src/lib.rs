@@ -1,16 +1,19 @@
 pub mod commands;
 pub mod confirm;
+#[cfg(feature = "smoke")]
+pub mod smoke;
 pub mod window;
 pub mod wire;
 
 use std::ffi::OsString;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 pub use confirm::{Confirm, Gtk};
 pub use wire::{Push, Sink};
 pub use window::Window;
 
+use aoide_desktop_shell::exec::untrusted::visible;
 use aoide_desktop_shell::exec::Exec;
 use tauri::Manager;
 
@@ -23,6 +26,8 @@ pub fn handler<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + 
         commands::chat_open,
         commands::chat_say,
         commands::chat_close,
+        #[cfg(feature = "smoke")]
+        commands::smoke_note,
     ]
 }
 
@@ -33,13 +38,37 @@ pub fn navigation_allowed(url: &tauri::Url) -> bool {
     url.scheme() == "tauri" && url.host_str() == Some("localhost")
 }
 
-/// Starts the app: refuses any argument, pins the program before GTK starts,
-/// then opens the one window.
-pub fn run() {
-    if std::env::args_os().len() > 1 {
-        eprintln!("aoide-desktop takes no arguments");
-        std::process::exit(2);
+/// The smoke directory the arguments name. A build without the smoke feature
+/// takes no argument, and refuses the one it is given by name.
+fn arguments(args: &[OsString]) -> Result<Option<PathBuf>, String> {
+    match args {
+        [] => Ok(None),
+        #[cfg(feature = "smoke")]
+        [flag, dir] if flag.to_str() == Some("--smoke") => Ok(Some(PathBuf::from(dir))),
+        [flag, ..] => Err(format!("refused argument `{}`: aoide-desktop takes no arguments", visible(&flag.to_string_lossy()))),
     }
+}
+
+/// Starts the app: refuses any argument it does not take, pins the program
+/// before GTK starts, then opens the one window.
+pub fn run() {
+    let args: Vec<OsString> = std::env::args_os().skip(1).collect();
+    let smoke_dir = match arguments(&args) {
+        Ok(dir) => dir,
+        Err(text) => {
+            eprintln!("aoide-desktop: {text}");
+            std::process::exit(2);
+        }
+    };
+    #[cfg(feature = "smoke")]
+    if let Some(dir) = smoke_dir {
+        if let Err(text) = smoke::begin(dir) {
+            eprintln!("aoide-desktop: {text}");
+            std::process::exit(2);
+        }
+    }
+    #[cfg(not(feature = "smoke"))]
+    let _ = smoke_dir;
     let base_env: Vec<(OsString, OsString)> = std::env::vars_os().collect();
     let home = base_env
         .iter()
@@ -58,13 +87,26 @@ pub fn run() {
         .invoke_handler(handler())
         .setup(move |app| {
             let exec = exec.take().expect("setup runs once");
-            let confirm = Box::new(Gtk::new(app.handle().clone()));
+            #[cfg(feature = "smoke")]
+            let confirm: Box<dyn Confirm> = Box::new(smoke::Scenario);
+            #[cfg(not(feature = "smoke"))]
+            let confirm: Box<dyn Confirm> = Box::new(Gtk::new(app.handle().clone()));
             app.manage(Arc::new(Window::new(exec, confirm)));
-            tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::App("index.html".into()))
+            let builder = tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::App("index.html".into()))
                 .incognito(true)
                 .devtools(false)
-                .on_navigation(navigation_allowed)
-                .build()?;
+                .on_navigation(navigation_allowed);
+            #[cfg(feature = "smoke")]
+            let builder = builder.on_page_load(|_, payload| {
+                let finished = payload.event() == tauri::webview::PageLoadEvent::Finished;
+                eprintln!("aoide-desktop: page load {}", if finished { "finished" } else { "started" });
+                if finished {
+                    if let Err(text) = smoke::ready() {
+                        eprintln!("aoide-desktop: {text}");
+                    }
+                }
+            });
+            builder.build()?;
             Ok(())
         })
         .run(tauri::generate_context!())

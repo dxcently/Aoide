@@ -12,6 +12,11 @@ doctest = false
 name = "aoide-desktop"
 path = "src/main.rs"
 
+[[test]]
+name = "smoke"
+path = "tests/smoke.rs"
+required-features = ["smoke"]
+
 [features]
 # The headless smoke run (B2). No default or release build turns it on.
 smoke = []

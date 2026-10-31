@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-smoke-note"
+description = "Enables the smoke_note command without any pre-configured scope."
+commands.allow = ["smoke_note"]
+
+[[permission]]
+identifier = "deny-smoke-note"
+description = "Denies the smoke_note command without any pre-configured scope."
+commands.deny = ["smoke_note"]

@@ -105,3 +105,44 @@ fn a_wrong_invoke_key_never_reaches_the_handler() {
     std::thread::sleep(Duration::from_millis(500));
     assert_eq!(sessions_calls(&record), 0, "the handler ran zero times for a wrong key");
 }
+
+#[cfg(not(feature = "smoke"))]
+#[test]
+fn smoke_note_is_refused_as_main_in_a_build_without_the_smoke_feature() {
+    let (window, _record) = window("smoke-note");
+    let app = mock_builder()
+        .manage(Arc::new(window))
+        .invoke_handler(handler())
+        .build(tauri::generate_context!())
+        .expect("the mock app builds");
+    let key = app.invoke_key().to_owned();
+    let main = WebviewWindowBuilder::new(&app, "main", WebviewUrl::App("index.html".into()))
+        .data_directory(scratch("smoke-note-main"))
+        .build()
+        .expect("the main window builds");
+    let refused = get_ipc_response(&main, request("smoke_note", &key));
+    assert!(refused.is_err(), "smoke_note is refused as main without the feature");
+}
+
+/// A smoke build grants the note to main, and the handler runs. No smoke
+/// directory is set in a test, so the handler answers that it is not a smoke run.
+#[cfg(feature = "smoke")]
+#[test]
+fn smoke_note_passes_as_main_in_a_smoke_build() {
+    let (window, _record) = window("smoke-note-on");
+    let app = mock_builder()
+        .manage(Arc::new(window))
+        .invoke_handler(handler())
+        .build(tauri::generate_context!())
+        .expect("the mock app builds");
+    let key = app.invoke_key().to_owned();
+    let main = WebviewWindowBuilder::new(&app, "main", WebviewUrl::App("index.html".into()))
+        .data_directory(scratch("smoke-note-on-main"))
+        .build()
+        .expect("the main window builds");
+    let mut note = request("smoke_note", &key);
+    note.body = InvokeBody::Json(serde_json::json!({"note": "a note"}));
+    let reached = get_ipc_response(&main, note);
+    let text = format!("{reached:?}");
+    assert!(text.contains("not a smoke run"), "smoke_note reaches its handler as main: {text}");
+}
