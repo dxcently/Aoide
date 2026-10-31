@@ -143,7 +143,11 @@ fn admit_transcript_path(profile: &AgentProfile, sid: &str, hint: &str) -> Optio
                     class: aoide_protocol::EventClass::Audit,
                     command: "session.transcript-path".to_string(),
                     status: "refused".to_string(),
-                    message: format!("{sid}: {}", refusal.unwrap_or("refused")),
+                    message: format!(
+                        "{}: {}",
+                        aoide_protocol::untrusted::strip_unsafe(sid),
+                        refusal.unwrap_or("refused")
+                    ),
                     untrusted_data: Some(hint.chars().take(AUDIT_REFUSED_TEXT_MAX).collect()),
                 },
             );
@@ -4795,6 +4799,25 @@ mod tests {
         std::env::set_var("PATH", format!("{}:{old}", dir.display()));
         f();
         std::env::set_var("PATH", old);
+    }
+
+    /// The admission-refusal audit names the session by its sid; a hostile sid
+    /// reaches the log's message stripped. Red on the base, which wrote it raw.
+    #[test]
+    fn an_admission_refusal_names_its_session_stripped() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let root = unique_stage("admit-strip");
+        std::env::set_var("AOIDE_AUDIT_LOG", root.join("log"));
+        let profile = agent_profile("claude").unwrap();
+        assert!(admit_transcript_path(profile, "s\u{1b}9", "/nonexistent/x.jsonl").is_none());
+        let log = std::fs::read_to_string(root.join("log")).unwrap();
+        let last = log.lines().last().expect("the refusal is audited");
+        let message = serde_json::from_str::<serde_json::Value>(last).unwrap()["message"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        assert!(!message.contains('\u{1b}'), "{message:?}");
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
