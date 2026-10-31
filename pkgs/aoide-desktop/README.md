@@ -34,3 +34,20 @@ nixpkgs' cargo setup hook writes to point cargo at the vendored crates. It
 accepts that file only when its text equals a golden template once store paths
 and the vendor directory are replaced. A run outside the sandbox is a pre-check:
 it may read a stale dep-info file and proves nothing about the commit.
+
+## The one fork
+
+`vendor/wry` is wry 0.57.0 with one block in `create_context`
+(`src/webkitgtk/web_context.rs`): four comment lines and
+`context.set_sandbox_enabled(true);`. webkit2gtk-4.1 runs its page process
+unsandboxed unless that call runs before the first WebView exists, and wry
+creates that WebView itself, so the call has to sit in wry. The root
+`Cargo.toml`'s `[patch.crates-io]` points wry at this copy, and the lock's wry
+entry is the path package.
+
+The fork goes when wry or tauri offers the option. Until then, a wry bump is a
+re-sync: copy the new registry tree over `vendor/wry`, add the block back, and
+move the digest constant `WRY_0_57_0_DIGEST` in `crates/shell/tests/gates.rs`
+to the new upstream digest. The digest covers every file of the tree, with the
+block taken out of `web_context.rs`, so a copy that passes equals upstream in
+every other byte. The test's name carries the version and moves with it.

@@ -19,3 +19,7 @@ unsafe_code = "forbid"
 [workspace.lints.clippy]
 disallowed_methods = "forbid"
 disallowed_types = "forbid"
+
+# wry is the one fork in the lane: vendor/wry is wry 0.57.0 plus one call. See README.md.
+[patch.crates-io]
+wry = { path = "vendor/wry" }

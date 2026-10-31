@@ -38,6 +38,8 @@ unsafe_code = "forbid"
 [workspace.lints.clippy]
 disallowed_methods = "forbid"
 disallowed_types = "forbid"
+[patch.crates-io]
+wry = { path = "vendor/wry" }
 "##;
 const DOOR_MANIFEST: &str = r##"[package]
 name = "aoide-desktop-door"
@@ -158,12 +160,14 @@ fn root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
 }
 
-/// Every file under `dir`, but not under the root's own `target` directory.
+/// Every file under `dir`, but not under the root's own `target` directory or
+/// its `vendor` directory, which holds the vendored wry the last gate pins.
 /// Each entry's own file type decides what it is, so the walk follows no
 /// symbolic link: it refuses one by name, since a walk through a link could
 /// read outside the root.
 fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
     let target = root().join("target");
+    let vendor = root().join("vendor");
     for entry in fs::read_dir(dir).expect("the directory is read") {
         let entry = entry.expect("a directory entry");
         let path = entry.path();
@@ -171,7 +175,7 @@ fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
         assert!(!kind.is_symlink(), "{} is a symbolic link, and a walk through one could read outside the root", path.display());
         if !kind.is_dir() {
             out.push(path);
-        } else if path != target {
+        } else if path != target && path != vendor {
             walk(&path, out);
         }
     }
@@ -671,4 +675,39 @@ fn the_config_normalizer_is_pinned_by_a_table_of_known_bad_paths() {
     for (line, golden) in &refused {
         assert_ne!(normalize_nix_config(line, vendor), format!("{golden}\n"), "{line} is refused");
     }
+}
+
+/// The four lines the fork adds to wry's web_context.rs, as the file holds them.
+const SANDBOX_BLOCK: &str = "    // aoide fork: WebKit's sandbox is opt-in and is set only before the first\n    // WebView exists, which this function precedes. This is the only change\n    // from wry 0.57.0; see pkgs/aoide-desktop/README.md.\n    context.set_sandbox_enabled(true);\n";
+
+/// The digest of wry 0.57.0 as the registry ships it: sha256 over `path NUL
+/// sha256(file) LF` for each file, sorted by path.
+const WRY_0_57_0_DIGEST: &str = "f0dfea1188ecc1c4d1317e70b47542ec3bee528d8554e9013bf5354c49d33936";
+
+/// The vendored wry is wry 0.57.0 less the sandbox block, file for file: the
+/// block is removed from web_context.rs before the digest is taken.
+#[test]
+fn the_vendored_wry_is_0_57_0_plus_the_sandbox_block() {
+    use sha2::{Digest, Sha256};
+    let vendor = root().join("vendor/wry");
+    let mut files = Vec::new();
+    walk(&vendor, &mut files);
+    let mut rows: Vec<(String, String)> = Vec::new();
+    for path in files {
+        let rel = path.strip_prefix(&vendor).expect("a vendored file is under vendor/wry").to_string_lossy().into_owned();
+        let mut bytes = fs::read(&path).expect("a vendored file is read");
+        if rel == "src/webkitgtk/web_context.rs" {
+            let text = String::from_utf8(bytes).expect("web_context.rs is UTF-8");
+            assert_eq!(text.matches(SANDBOX_BLOCK).count(), 1, "web_context.rs holds the sandbox block once");
+            bytes = text.replacen(SANDBOX_BLOCK, "", 1).into_bytes();
+        }
+        rows.push((rel, format!("{:x}", Sha256::digest(&bytes))));
+    }
+    rows.sort();
+    let listing: String = rows.iter().map(|(rel, hash)| format!("{rel}\0{hash}\n")).collect();
+    assert_eq!(
+        format!("{:x}", Sha256::digest(listing.as_bytes())),
+        WRY_0_57_0_DIGEST,
+        "vendor/wry is not wry 0.57.0 plus the sandbox block; re-sync it as the README says"
+    );
 }

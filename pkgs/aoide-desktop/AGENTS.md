@@ -13,6 +13,10 @@ and each crate's own invariants are in its AGENTS.md (`crates/door/AGENTS.md`,
   `[workspace.dependencies]`, with the requirements `pkgs/aoide` uses, except
   sha2: this workspace pins 0.10, where `pkgs/aoide` pins 0.11.
 - Every cargo command runs with `--offline`.
+- `vendor/wry` is the one vendored crate: wry 0.57.0 plus the sandbox block in
+  `create_context`, and nothing else. The gate pins it by digest
+  (`the_vendored_wry_is_0_57_0_plus_the_sandbox_block`). Change it only as the
+  README's re-sync says, in the same commit as the digest.
 
 ## Tests
 
@@ -77,7 +81,7 @@ and each crate's own invariants are in its AGENTS.md (`crates/door/AGENTS.md`,
   --workspace --all-targets --all-features -- -D warnings`.
 - The text scan is a tripwire, not the guard. `crates/shell/tests/gates.rs`
   reads every `.rs` file under this directory, and every file under `ui/` once
-  that exists, skipping the root's `target`. It bars six words in each one:
+  that exists, skipping the root's `target` and `vendor`. It bars six words in each one:
   `aoided.sock`, `"dispatch"`, `"subscribe"`, `/api/launch`, `sh -c` and
   `SIGKILL`. A second scan bars `extern` and `#[link` in every file under door's
   and shell's `src`, whatever its extension, so an `include!` of a `.inc` file
@@ -123,7 +127,8 @@ and each crate's own invariants are in its AGENTS.md (`crates/door/AGENTS.md`,
     and shell, such a file compiles under the forbid. The read misses a build
     script or a proc macro of a dependency, a linked library, and code that
     only a build the gate does not make compiles, such as one without `fakes`;
-  - exactly five `Cargo.toml` files lie under this directory, and each equals
+  - exactly five `Cargo.toml` files lie under this directory outside `vendor/`,
+    and each equals
     its golden text in the same file, less blank lines and comment lines
     (`the_manifests_are_the_golden_ones`). A new member brings its golden in
     the same commit.
