@@ -105,6 +105,8 @@ and its invariants are in that crate's AGENTS.md.
   - exactly one `build.rs` lies under this directory, the app's, and its
     tauri-build manifest equals its golden text (`the_one_build_script_is_the_apps`);
     none lies under the door;
+  - the door client spawns nothing: no source under the door's `src` holds
+    `Command`, `pre_exec` or `process::Child` (`the_door_client_spawns_no_process`);
   - no symbolic link lies under this directory, since a walk through one
     could read outside it (every test that walks the tree);
   - the root's `clippy.toml` is the only clippy config: a `clippy.toml` below

@@ -358,7 +358,7 @@ pub fn register(r: &mut Registry) {
     ));
     r.insert(cmd!(
         path: ["ask", "list"],
-        summary: "List the asks each `eidolon web` door holds, as aoided keeps them in state/stage/asks.json: the session, the door's port, the ask id, the ask as the door gave it with every string stripped of control and bidi characters, and the fingerprint `ask answer --expect` takes. Also says when the store was last written. Read-only; a door's own page is not asked.",
+        summary: "List the asks each `eidolon web` door holds, as aoided keeps them in state/stage/asks.json: the session, the door's port, the ask id, the ask as the door gave it with every key and string in its visible form (a control or bidi character is spelled as an escape, never removed), and the fingerprint `ask answer --expect` takes. Also says when the store was last written. Read-only; a door's own page is not asked.",
         args: [],
         flags: [],
         gated: false,

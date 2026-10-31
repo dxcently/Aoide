@@ -1028,8 +1028,9 @@ blank one is refused too.
   reason) and waits out a backoff before it is dialled again. `run` is the thread
   aoided starts beside the shellbridge. It spawns one reader per door, since each
   stream is a blocking read of its own. The verbs `ask list`, `ask watch` and
-  `ask answer` read that store; only `answer` posts to a door, and `watch` prints
-  one line per change of the store.
+  `ask answer` read that store; only `answer` posts to a door, and `watch`, which
+  only the terminal runs, prints one line per change of the store. Every ask is
+  shown and fingerprinted in its escaped form.
 - `shellbridge`, `notifications` — the socket loop and the core verbs. Their CLI
   commands (registry lines) live in `strillix`, and so do the desktop verbs; both
   files stay resident here (see charter smudge below). The socket answers three

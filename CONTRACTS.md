@@ -724,8 +724,8 @@ Contract guarantees:
   byte-identical until Strillix declares its kinds.
 - The `ask` kind (`aoide ask list`, `aoide ask watch`, `aoide ask answer`) is the
   open asks the `eidolon web` doors report, read from the `asks.json` section
-  below. `list` and `watch` are reads, `answer` is `act` and approves; all three
-  take CLI and Daemon doors only.
+  below. `list` and `watch` are reads, `answer` is `act` and approves. `list` and
+  `answer` take CLI and Daemon doors only; `watch` takes the CLI door only.
 - `doors` (optional string array on a command, and on a flag) — the doors that
   may call the command, from `cli`, `daemon`, `mcp`, `a2a`. **Additive**, same
   discipline: omitted from `schema --json` when it is the default `["cli",
@@ -4752,7 +4752,7 @@ anyone who can already write to the target's control socket.
 The open asks of the `eidolon web` doors, pulled by aoided's puller
 (`crates/conduct/src/graph/asks.rs`). Written under the stage
 lock, mode 0600, atomic rename. The puller writes it; `ask answer` writes it too (a
-409 drops the entry). Read by `aoide ask list` and `ask answer`.
+204 or a 409 drops the entry). Read by `aoide ask list` and `ask answer`.
 The file is `{"written": <unix seconds>, "asks": [...]}`; each entry is:
 
 - `sessionId` (string): the session whose record names the door's log.
@@ -4764,11 +4764,15 @@ The file is `{"written": <unix seconds>, "asks": [...]}`; each entry is:
   pin reads hashes to the same digest.
 - `tokenDigest` (string): that digest. The token itself is never stored.
 - `ask` (object): the ask as the door's frame gave it. Untrusted agent text;
-  readers strip it with `aoide_protocol::untrusted` before any output.
+  readers show it in `aoide_protocol::untrusted`'s visible form, every
+  character it would hide spelled as an escape, never removed.
 - `firstSeen` (integer, unix seconds): when the puller first saw the ask.
 
 An entry leaves when its door settles it, when the door goes, or when a new
 hello arrives on that port. A hello clears only the entries of its own door.
+
+The file has no cap on its entries. A door is a process of the same user, so a
+flood of asks from one is an accepted residual.
 
 ### `state/stage/jobs.json` — **v0**
 

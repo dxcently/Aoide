@@ -325,6 +325,23 @@ fn no_door_or_shell_source_holds_a_foreign_word() {
     }
 }
 
+/// The door client spawns nothing: it only dials. Spelled in pieces so this file
+/// does not hold the words it bars.
+const NO_SPAWN: [&str; 3] = [concat!("Comm", "and"), concat!("pre_", "exec"), concat!("process::", "Child")];
+
+#[test]
+fn the_door_client_spawns_no_process() {
+    let mut files = Vec::new();
+    walk(&root().join(DOOR).join("src"), &mut files);
+    assert!(!files.is_empty(), "the scan found no source under {DOOR}/src");
+    for path in files {
+        let text = String::from_utf8_lossy(&fs::read(&path).expect("a source is read")).into_owned();
+        for word in NO_SPAWN {
+            assert!(!text.contains(word), "{} holds `{word}`", path.display());
+        }
+    }
+}
+
 /// The one build script, the app's: tauri-build's manifest of the window's
 /// commands. Its golden text is compared without blank and comment lines.
 const BUILD_SCRIPT: &str = r##"const COMMANDS: &[&str] = &["palette", "run", "sessions", "chat_open", "chat_say", "chat_close", "smoke_note"];
