@@ -32,6 +32,7 @@ const LAYOUT: Layout = Layout {
                 ("session", "Roster, grants, traces and cleanup of conducted sessions"),
                 ("conductor", ""),
                 ("conduct", ""),
+                ("ask", "The open asks of eidolon web doors: list and answer"),
                 ("spawn", ""),
                 ("send", ""),
                 ("resurrect", ""),

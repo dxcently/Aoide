@@ -722,6 +722,9 @@ Contract guarantees:
   `approves`: `schemaVersion` stays `"0"`, since a blank key is omitted and a
   declared one adds a key no consumer must read. `strx schema --json` stays
   byte-identical until Strillix declares its kinds.
+- The `ask` kind (`aoide ask list`, `aoide ask answer`) is the open asks the
+  `eidolon web` doors report, read from the `asks.json` section below.
+  `list` and `answer` take CLI and Daemon doors only; `answer` is `act` and approves.
 - `doors` (optional string array on a command, and on a flag) — the doors that
   may call the command, from `cli`, `daemon`, `mcp`, `a2a`. **Additive**, same
   discipline: omitted from `schema --json` when it is the default `["cli",
@@ -4677,6 +4680,25 @@ answer like a permission-verdict digit never does), the payload is prefixed
 sent it — attribution, not authentication; both `--from` and
 `AOIDE_SESSION_ID` are ordinary same-user process state, spoofable by
 anyone who can already write to the target's control socket.
+
+### `state/stage/asks.json` — **v0**
+
+The open asks of the `eidolon web` doors, pulled by aoided's puller
+(`crates/conduct/src/graph/asks.rs`). Written under the stage
+lock, mode 0600, atomic rename. The puller writes it; `ask answer` writes it too (a
+409 drops the entry). Read by `aoide ask list` and `ask answer`.
+The file is `{"written": <unix seconds>, "asks": [...]}`; each entry is:
+
+- `sessionId` (string): the session whose record names the door's log.
+- `port` (integer): the door's port. The file keeps no token and no address.
+- `askId` (integer): the door's own counter. It repeats across door restarts,
+  so the key is `sessionId` + `port` + the door's hello.
+- `ask` (object): the ask as the door's frame gave it. Untrusted agent text;
+  readers strip it with `aoide_protocol::untrusted` before any output.
+- `firstSeen` (integer, unix seconds): when the puller first saw the ask.
+
+An entry leaves when its door settles it, when the door goes, or when a new
+hello arrives on that port. A hello clears only the entries of its own door.
 
 ### `state/stage/jobs.json` — **v0**
 

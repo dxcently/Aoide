@@ -28,6 +28,7 @@ const CALLS: [&str; 2] = ["can_approve", "refuse_unapproving_door"];
 /// (path under `crates/`, number of lines holding an approve check).
 const CHECKS: &[(&str, usize)] = &[
     ("client/src/commands.rs", 1),
+    ("conduct/src/graph/asks.rs", 2),
     ("conduct/src/graph/common.rs", 2),
     ("conduct/src/graph/conduct.rs", 1),
     ("conduct/src/graph/doorbell.rs", 1),

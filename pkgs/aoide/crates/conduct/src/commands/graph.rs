@@ -339,6 +339,38 @@ pub fn register(r: &mut Registry) {
         kind: "hold", verb: "act",
     ));
     r.insert(cmd!(
+        path: ["ask", "list"],
+        summary: "List the asks each `eidolon web` door holds, as aoided keeps them in state/stage/asks.json: the session, the door's port, the ask id, the ask as the door gave it with every string stripped of control and bidi characters, and the fingerprint `ask answer --expect` takes. Also says when the store was last written. Read-only; a door's own page is not asked.",
+        args: [],
+        flags: [],
+        gated: false,
+        implemented: true,
+        handler: crate::graph::ask_list,
+        examples: ["ask list", "ask list --json"],
+        doors: &[Door::Cli, Door::Daemon],
+        kind: "ask", verb: "list",
+    ));
+    r.insert(cmd!(
+        path: ["ask", "answer"],
+        summary: "Answer one open ask through the door that holds it (`eidolon web`'s own answer route). Refused before any request unless the ask is open, `--expect` is the fingerprint `ask list` shows for it, and the label is one the ask offers. The door's 204 settles the ask and drops it from the store; its 409 drops it as already settled; its 422 keeps it open. Every outcome is audited. Only the CLI and the daemon may answer.",
+        args: [
+            arg!("session", "string", true, "The session the ask belongs to: its session id, as `ask list` prints it."),
+            arg!("ask_id", "string", true, "The ask's id, as `ask list` prints it."),
+            arg!("label", "string", true, "One of the labels the ask offers."),
+        ],
+        flags: [
+            flag!("expect", "string", "Fingerprint of the ask, as `ask list --json` prints it (its `fingerprint`). Answer refuses without it, and before any request."),
+            flag!("note", "string", "An operator note the door records with the answer."),
+        ],
+        gated: false,
+        implemented: true,
+        handler: crate::graph::ask_answer,
+        examples: ["ask answer <session> <ask_id> yes --expect <fingerprint>"],
+        doors: &[Door::Cli, Door::Daemon],
+        approves: true,
+        kind: "ask", verb: "act",
+    ));
+    r.insert(cmd!(
         path: ["session", "permit"],
         summary: "Publish the notifications' permission SUMMONS for a session blocked on a permission prompt. The card is filed into the notifications ledger (stage/notifications.json) and this command RETURNS — the Quickshell notifications draws it with real approve/deny buttons, and the click routes back through the shellbridge to type the verdict in. The hook door raises it automatically when a session goes `awaiting`. Only ever raised for a conductable session whose harness has verified prompt keys, and only while that session is awaiting. A door that cannot approve (MCP, the network door) is refused and files no card. The verdict is only typed while the session is still awaiting.",
         args: [],

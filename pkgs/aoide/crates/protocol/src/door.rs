@@ -310,7 +310,7 @@ fn command_for<'a>(path: &[String], registry: &'a Registry) -> Option<&'a Comman
 /// aoide binary, and says aoide is not installed when neither does. Core names no
 /// desktop head: a `strillix` verb typed at `aoide` is an unknown command there.
 pub const AOIDE_ONLY_HEADS: &[&str] = &[
-    "a2a", "adapter", "conduct", "conductor", "config", "content", "context", "daemon", "events", "graph",
+    "a2a", "adapter", "ask", "conduct", "conductor", "config", "content", "context", "daemon", "events", "graph",
     "hooks", "identity", "job", "mail", "make", "melete", "mesh", "node", "project", "resurrect", "send", "session",
     "soundcheck", "spawn", "update", "usage", "workspace",
 ];

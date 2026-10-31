@@ -37,7 +37,7 @@ pub const SCHEMA_VERSION: &str = "0";
 /// run it yet. `none` is the explicit "about no object". A new object adds one
 /// name here, then the commands that carry it.
 pub const KINDS: &[&str] = &[
-    "config", "content", "event", "graph", "hold", "job", "letter", "mailbox",
+    "ask", "config", "content", "event", "graph", "hold", "job", "letter", "mailbox",
     "melete", "mesh", "node", "none", "note", "outbox", "pairing", "project",
     "secret", "secret-hold", "session", "usage", "workspace",
 ];

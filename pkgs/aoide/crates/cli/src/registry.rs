@@ -383,12 +383,14 @@ mod tests {
         // LAN ceremony) — reached 88.
         //
         // **The running total above is the CHAIN's history, not this list's
-        // **The vec below holds 124 paths** (counted, review F7). This line is
+        // **The vec below holds 126 paths** (counted, review F7). This line is
         // the authority for how many; the chain above is the history of how it
         // got there and is never the answer.
         let mut expected: Vec<&str> = vec![
             "a2a.serve",
             "adapter.melete",
+            "ask.answer",
+            "ask.list",
             "conduct",
             "conductor",
             "config",
@@ -732,6 +734,7 @@ mod tests {
         let mut got: Vec<String> = r.commands().filter(|c| c.approves).map(|c| c.dotted()).collect();
         got.sort();
         let mut expected = vec![
+            "ask.answer",
             "conduct",
             "graph.link",
             "job.add",
@@ -822,6 +825,8 @@ mod tests {
         let mut expected: Vec<&str> = vec![
             "a2a.serve none serve",
             "adapter.melete none serve",
+            "ask.answer ask act",
+            "ask.list ask list",
             "conduct session act",
             "conductor none serve",
             "config config show",
@@ -987,6 +992,7 @@ mod tests {
             got.push(format!("{kind}: {}", cells.join(", ")));
         }
         let expected: Vec<&str> = vec![
+            "ask: list ok, show missing, watch missing, act ok",
             "config: list n/a: one config, show ok, watch missing, act ok",
             "event: list missing, show missing, watch ok, act n/a: producers write events, no verb does",
             "graph: list n/a: one graph per host, show ok, watch missing, act ok",
