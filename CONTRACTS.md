@@ -4758,7 +4758,11 @@ The file is `{"written": <unix seconds>, "asks": [...]}`; each entry is:
 - `sessionId` (string): the session whose record names the door's log.
 - `port` (integer): the door's port. The file keeps no token and no address.
 - `askId` (integer): the door's own counter. It repeats across door restarts,
-  so the key is `sessionId` + `port` + the door's hello.
+  so the key is `sessionId` + `port` + the door's hello, and `tokenDigest` is the
+  hello's identity: the sha256 (hex) of the door's token bytes as the puller read
+  them when it opened the stream. `ask answer` refuses unless the token its own
+  pin reads hashes to the same digest.
+- `tokenDigest` (string): that digest. The token itself is never stored.
 - `ask` (object): the ask as the door's frame gave it. Untrusted agent text;
   readers strip it with `aoide_protocol::untrusted` before any output.
 - `firstSeen` (integer, unix seconds): when the puller first saw the ask.

@@ -17,7 +17,7 @@ mod http;
 mod listener;
 mod token;
 
-pub use client::{AnswerOutcome, CancelOutcome, Door, Mode, SayOutcome};
+pub use client::{AnswerOutcome, CancelOutcome, Door, Mode, Pinned, SayOutcome};
 pub use error::DoorError;
 pub use events::{Closer, Events};
 pub use frame::{Ask, AskOption, Frame, Timing, ToolUse, Usage};

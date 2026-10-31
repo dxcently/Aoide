@@ -1348,7 +1348,8 @@ pub fn run_loop(
     // Not gated on strillix: core's widgets and notifications run with no desktop process.
     std::thread::Builder::new().spawn(aoide_conduct::shellbridge::run_core)?;
     // aoided's ask puller: the asks each `eidolon web` door holds, kept beside it.
-    std::thread::Builder::new().spawn(aoide_conduct::graph::asks::run)?;
+    let puller_log = log_path.clone();
+    std::thread::Builder::new().spawn(move || aoide_conduct::graph::asks::run(puller_log))?;
 
     // `started` comes last: a client that waits for it finds the baseline taken
     // and the accept loop up.

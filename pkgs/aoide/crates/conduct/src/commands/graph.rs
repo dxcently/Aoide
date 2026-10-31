@@ -397,7 +397,7 @@ pub fn register(r: &mut Registry) {
         implemented: true,
         handler: crate::graph::ask_watch,
         examples: ["ask watch", "ask watch --json"],
-        doors: &[Door::Cli, Door::Daemon],
+        doors: &[Door::Cli],
         kind: "ask", verb: "watch",
     ));
     r.insert(cmd!(

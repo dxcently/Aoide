@@ -27,7 +27,7 @@ use std::time::{Duration, Instant};
 
 use aoide_door::{check_runtime, runtime_from_env, token_path, Ask, Door, DoorError, Frame};
 use aoide_protocol::output::{Fix, Kind, Outcome};
-use aoide_protocol::untrusted::{clean_line, strip_unsafe};
+use aoide_protocol::untrusted::{clean_line, visible, visible_json_line};
 use aoide_protocol::{append_audit, default_audit_log, AuditRecord, EventClass, Invocation};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -58,6 +58,9 @@ pub struct Entry {
     pub ask: Value,
     /// Unix seconds the puller first saw the ask.
     pub first_seen: u64,
+    /// The door's token digest, as the puller read it at the stream's open.
+    #[serde(default)]
+    pub token_digest: String,
 }
 
 /// `asks.json`: the open asks, and the unix second the file was last written.
@@ -80,14 +83,26 @@ pub fn port_of_token_name(name: &str) -> Option<u16> {
 }
 
 /// The session a door binds to: the one record whose `logPath` is the hello's
-/// `session`, byte for byte.
-pub fn bind_session(hello: &str, sessions: &[SessionRecord]) -> Option<String> {
-    sessions.iter().find(|r| r.log_path.as_deref() == Some(hello)).map(|r| r.session_id.clone())
+/// `session`, byte for byte. No record, or more than one, is refused.
+pub fn bind_session(hello: &str, sessions: &[SessionRecord]) -> Result<String, &'static str> {
+    let mut found = sessions.iter().filter(|r| r.log_path.as_deref() == Some(hello));
+    match (found.next(), found.next()) {
+        (Some(record), None) => Ok(record.session_id.clone()),
+        (None, _) => Err("unbound"),
+        (Some(_), Some(_)) => Err("ambiguous-session"),
+    }
+}
+
+/// Closes a door's stream, from the puller's own thread.
+fn close(events: &aoide_door::Events) {
+    if let Ok(closer) = events.closer() {
+        let _ = closer.close();
+    }
 }
 
 /// Applies one frame of a door's stream to the store and says whether it changed
 /// the store. Only `hello`, `ask` and `ask-settled` change anything.
-pub fn apply(file: &mut AsksFile, session_id: &str, port: u16, frame: &Frame, now: u64) -> bool {
+pub fn apply(file: &mut AsksFile, session_id: &str, port: u16, digest: &str, frame: &Frame, now: u64) -> bool {
     let before = file.asks.len();
     let of_door = |e: &Entry| e.session_id == session_id && e.port == port;
     match frame {
@@ -103,7 +118,14 @@ pub fn apply(file: &mut AsksFile, session_id: &str, port: u16, frame: &Frame, no
                 entry.ask = value;
                 return changed;
             }
-            file.asks.push(Entry { session_id: session_id.to_string(), port, ask_id, ask: value, first_seen: now });
+            file.asks.push(Entry {
+                session_id: session_id.to_string(),
+                port,
+                ask_id,
+                ask: value,
+                first_seen: now,
+                token_digest: digest.to_string(),
+            });
             true
         }
         Frame::AskSettled { ask_id, .. } => {
@@ -112,6 +134,12 @@ pub fn apply(file: &mut AsksFile, session_id: &str, port: u16, frame: &Frame, no
         }
         _ => false,
     }
+}
+
+/// The digest a store entry keeps for its door: the sha256 of the token's bytes,
+/// in hex. The store keeps no token.
+pub fn token_digest(token: &[u8]) -> String {
+    aoide_storage::seal::hex_encode(&aoide_storage::seal::sha256(token))
 }
 
 /// Removes every ask of one door. Returns whether any was removed.
@@ -164,19 +192,82 @@ pub fn update_store(path: &Path, change: impl FnOnce(&mut AsksFile) -> bool) -> 
     })
 }
 
-/// Every string an ask carries, stripped of what no terminal or JSON reader may be
-/// handed. The structure and the numbers stay as the door gave them.
-pub fn strip_json(v: &Value) -> Value {
+/// The ask as `ask list` shows it, and as its fingerprint covers it: every string
+/// and every key in the visible form, so each character `visible` would spell is
+/// written as its escape. Nothing is removed, so two asks that read alike but
+/// differ in a hidden character are two asks.
+pub fn visible_ask(v: &Value) -> Value {
     match v {
-        Value::String(s) => Value::String(strip_unsafe(s)),
-        Value::Array(items) => Value::Array(items.iter().map(strip_json).collect()),
-        Value::Object(map) => Value::Object(map.iter().map(|(k, v)| (strip_unsafe(k), strip_json(v))).collect()),
+        Value::String(s) => Value::String(visible(s)),
+        Value::Array(items) => Value::Array(items.iter().map(visible_ask).collect()),
+        Value::Object(map) => Value::Object(map.iter().map(|(k, v)| (visible(k), visible_ask(v))).collect()),
         other => other.clone(),
     }
 }
 
+/// The rows `ask list --json` shows: one per open ask, shown and fingerprinted.
+fn rows_of(file: &AsksFile) -> Vec<Value> {
+    file.asks
+        .iter()
+        .map(|entry| {
+            let shown = visible_ask(&entry.ask);
+            let fingerprint = fingerprint_of(&entry.session_id, entry.port, entry.ask_id, &shown);
+            json!({
+                "sessionId": entry.session_id,
+                "port": entry.port,
+                "askId": entry.ask_id,
+                "ask": shown,
+                "fingerprint": fingerprint,
+                "firstSeen": entry.first_seen,
+            })
+        })
+        .collect()
+}
+
+/// One text line for an open ask: what an approval would run, with its reason, or
+/// what a question asks and the labels it offers. Every field is the visible form.
+fn line_of(entry: &Entry, fingerprint: &str) -> String {
+    let head = format!("{} port {} ask {}", visible(&entry.session_id), entry.port, entry.ask_id);
+    let what = match entry.ask.get("kind").and_then(Value::as_str) {
+        Some("approval") => format!(
+            "approval for {} with {}; reason: {}",
+            visible(entry.ask["tool"].as_str().unwrap_or_default()),
+            visible_json_line(entry.ask.get("input").unwrap_or(&Value::Null)),
+            entry.ask.get("reason").and_then(Value::as_str).map_or("none".to_string(), visible),
+        ),
+        Some("question") => format!(
+            "question {}; offers: {}",
+            visible(entry.ask["prompt"].as_str().unwrap_or_default()),
+            offered(&entry.ask).iter().map(|label| visible(label)).collect::<Vec<_>>().join(", "),
+        ),
+        _ => "an ask this client does not read".to_string(),
+    };
+    format!("{head}: {what}; fingerprint {fingerprint}")
+}
+
+/// `ask list [--json]`: the open asks, each with the fingerprint an answer names,
+/// and when the store was last written. Every field is in its visible form.
+pub fn ask_list(_inv: &Invocation) -> Outcome {
+    let cmd = "ask.list";
+    let file: AsksFile = match load_stage(&asks_path()) {
+        Ok(file) => file,
+        Err(e) => return stage_error(cmd, e),
+    };
+    let rows = rows_of(&file);
+    let lines: Vec<String> = file
+        .asks
+        .iter()
+        .zip(&rows)
+        .map(|(entry, row)| line_of(entry, row["fingerprint"].as_str().unwrap_or_default()))
+        .collect();
+    let n = rows.len();
+    let body = if n == 0 { "no open asks".to_string() } else { lines.join("\n") };
+    Outcome::ok(cmd, format!("{n} open ask(s), store written at {}\n{body}", file.written))
+        .with_data(json!({ "asks": rows, "written": file.written }))
+}
+
 /// The fingerprint of one ask: the first 16 hex digits of the sha256 of the bytes
-/// `ask list --json` shows for it, its session, port, ask id and stripped ask.
+/// `ask list --json` shows for it, its session, port, ask id and visible ask.
 pub fn fingerprint_of(session_id: &str, port: u16, ask_id: u64, shown: &Value) -> String {
     let body = json!({ "sessionId": session_id, "port": port, "askId": ask_id, "ask": shown });
     let bytes = serde_json::to_string(&body).unwrap_or_default();
@@ -195,8 +286,9 @@ fn offered(ask: &Value) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// One audit line for a verb's outcome, with the door that called it.
-fn audit_ask(inv: &Invocation, command: &str, status: &str, message: &str) {
+/// One audit line for a verb's outcome, with the door that called it. `text` is
+/// the ask's visible JSON, carried as untrusted data; empty when there is no ask.
+fn audit_ask(inv: &Invocation, command: &str, status: &str, message: &str, text: &str) {
     let log = inv.flags.get("audit-log").map(PathBuf::from).unwrap_or_else(default_audit_log);
     let _ = append_audit(
         &log,
@@ -207,56 +299,9 @@ fn audit_ask(inv: &Invocation, command: &str, status: &str, message: &str) {
             command: command.to_string(),
             status: status.to_string(),
             message: message.to_string(),
-            untrusted_data: None,
+            untrusted_data: (!text.is_empty()).then(|| text.to_string()),
         },
     );
-}
-
-/// The rows `ask list --json` shows: one per open ask, stripped and fingerprinted.
-fn rows_of(file: &AsksFile) -> Vec<Value> {
-    file.asks
-        .iter()
-        .map(|entry| {
-            let shown = strip_json(&entry.ask);
-            let fingerprint = fingerprint_of(&entry.session_id, entry.port, entry.ask_id, &shown);
-            json!({
-                "sessionId": entry.session_id,
-                "port": entry.port,
-                "askId": entry.ask_id,
-                "ask": shown,
-                "fingerprint": fingerprint,
-                "firstSeen": entry.first_seen,
-            })
-        })
-        .collect()
-}
-
-/// `ask list [--json]`: the open asks, each with the fingerprint an answer names,
-/// and when the store was last written. Every string is stripped first.
-pub fn ask_list(_inv: &Invocation) -> Outcome {
-    let cmd = "ask.list";
-    let file: AsksFile = match load_stage(&asks_path()) {
-        Ok(file) => file,
-        Err(e) => return stage_error(cmd, e),
-    };
-    let rows = rows_of(&file);
-    let lines: Vec<String> = rows
-        .iter()
-        .map(|row| {
-            let prompt = row["ask"].get("prompt").and_then(Value::as_str).map(clean_line).unwrap_or_default();
-            format!(
-                "{} port {} ask {}: {prompt} (fingerprint {})",
-                row["sessionId"].as_str().unwrap_or_default(),
-                row["port"],
-                row["askId"],
-                row["fingerprint"].as_str().unwrap_or_default()
-            )
-        })
-        .collect();
-    let n = rows.len();
-    let body = if n == 0 { "no open asks".to_string() } else { lines.join("\n") };
-    Outcome::ok(cmd, format!("{n} open ask(s), store written at {}\n{body}", file.written))
-        .with_data(json!({ "asks": rows, "written": file.written }))
 }
 
 /// Set when `ask watch` is interrupted: its loop ends and prints the closing line.
@@ -316,6 +361,15 @@ pub fn watch_store(path: &Path, json_mode: bool, poll: Duration, stop: &AtomicBo
 
 /// `ask watch [--json]`: one line per change of the asks store, until Ctrl-C.
 pub fn ask_watch(inv: &Invocation) -> Outcome {
+    if !matches!(inv.door, aoide_protocol::Door::Cli) {
+        return Outcome::refuse(
+            "ask.watch",
+            Kind::Refused,
+            "ask watch runs from the terminal only; a daemon call would hold a loop".to_string(),
+            "watch from the CLI",
+            Fix::Run("aoide ask watch".to_string()),
+        );
+    }
     let json_mode = inv.flag_present("json");
     WATCH_STOP.store(false, Ordering::SeqCst);
     unsafe {
@@ -330,10 +384,38 @@ pub fn ask_watch(inv: &Invocation) -> Outcome {
     Outcome::ok("ask.watch", "watched the asks store until interrupted").with_data(json!({ "reason": "interrupted" }))
 }
 
+/// What an answer's audit lines carry: the fingerprint of the ask it names (`none`
+/// until an entry is found) and the ask's visible JSON, as untrusted data.
+struct Trail<'a> {
+    inv: &'a Invocation,
+    fingerprint: String,
+    ask: String,
+}
+
+impl Trail<'_> {
+    fn audit(&self, status: &str, message: &str) {
+        audit_ask(
+            self.inv,
+            "ask.answer",
+            status,
+            &format!("{message}; fingerprint {}", self.fingerprint),
+            &self.ask,
+        );
+    }
+
+    /// A refusal, audited with its reason, and the outcome that names the fix.
+    fn refuse(&self, what: String, why: &str, reason: &str) -> Outcome {
+        self.audit("refused", &what);
+        Outcome::refuse("ask.answer", Kind::Refused, what, why, Fix::Run("aoide ask list".to_string()))
+            .with_fields(json!({ "reason": reason }))
+    }
+}
+
 /// `ask answer <session> <ask_id> <label> --expect <fingerprint> [--note <text>]`:
 /// answers one open ask through its door. Refused before any request unless the
 /// ask is open, the fingerprint is the one `ask list` shows and the label is one
-/// the ask offers. A door's 204 settles the ask, a 409 drops it, a 422 keeps it.
+/// the ask offers, and the door answering now holds the token its puller read.
+/// A door's 204 settles the ask, a 409 drops it, a 422 keeps it.
 pub fn ask_answer(inv: &Invocation) -> Outcome {
     let cmd = "ask.answer";
     let args = match require_args(inv, &["session", "ask_id", "label"]) {
@@ -349,25 +431,23 @@ pub fn ask_answer(inv: &Invocation) -> Outcome {
     ) {
         return refusal;
     }
+    let mut trail = Trail { inv, fingerprint: "none".to_string(), ask: String::new() };
     let (session, label) = (args[0].as_str(), args[2].as_str());
     let Ok(ask_id) = args[1].trim().parse::<u64>() else {
-        return Outcome::usage(cmd, format!("`{}` is not an ask id", clean_line(&args[1])));
-    };
-    let refuse = |what: String, why: &str, reason: &str| {
-        audit_ask(inv, cmd, "refused", &what);
-        Outcome::refuse(cmd, Kind::Refused, what, why, Fix::Run("aoide ask list".to_string()))
-            .with_fields(json!({ "reason": reason, "askId": ask_id.to_string() }))
+        let what = format!("`{}` is not an ask id", clean_line(&args[1]));
+        trail.audit("refused", &what);
+        return Outcome::usage(cmd, what);
     };
     let expect = match inv.flags.get("expect").map(|e| e.trim().to_string()) {
         None => {
-            return refuse(
+            return trail.refuse(
                 format!("ask {ask_id} not answered: answer needs --expect"),
                 "a bare ask id is refused: list the asks and copy the fingerprint you read",
                 "expect-required",
             )
         }
         Some(e) if e.is_empty() => {
-            return refuse(
+            return trail.refuse(
                 format!("ask {ask_id} not answered: --expect is empty"),
                 "the fingerprint is empty; list the asks again and copy it",
                 "expect-empty",
@@ -377,32 +457,39 @@ pub fn ask_answer(inv: &Invocation) -> Outcome {
     };
     let file: AsksFile = match load_stage(&asks_path()) {
         Ok(file) => file,
-        Err(e) => return stage_error(cmd, e),
+        Err(e) => {
+            trail.audit("error", &e);
+            return stage_error(cmd, e);
+        }
     };
-    let Some(entry) = file.asks.iter().find(|e| e.session_id == session && e.ask_id == ask_id).cloned() else {
-        return refuse(
+    let matching: Vec<&Entry> = file.asks.iter().filter(|e| e.session_id == session && e.ask_id == ask_id).collect();
+    if matching.is_empty() {
+        return trail.refuse(
             format!("ask {ask_id} of `{}` is not open", clean_line(session)),
             "nothing was sent; list the asks to see what is open",
             "not-open",
         );
-    };
-    let shown = strip_json(&entry.ask);
-    if fingerprint_of(&entry.session_id, entry.port, entry.ask_id, &shown) != expect {
-        return refuse(
+    }
+    let Some(entry) = matching.into_iter().find(|e| {
+        fingerprint_of(&e.session_id, e.port, e.ask_id, &visible_ask(&e.ask)) == expect
+    }) else {
+        return trail.refuse(
             format!("ask {ask_id} is not the one named by --expect {expect}; nothing was sent"),
             "the ask changed or the fingerprint is wrong; list the asks again",
             "fingerprint-mismatch",
         );
-    }
+    };
+    trail.fingerprint = expect.clone();
+    trail.ask = visible_json_line(&entry.ask);
     if !offered(&entry.ask).iter().any(|offer| offer == label) {
-        return refuse(
+        return trail.refuse(
             format!("ask {ask_id} does not offer `{}`; nothing was sent", clean_line(label)),
             "answer with one of the labels `ask list` shows for it",
             "not-offered",
         );
     }
     let Some(runtime) = runtime_from_env(std::env::var_os("XDG_RUNTIME_DIR").as_deref()).ok() else {
-        return refuse(
+        return trail.refuse(
             "XDG_RUNTIME_DIR is not set; the door's token has no other place to live".to_string(),
             "nothing was sent",
             "runtime-unset",
@@ -411,40 +498,50 @@ pub fn ask_answer(inv: &Invocation) -> Outcome {
     let addr = SocketAddr::from(([127, 0, 0, 1], entry.port));
     let door = match Door::new(addr, &runtime, &token_path(&runtime, entry.port)) {
         Ok(door) => door,
-        Err(e) => return refuse(format!("door refused: {}", reason(&e)), "nothing was sent", reason(&e)),
+        Err(e) => return trail.refuse(format!("door refused: {}", reason(&e)), "nothing was sent", reason(&e)),
     };
+    let pinned = match door.pin() {
+        Ok(pinned) => pinned,
+        Err(e) => return trail.refuse(format!("door refused: {}", reason(&e)), "nothing was sent", reason(&e)),
+    };
+    if pinned.digest(token_digest) != entry.token_digest {
+        return trail.refuse(
+            format!("ask {ask_id}: the door on port {} is not the one that held it; nothing was sent", entry.port),
+            "the door restarted or another door holds the port; list the asks again",
+            "door-changed",
+        );
+    }
     let note = inv.flags.get("note").map(String::as_str);
-    let settle = |dropped: bool| {
-        if dropped {
-            let _ = update_store(&asks_path(), |f| {
-                let before = f.asks.len();
-                f.asks.retain(|e| !(e.session_id == session && e.port == entry.port && e.ask_id == ask_id));
-                f.asks.len() != before
-            });
-        }
+    let (port, ask) = (entry.port, entry.ask_id);
+    let settle = || {
+        let _ = update_store(&asks_path(), |f| {
+            let before = f.asks.len();
+            f.asks.retain(|e| !(e.session_id == session && e.port == port && e.ask_id == ask));
+            f.asks.len() != before
+        });
     };
-    match door.answer(ask_id, label, note) {
+    match pinned.answer(ask_id, label, note) {
         Ok(aoide_door::AnswerOutcome::Answered) => {
-            settle(true);
-            audit_ask(inv, cmd, "answered", &format!("ask {ask_id} of {session}: {}", clean_line(label)));
+            settle();
+            trail.audit("answered", &format!("ask {ask_id} of {session}: {}", clean_line(label)));
             Outcome::ok(cmd, format!("ask {ask_id} answered: {}", clean_line(label)))
         }
         Ok(aoide_door::AnswerOutcome::NotPending) => {
-            settle(true);
+            settle();
             let what = format!("ask {ask_id} is no longer pending on its door; dropped from the store");
-            audit_ask(inv, cmd, "settled", &what);
+            trail.audit("settled", &what);
             Outcome::refuse(cmd, Kind::Refused, what, "the door already settled it", Fix::Run("aoide ask list".to_string()))
                 .with_fields(json!({ "reason": "not-pending", "askId": ask_id.to_string() }))
         }
         Ok(aoide_door::AnswerOutcome::Rejected { reason }) => {
             let what = format!("ask {ask_id} does not take that answer: {}", clean_line(&reason));
-            audit_ask(inv, cmd, "rejected", &what);
+            trail.audit("rejected", &what);
             Outcome::refuse(cmd, Kind::Refused, what, "the ask stays open", Fix::Run("aoide ask list".to_string()))
                 .with_fields(json!({ "reason": "not-offered", "askId": ask_id.to_string() }))
         }
         Err(e) => {
             let why = reason(&e);
-            audit_ask(inv, cmd, "error", &format!("ask {ask_id} of {session}: door did not answer ({why})"));
+            trail.audit("error", &format!("ask {ask_id} of {session}: door did not answer ({why})"));
             Outcome::error(cmd, format!("the door did not answer ask {ask_id}: {why}"))
                 .with_data(json!({ "reason": why, "askId": ask_id.to_string() }))
         }
@@ -518,7 +615,9 @@ impl Puller {
     fn follow(&self, port: u16) -> Result<(), &'static str> {
         let addr = SocketAddr::from(([127, 0, 0, 1], port));
         let door = Door::new(addr, &self.runtime, &token_path(&self.runtime, port)).map_err(|e| reason(&e))?;
-        let mut events = door.events().map_err(|e| reason(&e))?;
+        let pinned = door.pin().map_err(|e| reason(&e))?;
+        let digest = pinned.digest(token_digest);
+        let mut events = pinned.events().map_err(|e| reason(&e))?;
         let mut session: Option<String> = None;
         let mut failure = None;
         while let Some(next) = events.next() {
@@ -529,18 +628,27 @@ impl Puller {
                     break;
                 }
             };
-            if let Frame::Hello { session: hello, .. } = &frame {
-                let sessions = load_stage::<SessionsFile>(&self.sessions).map(|f| f.sessions).unwrap_or_default();
-                let Some(id) = bind_session(hello, &sessions) else {
-                    if let Ok(closer) = events.closer() {
-                        let _ = closer.close();
+            match &frame {
+                Frame::Hello { session: hello, .. } => {
+                    let sessions = load_stage::<SessionsFile>(&self.sessions).map(|f| f.sessions).unwrap_or_default();
+                    match bind_session(hello, &sessions) {
+                        Ok(id) => session = Some(id),
+                        Err(why) => {
+                            close(&events);
+                            return Err(why);
+                        }
                     }
-                    return Err("unbound");
-                };
-                session = Some(id);
+                }
+                Frame::Lagged { .. } => {
+                    // The door dropped frames: this stream cannot be trusted to hold every
+                    // ask, so it ends here and the next tick dials the door again.
+                    close(&events);
+                    break;
+                }
+                _ => {}
             }
             if let Some(id) = &session {
-                self.update(|file| apply(file, id, port, &frame, now()));
+                self.update(|file| apply(file, id, port, &digest, &frame, now()));
             }
         }
         if let Some(id) = session {
@@ -581,11 +689,12 @@ impl Puller {
     }
 }
 
-/// aoided's puller: lists the doors every [`TICK`] until the process ends. With
-/// no runtime directory there is no door to find, and it returns.
-pub fn run() {
+/// aoided's puller: lists the doors every [`TICK`] until the process ends, and
+/// audits to `log_path`, the log aoided was given. With no runtime directory
+/// there is no door to find, and it returns.
+pub fn run(log_path: PathBuf) {
     let Ok(runtime) = runtime_from_env(std::env::var_os("XDG_RUNTIME_DIR").as_deref()) else { return };
-    let puller = Puller::new(runtime, asks_path(), sessions_path(), default_audit_log());
+    let puller = Puller::new(runtime, asks_path(), sessions_path(), log_path);
     loop {
         puller.tick();
         thread::sleep(TICK);
@@ -611,7 +720,7 @@ mod tests {
     const SETTLE_7: &str = r#"{"type":"ask-settled","ask_id":7,"how":"answered","answer":"a"}"#;
 
     fn entry(session_id: &str, port: u16, ask_id: u64) -> Entry {
-        Entry { session_id: session_id.into(), port, ask_id, ask: Value::Null, first_seen: 1 }
+        Entry { session_id: session_id.into(), port, ask_id, ask: Value::Null, first_seen: 1, token_digest: String::new() }
     }
 
     /// A stage directory and a runtime directory of this test's own.
@@ -707,23 +816,28 @@ mod tests {
             SessionRecord { session_id: "s0".into(), log_path: Some("/w/a.eid".into()), ..Default::default() },
             SessionRecord { session_id: "s1".into(), log_path: Some("/w/A.eid".into()), ..Default::default() },
         ];
-        assert_eq!(bind_session("/w/a.eid", &sessions), Some("s0".to_string()));
-        assert_eq!(bind_session("/w/A.eid", &sessions), Some("s1".to_string()));
-        assert_eq!(bind_session("/w/a.eid/", &sessions), None, "no trailing-slash match");
-        assert_eq!(bind_session("a.eid", &sessions), None, "no stem match");
+        assert_eq!(bind_session("/w/a.eid", &sessions), Ok("s0".to_string()));
+        assert_eq!(bind_session("/w/A.eid", &sessions), Ok("s1".to_string()));
+        assert_eq!(bind_session("/w/a.eid/", &sessions), Err("unbound"), "no trailing-slash match");
+        assert_eq!(bind_session("a.eid", &sessions), Err("unbound"), "no stem match");
+        let twins = vec![
+            SessionRecord { session_id: "s0".into(), log_path: Some("/w/a.eid".into()), ..Default::default() },
+            SessionRecord { session_id: "s2".into(), log_path: Some("/w/a.eid".into()), ..Default::default() },
+        ];
+        assert_eq!(bind_session("/w/a.eid", &twins), Err("ambiguous-session"));
     }
 
     #[test]
     fn an_ask_frame_adds_it_and_its_settle_removes_it_and_nothing_else() {
         let mut file = AsksFile::default();
         let ask = Frame::Ask(Ask::Question { ask_id: 7, prompt: "p".into(), options: vec![] });
-        assert!(apply(&mut file, "s0", 1, &ask, 5));
-        assert!(!apply(&mut file, "s0", 1, &ask, 9), "the same ask again changes nothing");
+        assert!(apply(&mut file, "s0", 1, "d", &ask, 5));
+        assert!(!apply(&mut file, "s0", 1, "d", &ask, 9), "the same ask again changes nothing");
         assert_eq!(file.asks[0].first_seen, 5, "the first sight is kept");
         let other = Frame::Ask(Ask::Question { ask_id: 7, prompt: "q".into(), options: vec![] });
-        assert!(apply(&mut file, "s0", 2, &other, 5), "another door's ask 7 is its own ask");
+        assert!(apply(&mut file, "s0", 2, "d", &other, 5), "another door's ask 7 is its own ask");
         let settle = Frame::AskSettled { ask_id: 7, how: "answered".into(), answer: None, note: None };
-        assert!(apply(&mut file, "s0", 1, &settle, 6));
+        assert!(apply(&mut file, "s0", 1, "d", &settle, 6));
         assert_eq!(file.asks.len(), 1);
         assert_eq!((file.asks[0].session_id.as_str(), file.asks[0].port), ("s0", 2));
     }
@@ -739,7 +853,7 @@ mod tests {
             pending: 0,
             protocol: 1,
         };
-        assert!(apply(&mut file, "s0", 1, &hello_frame, 5));
+        assert!(apply(&mut file, "s0", 1, "d", &hello_frame, 5));
         assert_eq!(file.asks, vec![entry("s0", 2, 7), entry("s1", 1, 9)]);
         assert!(!drop_door(&mut file, "s9", 9), "a door with no asks removes none");
     }
@@ -843,6 +957,44 @@ mod tests {
         assert_eq!(text.lines().count(), 1, "one audit line for the refusal");
         assert!(fake.requests().is_empty(), "no request reached the door");
     }
+
+    #[test]
+    fn a_door_two_records_hold_is_skipped_and_audited_once() {
+        let rig = rig("ambiguous");
+        rig.sessions(&[LOG, LOG]);
+        let fake = FakeDoor::start(&rig.runtime, "tok");
+        fake.set_head(&[&hello(LOG), ASK_7]);
+        rig.puller().tick();
+        let text = wait_for_audit(&rig.audit, "ambiguous");
+        assert_eq!(text.lines().count(), 1, "one audit line for the skip");
+        assert!(!rig.asks.exists(), "no record is chosen, so no ask is kept");
+    }
+
+    #[test]
+    fn a_lagged_frame_closes_the_stream_and_the_door_is_dialled_again() {
+        let rig = rig("lagged");
+        rig.sessions(&[LOG]);
+        let fake = FakeDoor::start(&rig.runtime, "tok");
+        fake.set_head(&[&hello(LOG)]);
+        let puller = rig.puller();
+        puller.tick();
+        for _ in 0..400 {
+            if fake.streaming() {
+                break;
+            }
+            thread::sleep(Duration::from_millis(25));
+        }
+        thread::sleep(Duration::from_millis(100));
+        fake.push(r#"{"type":"lagged","dropped":3}"#);
+        for _ in 0..400 {
+            puller.tick();
+            if fake.requests().iter().filter(|r| r.path == "/api/events").count() >= 2 {
+                return;
+            }
+            thread::sleep(Duration::from_millis(25));
+        }
+        panic!("a lagged stream was not closed and the door was not dialled again");
+    }
 }
 
 #[cfg(test)]
@@ -887,21 +1039,55 @@ mod verb_tests {
         }
     }
 
+    /// The digest the puller stores for a door whose token is `token`.
+    fn digest(token: &str) -> String {
+        aoide_storage::seal::hex_encode(&aoide_storage::seal::sha256(token.as_bytes()))
+    }
+
+    /// An open ask of this session, as the puller stores it for a door on `port`
+    /// whose token is `token`.
+    fn entry_at(port: u16, ask_id: u64, ask: Value, token: &str) -> Entry {
+        Entry { session_id: SESSION.into(), port, ask_id, ask, first_seen: 1, token_digest: digest(token) }
+    }
+
+    fn open_entries(env: &Env, entries: Vec<Entry>) {
+        let file = AsksFile { written: 1, asks: entries };
+        std::fs::write(&env.asks, serde_json::to_string(&file).unwrap()).unwrap();
+    }
+
     /// A store with one question open on `port`, the ask as the door's frame gives it.
     fn open(env: &Env, port: u16, ask: Value) {
-        let file = AsksFile {
-            written: 1,
-            asks: vec![Entry { session_id: SESSION.into(), port, ask_id: 7, ask, first_seen: 1 }],
-        };
-        std::fs::write(&env.asks, serde_json::to_string(&file).unwrap()).unwrap();
+        open_entries(env, vec![entry_at(port, 7, ask, TOKEN)]);
     }
 
     fn question(prompt: &str) -> Value {
         json!({"kind": "question", "ask_id": 7, "prompt": prompt, "options": [{"label": "a"}, {"label": "b"}]})
     }
 
+    fn approval(command: &str) -> Value {
+        json!({
+            "kind": "approval", "ask_id": 7, "call_id": "c1", "tool": "Bash",
+            "input": {"command": command}, "prompt": "run it?", "reason": null,
+            "structural": false, "judged": null, "yolo": false, "answers": ["yes", "no"]
+        })
+    }
+
+    /// The `reason` a refusal or an error carries in its data.
+    fn reason_of(out: &Outcome) -> String {
+        out.data.as_ref().and_then(|d| d["reason"].as_str()).unwrap_or_default().to_string()
+    }
+
+    fn list(env: &Env) -> Outcome {
+        ask_list(&invocation(&["ask", "list"], &[], Caller::Cli, &env.audit))
+    }
+
+    /// The fingerprint `ask list` shows for the open ask at row 0.
+    fn listed_fingerprint(env: &Env) -> String {
+        list(env).data.as_ref().expect("list data")["asks"][0]["fingerprint"].as_str().unwrap().to_string()
+    }
+
     fn fingerprint(port: u16, ask: &Value) -> String {
-        fingerprint_of(SESSION, port, 7, &strip_json(ask))
+        fingerprint_of(SESSION, port, 7, &visible_ask(ask))
     }
 
     fn open_asks(env: &Env) -> usize {
@@ -1023,7 +1209,7 @@ mod verb_tests {
         assert!(!shown["ask"]["prompt"].as_str().unwrap().contains(|c: char| c.is_control() || c == '\u{202e}'));
         assert_eq!(
             shown["fingerprint"].as_str().unwrap(),
-            fingerprint_of(SESSION, 9, 7, &strip_json(&raw)),
+            fingerprint_of(SESSION, 9, 7, &visible_ask(&raw)),
             "the fingerprint is taken over the stripped ask"
         );
     }
@@ -1062,11 +1248,185 @@ mod verb_tests {
     }
 
     #[test]
-    fn ask_watch_takes_the_cli_and_daemon_doors_only() {
+    fn ask_watch_takes_the_cli_door_only() {
         let mut r = aoide_protocol::registry::Registry::new();
         crate::commands::graph::register(&mut r);
         let watch = r.get(&["ask".to_string(), "watch".to_string()]).expect("ask watch is registered");
-        assert!(watch.opens(Caller::Cli) && watch.opens(Caller::Daemon));
-        assert!(!watch.opens(Caller::Mcp) && !watch.opens(Caller::A2a));
+        assert!(watch.opens(Caller::Cli));
+        assert!(!watch.opens(Caller::Daemon) && !watch.opens(Caller::Mcp) && !watch.opens(Caller::A2a));
+    }
+
+    /// The handler refuses a daemon call on its own, and returns: a live loop never
+    /// runs inside aoided. The call runs on a thread so a loop fails the test, not hangs it.
+    #[test]
+    fn ask_watch_refuses_a_daemon_call_and_returns() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let env = env("ask-watch-daemon");
+        let audit = env.audit.clone();
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let out = ask_watch(&invocation(&["ask", "watch"], &[], Caller::Daemon, &audit));
+            let _ = tx.send(out.status);
+        });
+        let status = rx.recv_timeout(Duration::from_secs(5)).expect("ask watch returned for the daemon door");
+        assert_ne!(status, aoide_protocol::output::Status::Ok);
+    }
+
+    /// The approval an approver reads is the bytes that run: a newline is shown
+    /// escaped, never removed.
+    #[test]
+    fn a_newline_in_an_approval_is_shown_escaped_never_removed() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let env = env("ask-escaped");
+        open(&env, 9, approval("ls #\nrm -rf ~"));
+        let out = list(&env);
+        assert!(out.message.contains(r"ls #\nrm -rf ~"), "{}", out.message);
+        let shown = &out.data.as_ref().expect("list data")["asks"][0]["ask"]["input"]["command"];
+        assert_eq!(shown, r"ls #\nrm -rf ~");
+    }
+
+    #[test]
+    fn asks_differing_only_by_a_hidden_character_get_different_fingerprints() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let env = env("ask-hidden-fp");
+        open(&env, 9, approval("rm -rf x"));
+        let plain = listed_fingerprint(&env);
+        open(&env, 9, approval("rm\u{200b} -rf x"));
+        let hidden = listed_fingerprint(&env);
+        assert_ne!(plain, hidden, "the hidden character is part of what is approved");
+    }
+
+    #[test]
+    fn a_key_differing_only_by_a_hidden_character_is_shown_beside_its_twin() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let env = env("ask-keys");
+        let ask = json!({
+            "kind": "approval", "ask_id": 7, "call_id": "c1", "tool": "Bash",
+            "input": {"cmd": "one", "cmd\u{200b}": "two"}, "prompt": "p", "reason": null,
+            "structural": false, "judged": null, "yolo": false, "answers": ["yes", "no"]
+        });
+        open(&env, 9, ask);
+        let out = list(&env);
+        let input = &out.data.as_ref().expect("list data")["asks"][0]["ask"]["input"];
+        assert_eq!(input.as_object().map(|m| m.len()), Some(2), "{input}");
+    }
+
+    #[test]
+    fn the_text_list_names_an_approvals_tool_input_and_reason() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let env = env("ask-text-approval");
+        let mut ask = approval("ls");
+        ask["reason"] = json!("because x");
+        open(&env, 9, ask);
+        let out = list(&env);
+        assert!(out.message.contains("Bash"), "{}", out.message);
+        assert!(out.message.contains(r#"{"command":"ls"}"#), "{}", out.message);
+        assert!(out.message.contains("because x"), "{}", out.message);
+    }
+
+    #[test]
+    fn the_text_list_names_a_questions_offered_labels() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let env = env("ask-text-question");
+        open(&env, 9, question("pick one"));
+        let out = list(&env);
+        assert!(out.message.contains("offers: a, b"), "{}", out.message);
+    }
+
+    /// A door restarted on the same port holds a new token; the stored ask is the
+    /// old process's. The answer is refused before any post reaches the new door.
+    #[test]
+    fn a_restarted_door_on_the_same_port_is_refused_before_any_post() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let env = env("ask-restart");
+        let fake = FakeDoor::start(&env.runtime, TOKEN);
+        fake.reply("/api/answer", 204, "");
+        let ask = question("pick");
+        open(&env, fake.addr().port(), ask.clone());
+        let fp = fingerprint(fake.addr().port(), &ask);
+        fake.set_token_file("restarted-token");
+        let out = ask_answer(&invocation(&[SESSION, "7", "a"], &[("expect", &fp)], Caller::Cli, &env.audit));
+        assert_eq!(reason_of(&out), "door-changed", "{}", out.message);
+        assert!(fake.requests().iter().all(|r| r.method != "POST"), "a post reached the restarted door");
+        assert_eq!(open_asks(&env), 1, "nothing was answered, so the entry stays");
+    }
+
+    /// Another session's door holds the port now: its token is not the one the
+    /// stored ask was read from, so it is refused the same way.
+    #[test]
+    fn another_sessions_door_on_the_same_port_is_refused_before_any_post() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let env = env("ask-other-session");
+        let fake = FakeDoor::start(&env.runtime, TOKEN);
+        fake.reply("/api/answer", 204, "");
+        let ask = question("pick");
+        open_entries(&env, vec![entry_at(fake.addr().port(), 7, ask.clone(), "session-a-token")]);
+        let fp = fingerprint(fake.addr().port(), &ask);
+        let out = ask_answer(&invocation(&[SESSION, "7", "a"], &[("expect", &fp)], Caller::Cli, &env.audit));
+        assert_eq!(reason_of(&out), "door-changed", "{}", out.message);
+        assert!(fake.requests().iter().all(|r| r.method != "POST"), "a post reached the other session's door");
+    }
+
+    /// Two doors hold ask 7 of one session: the answer names the entry its
+    /// fingerprint matches, and posts to that door only.
+    #[test]
+    fn answer_picks_the_entry_its_fingerprint_names_among_two_doors() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let env = env("ask-two-doors");
+        let first = FakeDoor::start(&env.runtime, "tok-a");
+        let second = FakeDoor::start(&env.runtime, "tok-b");
+        second.reply("/api/answer", 204, "");
+        let (ask_a, ask_b) = (question("pick a"), question("pick b"));
+        open_entries(
+            &env,
+            vec![
+                entry_at(first.addr().port(), 7, ask_a, "tok-a"),
+                entry_at(second.addr().port(), 7, ask_b.clone(), "tok-b"),
+            ],
+        );
+        let fp = fingerprint(second.addr().port(), &ask_b);
+        let out = ask_answer(&invocation(&[SESSION, "7", "a"], &[("expect", &fp)], Caller::Cli, &env.audit));
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "{}", out.message);
+        assert_eq!(second.requests().iter().filter(|r| r.method == "POST").count(), 1, "the named door got the answer");
+        assert!(first.requests().is_empty(), "the other door got nothing");
+    }
+
+    #[test]
+    fn a_store_that_does_not_read_is_refused_and_audited() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let env = env("ask-unreadable");
+        std::fs::write(&env.asks, "not json").unwrap();
+        let out = ask_answer(&invocation(&[SESSION, "7", "a"], &[("expect", "0000000000000000")], Caller::Cli, &env.audit));
+        assert_ne!(out.status, aoide_protocol::output::Status::Ok);
+        assert_eq!(audit_lines(&env), 1, "the store-read failure is audited");
+    }
+
+    #[test]
+    fn an_ask_id_that_is_not_a_number_is_audited() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let env = env("ask-id-usage");
+        let out = ask_answer(&invocation(&[SESSION, "seven", "a"], &[("expect", "0000000000000000")], Caller::Cli, &env.audit));
+        assert_ne!(out.status, aoide_protocol::output::Status::Ok);
+        assert_eq!(audit_lines(&env), 1, "the usage error is audited");
+    }
+
+    /// The answered line names the fingerprint the approver read, and carries the
+    /// ask it answered as untrusted data, as pending.rs's lines do.
+    #[test]
+    fn an_answer_is_audited_with_its_fingerprint_and_the_ask_it_answered() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let env = env("ask-audit-answer");
+        let fake = FakeDoor::start(&env.runtime, TOKEN);
+        fake.reply("/api/answer", 204, "");
+        let ask = question("pick");
+        open(&env, fake.addr().port(), ask.clone());
+        let fp = fingerprint(fake.addr().port(), &ask);
+        let out = ask_answer(&invocation(&[SESSION, "7", "a"], &[("expect", &fp)], Caller::Cli, &env.audit));
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "{}", out.message);
+        let text = std::fs::read_to_string(&env.audit).unwrap();
+        let line: Value = serde_json::from_str(text.lines().last().expect("an audit line")).unwrap();
+        assert_eq!(line["status"], "answered");
+        assert!(line["message"].as_str().unwrap_or_default().contains(&fp), "{line}");
+        assert!(line["untrusted_data"].as_str().unwrap_or_default().contains("pick"), "{line}");
     }
 }

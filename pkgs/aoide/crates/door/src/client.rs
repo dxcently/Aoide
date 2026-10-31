@@ -9,7 +9,7 @@ use crate::error::DoorError;
 use crate::events::Events;
 use crate::http::{body_reader, framing_error, read_head, write_request, Head, Wire, Within};
 use crate::listener;
-use crate::token::read_token;
+use crate::token::{read_token, Token};
 
 const CONNECT: Duration = Duration::from_secs(5);
 /// The deadline a request waits under, from its send: a call's send, head and body
@@ -90,62 +90,34 @@ impl Door {
         self
     }
 
+    /// Reads the token under A6's checks, and holds it for the requests made
+    /// through the returned [`Pinned`]: the door that answers is the one whose
+    /// token was read here.
+    pub fn pin(&self) -> Result<Pinned<'_>, DoorError> {
+        let token = read_token(&self.runtime, &self.token_file, self.addr.port())?;
+        Ok(Pinned { door: self, token })
+    }
+
     pub fn say(&self, text: &str, mode: Mode) -> Result<SayOutcome, DoorError> {
-        let body = json!({"text": text, "mode": mode.word()});
-        let (status, bytes) = self.call("POST", "/api/say", Some(&body))?;
-        match status {
-            202 => {
-                let queued = serde_json::from_slice::<Value>(&bytes)
-                    .ok()
-                    .and_then(|v| v.get("queued").and_then(Value::as_bool));
-                queued
-                    .map(|queued| SayOutcome::Queued { queued })
-                    .ok_or_else(|| DoorError::Malformed("say's 202 carries no queued flag".to_string()))
-            }
-            422 => Ok(SayOutcome::Refused { reason: error_text(&bytes) }),
-            other => Err(common(other)),
-        }
+        self.pin()?.say(text, mode)
     }
 
     pub fn cancel(&self) -> Result<CancelOutcome, DoorError> {
-        let (status, _) = self.call("POST", "/api/cancel", None)?;
-        match status {
-            204 => Ok(CancelOutcome::Cancelled),
-            409 => Ok(CancelOutcome::Idle),
-            other => Err(common(other)),
-        }
+        self.pin()?.cancel()
     }
 
     pub fn answer(&self, ask_id: u64, label: &str, note: Option<&str>) -> Result<AnswerOutcome, DoorError> {
-        let mut body = json!({"ask_id": ask_id, "answer": label});
-        if let Some(note) = note {
-            body["note"] = json!(note);
-        }
-        let (status, bytes) = self.call("POST", "/api/answer", Some(&body))?;
-        match status {
-            204 => Ok(AnswerOutcome::Answered),
-            409 => Ok(AnswerOutcome::NotPending),
-            422 => Ok(AnswerOutcome::Rejected { reason: error_text(&bytes) }),
-            other => Err(common(other)),
-        }
+        self.pin()?.answer(ask_id, label, note)
     }
 
     pub fn events(&self) -> Result<Events, DoorError> {
-        let (head, reader) = self.exchange("GET", "/api/events", None)?;
-        match head.status {
-            200 => {
-                let socket = reader.get_ref().stream.try_clone()?;
-                let deadline = reader.get_ref().deadline();
-                Ok(Events::new(body_reader(&head, reader), socket, deadline))
-            }
-            other => Err(common(other)),
-        }
+        self.pin()?.events()
     }
 
     /// One request whose reply is read whole: its send, head and body share one deadline.
-    fn call(&self, method: &str, path: &str, body: Option<&Value>) -> Result<(u16, Vec<u8>), DoorError> {
+    fn call(&self, token: &Token, method: &str, path: &str, body: Option<&Value>) -> Result<(u16, Vec<u8>), DoorError> {
         let bytes = body.map(|b| serde_json::to_vec(b).expect("a json value serializes"));
-        let (head, reader) = self.exchange(method, path, bytes.as_deref())?;
+        let (head, reader) = self.exchange(token, method, path, bytes.as_deref())?;
         // An error status is decided by its head: its length and a cut body are not errors.
         let capped = head.status < 400;
         if let Some(length) = head.length.filter(|length| capped && *length > MAX_REPLY) {
@@ -162,14 +134,13 @@ impl Door {
         Ok((head.status, out))
     }
 
-    /// Reads the token under A6, connects, checks the listener before a byte is
+    /// Connects with `token` already read, checks the listener before a byte is
     /// written, then sends the request and reads the reply's head. One deadline
     /// starts before the send, and the writes and the reads up to the end of the
     /// head share it. A write that fails is reported only if no reply came: a
     /// door may answer (413) before it has read the whole body. The reader holds
     /// the deadline, so an events stream holds it until its hello is read.
-    fn exchange(&self, method: &str, path: &str, body: Option<&[u8]>) -> Result<(Head, BufReader<Wire>), DoorError> {
-        let token = read_token(&self.runtime, &self.token_file, self.addr.port())?;
+    fn exchange(&self, token: &Token, method: &str, path: &str, body: Option<&[u8]>) -> Result<(Head, BufReader<Wire>), DoorError> {
         let stream = TcpStream::connect_timeout(&self.addr, CONNECT)
             .map_err(|source| DoorError::Connect { addr: self.addr, source })?;
         listener::check(self.addr, stream.local_addr()?)?;
@@ -189,6 +160,74 @@ impl Door {
                 Err(io) => DoorError::Io(io),
                 Ok(()) => e,
             }),
+        }
+    }
+}
+
+/// A door and the token its file held when [`Door::pin`] read it. Every request
+/// made through it sends that token: a door restarted after the pin answers 401,
+/// and never receives the request meant for the one the pin read.
+pub struct Pinned<'a> {
+    door: &'a Door,
+    token: Token,
+}
+
+impl Pinned<'_> {
+    /// `hash` applied to the pinned token's bytes. The token itself never leaves
+    /// this crate; a caller compares digests.
+    pub fn digest(&self, hash: impl FnOnce(&[u8]) -> String) -> String {
+        hash(self.token.as_str().as_bytes())
+    }
+
+    pub fn say(&self, text: &str, mode: Mode) -> Result<SayOutcome, DoorError> {
+        let body = json!({"text": text, "mode": mode.word()});
+        let (status, bytes) = self.door.call(&self.token, "POST", "/api/say", Some(&body))?;
+        match status {
+            202 => {
+                let queued = serde_json::from_slice::<Value>(&bytes)
+                    .ok()
+                    .and_then(|v| v.get("queued").and_then(Value::as_bool));
+                queued
+                    .map(|queued| SayOutcome::Queued { queued })
+                    .ok_or_else(|| DoorError::Malformed("say's 202 carries no queued flag".to_string()))
+            }
+            422 => Ok(SayOutcome::Refused { reason: error_text(&bytes) }),
+            other => Err(common(other)),
+        }
+    }
+
+    pub fn cancel(&self) -> Result<CancelOutcome, DoorError> {
+        let (status, _) = self.door.call(&self.token, "POST", "/api/cancel", None)?;
+        match status {
+            204 => Ok(CancelOutcome::Cancelled),
+            409 => Ok(CancelOutcome::Idle),
+            other => Err(common(other)),
+        }
+    }
+
+    pub fn answer(&self, ask_id: u64, label: &str, note: Option<&str>) -> Result<AnswerOutcome, DoorError> {
+        let mut body = json!({"ask_id": ask_id, "answer": label});
+        if let Some(note) = note {
+            body["note"] = json!(note);
+        }
+        let (status, bytes) = self.door.call(&self.token, "POST", "/api/answer", Some(&body))?;
+        match status {
+            204 => Ok(AnswerOutcome::Answered),
+            409 => Ok(AnswerOutcome::NotPending),
+            422 => Ok(AnswerOutcome::Rejected { reason: error_text(&bytes) }),
+            other => Err(common(other)),
+        }
+    }
+
+    pub fn events(&self) -> Result<Events, DoorError> {
+        let (head, reader) = self.door.exchange(&self.token, "GET", "/api/events", None)?;
+        match head.status {
+            200 => {
+                let socket = reader.get_ref().stream.try_clone()?;
+                let deadline = reader.get_ref().deadline();
+                Ok(Events::new(body_reader(&head, reader), socket, deadline))
+            }
+            other => Err(common(other)),
         }
     }
 }

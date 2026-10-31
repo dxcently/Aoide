@@ -19,7 +19,10 @@ are in README.md.
   dual-stack listener's accepted socket is in `tcp6`, finds no row, and is
   refused, which is fail-closed. The check proves the listener runs as this
   user. It does not prove the process is `eidolon`: a same-uid listener passes.
-- The token is read on every request. The runtime directory and its `eidolon`
+- The token is read under these rules on every `Door` request, and a `Pinned`
+  door (from `Door::pin`) sends the token its pin read on each of its requests,
+  so a door restarted after the pin answers 401 and never receives the request
+  meant for its successor. The runtime directory and its `eidolon`
   directory must be real directories (no symlinks), owned by the effective uid,
   at mode 0700. The token file must be exactly
   `<runtime>/eidolon/web-<port>.token`, a regular file owned by the effective
