@@ -383,7 +383,7 @@ mod tests {
         // LAN ceremony) — reached 88.
         //
         // **The running total above is the CHAIN's history, not this list's
-        // **The vec below holds 126 paths** (counted, review F7). This line is
+        // **The vec below holds 127 paths** (counted, review F7). This line is
         // the authority for how many; the chain above is the history of how it
         // got there and is never the answer.
         let mut expected: Vec<&str> = vec![
@@ -391,6 +391,7 @@ mod tests {
             "adapter.melete",
             "ask.answer",
             "ask.list",
+            "ask.watch",
             "conduct",
             "conductor",
             "config",
@@ -827,6 +828,7 @@ mod tests {
             "adapter.melete none serve",
             "ask.answer ask act",
             "ask.list ask list",
+            "ask.watch ask watch",
             "conduct session act",
             "conductor none serve",
             "config config show",
@@ -992,7 +994,7 @@ mod tests {
             got.push(format!("{kind}: {}", cells.join(", ")));
         }
         let expected: Vec<&str> = vec![
-            "ask: list ok, show missing, watch missing, act ok",
+            "ask: list ok, show missing, watch ok, act ok",
             "config: list n/a: one config, show ok, watch missing, act ok",
             "event: list missing, show missing, watch ok, act n/a: producers write events, no verb does",
             "graph: list n/a: one graph per host, show ok, watch missing, act ok",

@@ -722,9 +722,10 @@ Contract guarantees:
   `approves`: `schemaVersion` stays `"0"`, since a blank key is omitted and a
   declared one adds a key no consumer must read. `strx schema --json` stays
   byte-identical until Strillix declares its kinds.
-- The `ask` kind (`aoide ask list`, `aoide ask answer`) is the open asks the
-  `eidolon web` doors report, read from the `asks.json` section below.
-  `list` and `answer` take CLI and Daemon doors only; `answer` is `act` and approves.
+- The `ask` kind (`aoide ask list`, `aoide ask watch`, `aoide ask answer`) is the
+  open asks the `eidolon web` doors report, read from the `asks.json` section
+  below. `list` and `watch` are reads, `answer` is `act` and approves; all three
+  take CLI and Daemon doors only.
 - `doors` (optional string array on a command, and on a flag) — the doors that
   may call the command, from `cli`, `daemon`, `mcp`, `a2a`. **Additive**, same
   discipline: omitted from `schema --json` when it is the default `["cli",

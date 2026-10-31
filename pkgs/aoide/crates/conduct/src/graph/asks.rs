@@ -20,6 +20,7 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -211,6 +212,25 @@ fn audit_ask(inv: &Invocation, command: &str, status: &str, message: &str) {
     );
 }
 
+/// The rows `ask list --json` shows: one per open ask, stripped and fingerprinted.
+fn rows_of(file: &AsksFile) -> Vec<Value> {
+    file.asks
+        .iter()
+        .map(|entry| {
+            let shown = strip_json(&entry.ask);
+            let fingerprint = fingerprint_of(&entry.session_id, entry.port, entry.ask_id, &shown);
+            json!({
+                "sessionId": entry.session_id,
+                "port": entry.port,
+                "askId": entry.ask_id,
+                "ask": shown,
+                "fingerprint": fingerprint,
+                "firstSeen": entry.first_seen,
+            })
+        })
+        .collect()
+}
+
 /// `ask list [--json]`: the open asks, each with the fingerprint an answer names,
 /// and when the store was last written. Every string is stripped first.
 pub fn ask_list(_inv: &Invocation) -> Outcome {
@@ -219,29 +239,95 @@ pub fn ask_list(_inv: &Invocation) -> Outcome {
         Ok(file) => file,
         Err(e) => return stage_error(cmd, e),
     };
-    let mut rows = Vec::with_capacity(file.asks.len());
-    let mut lines = Vec::with_capacity(file.asks.len());
-    for entry in &file.asks {
-        let shown = strip_json(&entry.ask);
-        let fingerprint = fingerprint_of(&entry.session_id, entry.port, entry.ask_id, &shown);
-        let prompt = shown.get("prompt").and_then(Value::as_str).map(clean_line).unwrap_or_default();
-        lines.push(format!(
-            "{} port {} ask {}: {prompt} (fingerprint {fingerprint})",
-            entry.session_id, entry.port, entry.ask_id
-        ));
-        rows.push(json!({
-            "sessionId": entry.session_id,
-            "port": entry.port,
-            "askId": entry.ask_id,
-            "ask": shown,
-            "fingerprint": fingerprint,
-            "firstSeen": entry.first_seen,
-        }));
-    }
+    let rows = rows_of(&file);
+    let lines: Vec<String> = rows
+        .iter()
+        .map(|row| {
+            let prompt = row["ask"].get("prompt").and_then(Value::as_str).map(clean_line).unwrap_or_default();
+            format!(
+                "{} port {} ask {}: {prompt} (fingerprint {})",
+                row["sessionId"].as_str().unwrap_or_default(),
+                row["port"],
+                row["askId"],
+                row["fingerprint"].as_str().unwrap_or_default()
+            )
+        })
+        .collect();
     let n = rows.len();
     let body = if n == 0 { "no open asks".to_string() } else { lines.join("\n") };
     Outcome::ok(cmd, format!("{n} open ask(s), store written at {}\n{body}", file.written))
         .with_data(json!({ "asks": rows, "written": file.written }))
+}
+
+/// Set when `ask watch` is interrupted: its loop ends and prints the closing line.
+static WATCH_STOP: AtomicBool = AtomicBool::new(false);
+const WATCH_POLL: Duration = Duration::from_millis(250);
+
+extern "C" fn on_watch_sigint(_signum: libc::c_int) {
+    WATCH_STOP.store(true, Ordering::SeqCst);
+}
+
+fn with_type(row: &Value, change: &str) -> Value {
+    let mut row = row.clone();
+    row["type"] = json!(change);
+    row
+}
+
+/// The rows that left and the rows that came between two snapshots, each typed
+/// `removed` or `added`.
+fn changes(before: &[Value], after: &[Value]) -> Vec<Value> {
+    let gone = before.iter().filter(|row| !after.contains(row)).map(|row| with_type(row, "removed"));
+    let came = after.iter().filter(|row| !before.contains(row)).map(|row| with_type(row, "added"));
+    gone.chain(came).collect()
+}
+
+fn change_text(row: &Value) -> String {
+    format!(
+        "{} {} port {} ask {}",
+        row["type"].as_str().unwrap_or_default(),
+        row["sessionId"].as_str().unwrap_or_default(),
+        row["port"],
+        row["askId"]
+    )
+}
+
+/// Follows the store until `stop` is set, one line per change: an ask added or
+/// removed. It starts from nothing, so the asks open at the start come out as
+/// additions. The closing line is an `end` object, as the other watches end.
+/// A store that cannot be read is skipped until it can.
+pub fn watch_store(path: &Path, json_mode: bool, poll: Duration, stop: &AtomicBool, emit: &mut dyn FnMut(String)) {
+    let mut seen: Vec<Value> = Vec::new();
+    while !stop.load(Ordering::SeqCst) {
+        if let Ok(file) = load_stage::<AsksFile>(path) {
+            let now = rows_of(&file);
+            for row in changes(&seen, &now) {
+                emit(if json_mode { row.to_string() } else { change_text(&row) });
+            }
+            seen = now;
+        }
+        thread::sleep(poll);
+    }
+    emit(if json_mode {
+        json!({ "type": "end", "reason": "interrupted" }).to_string()
+    } else {
+        "watch ended: interrupted".to_string()
+    });
+}
+
+/// `ask watch [--json]`: one line per change of the asks store, until Ctrl-C.
+pub fn ask_watch(inv: &Invocation) -> Outcome {
+    let json_mode = inv.flag_present("json");
+    WATCH_STOP.store(false, Ordering::SeqCst);
+    unsafe {
+        libc::signal(libc::SIGINT, on_watch_sigint as *const () as libc::sighandler_t);
+    }
+    watch_store(&asks_path(), json_mode, WATCH_POLL, &WATCH_STOP, &mut |line| {
+        use std::io::Write as _;
+        let mut out = std::io::stdout();
+        let _ = writeln!(out, "{line}");
+        let _ = out.flush();
+    });
+    Outcome::ok("ask.watch", "watched the asks store until interrupted").with_data(json!({ "reason": "interrupted" }))
 }
 
 /// `ask answer <session> <ask_id> <label> --expect <fingerprint> [--note <text>]`:
@@ -940,5 +1026,47 @@ mod verb_tests {
             fingerprint_of(SESSION, 9, 7, &strip_json(&raw)),
             "the fingerprint is taken over the stripped ask"
         );
+    }
+
+    fn wait_for_lines(lines: &Mutex<Vec<String>>, n: usize) {
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while lines.lock().unwrap().len() < n {
+            assert!(std::time::Instant::now() < deadline, "watch printed too few lines");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+
+    #[test]
+    fn an_added_and_a_removed_ask_each_give_one_line_and_the_stop_closes_the_stream() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let env = env("ask-watch");
+        let stop = Arc::new(AtomicBool::new(false));
+        let lines = Arc::new(Mutex::new(Vec::<String>::new()));
+        let (path, stop_in, lines_in) = (env.asks.clone(), stop.clone(), lines.clone());
+        let watcher = std::thread::spawn(move || {
+            watch_store(&path, true, Duration::from_millis(5), &stop_in, &mut |line| {
+                lines_in.lock().unwrap().push(line)
+            });
+        });
+        open(&env, 9, question("pick one"));
+        wait_for_lines(&lines, 1);
+        std::fs::write(&env.asks, serde_json::to_string(&AsksFile::default()).unwrap()).unwrap();
+        wait_for_lines(&lines, 2);
+        stop.store(true, Ordering::SeqCst);
+        watcher.join().unwrap();
+        let got: Vec<Value> = lines.lock().unwrap().iter().map(|l| serde_json::from_str(l).unwrap()).collect();
+        let kinds: Vec<&str> = got.iter().map(|v| v["type"].as_str().unwrap()).collect();
+        assert_eq!(kinds, ["added", "removed", "end"]);
+        assert_eq!(got[0]["askId"], 7);
+        assert_eq!(got[2]["reason"], "interrupted");
+    }
+
+    #[test]
+    fn ask_watch_takes_the_cli_and_daemon_doors_only() {
+        let mut r = aoide_protocol::registry::Registry::new();
+        crate::commands::graph::register(&mut r);
+        let watch = r.get(&["ask".to_string(), "watch".to_string()]).expect("ask watch is registered");
+        assert!(watch.opens(Caller::Cli) && watch.opens(Caller::Daemon));
+        assert!(!watch.opens(Caller::Mcp) && !watch.opens(Caller::A2a));
     }
 }
