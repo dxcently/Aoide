@@ -2255,6 +2255,63 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    /// The follow reads a `.eid` journal through the producer's export door, not
+    /// only a `trace.jsonl`: each tick the export grows and the journal changes
+    /// with it, so the follow prints the new records and counts no gap. Coverage
+    /// of the door's path, not a fix: it is green on the base.
+    #[test]
+    fn a_follow_on_an_eid_journal_prints_what_the_export_adds() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let root = unique_stage("trace-eid-follow");
+        let bin = root.join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let export = root.join("journal.export.jsonl");
+        let script = bin.join("eidolon");
+        std::fs::write(
+            &script,
+            format!("#!/bin/sh\ncase \"$*\" in *--help*) echo '--after'; exit 0;; esac\ncat '{}'\n", export.display()),
+        )
+        .unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let journal = root.join("journal.eid");
+        SHRINK_CALLS.store(0, Ordering::SeqCst);
+        INTERRUPTED.store(false, Ordering::SeqCst);
+
+        let out = with_fake_eidolon_path(&bin, || {
+            follow_trace("session.trace", "Aoide-eid", "eid", &journal, grows_an_eid_journal, 5, true, false)
+        });
+        assert_eq!(out.status, Status::Ok, "msg: {}", out.message);
+        let data = out.data.clone().unwrap();
+        assert_eq!(data["gaps"], 0, "a grown journal is no gap: {data}");
+        assert_eq!(data["printed"], 7, "5 of the first export, then the 2 it added: {data}");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// One export per tick: 400 records, then 402, then the follow is interrupted.
+    /// The journal's length grows with each, so the door's memo misses.
+    fn grows_an_eid_journal(path: &std::path::Path) -> Option<Vec<String>> {
+        let call = SHRINK_CALLS.fetch_add(1, Ordering::SeqCst);
+        let export = path.with_file_name("journal.export.jsonl");
+        match call {
+            0 => write_trace(&export, 0..400),
+            1 => write_trace(&export, 0..402),
+            _ => INTERRUPTED.store(true, Ordering::SeqCst),
+        }
+        std::fs::write(path, "x".repeat(call * 10 + 1)).unwrap();
+        aoide_protocol::agents::eidolon_trace_tail(path)
+    }
+
+    /// Runs `f` with `dir` first on PATH, restoring PATH after.
+    fn with_fake_eidolon_path<T>(dir: &std::path::Path, f: impl FnOnce() -> T) -> T {
+        let old = std::env::var("PATH").unwrap_or_default();
+        std::env::set_var("PATH", format!("{}:{old}", dir.display()));
+        let out = f();
+        std::env::set_var("PATH", old);
+        out
+    }
+
     /// Writes a fresh trace beside `path` and renames it over `path`, so the
     /// follow sees a new inode with ids 397..402 (397 to 399 are already printed).
     fn replaced_by_a_new_file(path: &std::path::Path) -> Option<Vec<String>> {
