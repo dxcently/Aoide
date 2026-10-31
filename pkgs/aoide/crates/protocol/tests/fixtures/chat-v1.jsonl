@@ -1,0 +1,11 @@
+{"id":"1","role":"user","session":"s-1","text":"hello <script>","ts":1789603005570,"v":1}
+{"id":"2","role":"agent","session":"s-1","text":"Let me read the slot catalog.","ts":1789603009102,"v":1}
+{"id":"2.0","role":"agent","session":"s-1","text":"I should read the catalog first.","thinking":true,"ts":1789603009100,"v":1}
+{"id":"2.1","role":"tool","session":"s-1","tool":{"input":"{\"path\":\"slots.md\"}","name":"read"},"ts":1789603009102,"v":1}
+{"id":"3","role":"tool","session":"s-1","tool":{"name":"read","result":"1 # Per-rice widget slots"},"ts":1789603009140,"v":1}
+{"id":"4","role":"tool","session":"s-1","tool":{"error":true,"name":"read","result":"ENOENT: no such file"},"ts":1789603009200,"v":1}
+{"from":"peer-7","id":"5","role":"system","session":"s-1","text":"ping","ts":1789603010000,"v":1}
+{"id":"6","role":"system","session":"s-1","state":"waiting","ts":null,"v":1}
+{"ask":{"answers":["yes","no"],"id":"call_x","kind":"approval","prompt":"Overwrite?"},"id":"7","role":"agent","session":"s-1","ts":1789626500000,"v":1}
+{"ask":{"id":"call_q","kind":"question","options":[{"description":"warm palette","label":"sunrise"},{"description":"cool palette","label":"dusk"}],"prompt":"Which rice?"},"id":"8","role":"agent","session":"s-1","ts":1789626510000,"v":1}
+{"ask":{"fingerprint":"3f9a","id":"perm-1","kind":"approval","prompt":"Bash: rm -rf build"},"id":"9","role":"system","session":"s-1","ts":null,"v":1}

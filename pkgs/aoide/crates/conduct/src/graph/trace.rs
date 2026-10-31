@@ -210,9 +210,9 @@ impl Step {
     }
 }
 
-static INTERRUPTED: AtomicBool = AtomicBool::new(false);
+pub(super) static INTERRUPTED: AtomicBool = AtomicBool::new(false);
 
-extern "C" fn on_sigint(_signum: libc::c_int) {
+pub(super) extern "C" fn on_sigint(_signum: libc::c_int) {
     INTERRUPTED.store(true, Ordering::SeqCst);
 }
 
@@ -821,6 +821,75 @@ fn ledger_ended(target: &str) -> Option<aoide_storage::ledger::LedgerEntry> {
 }
 
 /// `session trace <id> [--tail N] [--follow] [--json]` — see the module doc.
+/// The local session a `<target>` names, resolved exactly as `send --to` resolves
+/// it, with the ledger's ended entry when the name is an ended session. A refusal
+/// comes back as the outcome to return. Shared by `session trace` and `session chat`.
+pub(super) fn resolve_local(
+    cmd: &str,
+    target: &str,
+) -> Result<(String, Option<aoide_storage::ledger::LedgerEntry>, SessionsFile), Outcome> {
+    let file: SessionsFile = match load_stage(&sessions_path()) {
+        Ok(f) => f,
+        Err(e) => return Err(stage_error(cmd, e)),
+    };
+    let host = aoide_storage::display::local_host_name();
+    let ids: HashSet<&str> = file.sessions.iter().map(|s| s.session_id.as_str()).collect();
+    let candidates: Vec<LocalCandidate<'_>> = file
+        .sessions
+        .iter()
+        .map(|s| {
+            let role = if resolved_parent(s, &ids).is_some() { "child" } else { "root" };
+            LocalCandidate { session_id: &s.session_id, petname: s.petname.as_deref(), role }
+        })
+        .collect();
+    let nodes = aoide_storage::node_store::load_nodes();
+    let node_names: Vec<&str> = nodes.iter().map(|p| p.name.as_str()).collect();
+
+    let echo_target = strip_unsafe(&target);
+    let (id, ended) = match addr::resolve(&target, &host, &candidates, &node_names) {
+        Resolution::Local(id) => (id, None),
+        Resolution::Remote { node, .. } => {
+            let node = strip_unsafe(&node);
+            return Err(Outcome::error(
+                cmd,
+                format!(
+                    "`{echo_target}` resolves to a session on node `{node}` — a trace is a file on the \
+                     node that wrote it, so run `session trace` there"
+                ),
+            )
+            .with_data(json!({ "reason": "remote-target", "node": node, "target": echo_target })));
+        }
+        Resolution::Ambiguous(found) => {
+            let found: Vec<String> = found.iter().map(|f| strip_unsafe(f)).collect();
+            return Err(Outcome::error(
+                cmd,
+                format!(
+                    "`{echo_target}` is ambiguous — {} local session(s) match: {}",
+                    found.len(),
+                    found.join(", ")
+                ),
+            )
+            .with_data(json!({ "reason": "ambiguous", "target": echo_target, "candidates": found })));
+        }
+        Resolution::NotFound => match ledger_ended(&target) {
+            Some(entry) => (entry.session_id.clone(), Some(entry)),
+            None => {
+                let hint = if !target.contains('/') && node_names.contains(&target) {
+                    format!(
+                        " (`{echo_target}` names a known node, not a local session — did you mean `{echo_target}/<session>`?)"
+                    )
+                } else {
+                    String::new()
+                };
+                return Err(Outcome::error(cmd, format!("no session matches `{echo_target}`{hint}"))
+                    .with_data(json!({ "reason": "not-found", "target": echo_target })));
+            }
+        },
+    };
+    let id = strip_unsafe(&id);
+    Ok((id, ended, file))
+}
+
 pub fn session_trace(inv: &Invocation) -> Outcome {
     let cmd = "session.trace";
     let args = match require_args(inv, &["id"]) {
@@ -845,65 +914,12 @@ pub fn session_trace(inv: &Invocation) -> Outcome {
     // registered node names, with the same ambiguity/not-found
     // refusals. No hub preference here — that is a ROUTING rule for `send`
     // (P-D5), not a rule for reading a file that lives on THIS box.
-    let file: SessionsFile = match load_stage(&sessions_path()) {
-        Ok(f) => f,
-        Err(e) => return stage_error(cmd, e),
+    let (id, ended, file) = match resolve_local(cmd, &target) {
+        Ok(r) => r,
+        Err(o) => return o,
     };
     let host = aoide_storage::display::local_host_name();
     let ids: HashSet<&str> = file.sessions.iter().map(|s| s.session_id.as_str()).collect();
-    let candidates: Vec<LocalCandidate<'_>> = file
-        .sessions
-        .iter()
-        .map(|s| {
-            let role = if resolved_parent(s, &ids).is_some() { "child" } else { "root" };
-            LocalCandidate { session_id: &s.session_id, petname: s.petname.as_deref(), role }
-        })
-        .collect();
-    let nodes = aoide_storage::node_store::load_nodes();
-    let node_names: Vec<&str> = nodes.iter().map(|p| p.name.as_str()).collect();
-
-    let echo_target = strip_unsafe(&target);
-    let (id, ended) = match addr::resolve(&target, &host, &candidates, &node_names) {
-        Resolution::Local(id) => (id, None),
-        Resolution::Remote { node, .. } => {
-            let node = strip_unsafe(&node);
-            return Outcome::error(
-                cmd,
-                format!(
-                    "`{echo_target}` resolves to a session on node `{node}` — a trace is a file on the \
-                     node that wrote it, so run `session trace` there"
-                ),
-            )
-            .with_data(json!({ "reason": "remote-target", "node": node, "target": echo_target }));
-        }
-        Resolution::Ambiguous(found) => {
-            let found: Vec<String> = found.iter().map(|f| strip_unsafe(f)).collect();
-            return Outcome::error(
-                cmd,
-                format!(
-                    "`{echo_target}` is ambiguous — {} local session(s) match: {}",
-                    found.len(),
-                    found.join(", ")
-                ),
-            )
-            .with_data(json!({ "reason": "ambiguous", "target": echo_target, "candidates": found }));
-        }
-        Resolution::NotFound => match ledger_ended(&target) {
-            Some(entry) => (entry.session_id.clone(), Some(entry)),
-            None => {
-                let hint = if !target.contains('/') && node_names.contains(&target.as_str()) {
-                    format!(
-                        " (`{echo_target}` names a known node, not a local session — did you mean `{echo_target}/<session>`?)"
-                    )
-                } else {
-                    String::new()
-                };
-                return Outcome::error(cmd, format!("no session matches `{echo_target}`{hint}"))
-                    .with_data(json!({ "reason": "not-found", "target": echo_target }));
-            }
-        },
-    };
-    let id = strip_unsafe(&id);
 
     // The trace is a HARNESS CAPABILITY, never a name check: a profile whose
     // `TranscriptSpec::trace` is `None` keeps no trace file at all, and
@@ -1026,12 +1042,46 @@ fn followed_line(line: &str, json_mode: bool, dim: bool) -> String {
     }
 }
 
+/// The identity a follow resumes after: a trace record's own journal id when the
+/// line parses as one, else a hash of the whole line.
+fn record_cursor(line: &str) -> String {
+    match eidolon_trace_record(line) {
+        Some(rec) => format!("#{}", rec.id),
+        None => {
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            std::hash::Hash::hash(line, &mut hasher);
+            format!("h{:x}", std::hash::Hasher::finish(&hasher))
+        }
+    }
+}
+
+/// A trace file's identity: device and inode. A replaced trace gets a new one.
+pub(super) fn file_identity(path: &Path) -> Option<(u64, u64)> {
+    use std::os::unix::fs::MetadataExt;
+    std::fs::metadata(path).ok().map(|m| (m.dev(), m.ino()))
+}
+
+/// The lines one follow tick prints, and whether records were skipped. Without
+/// a cursor (nothing printed yet) the whole window is new. With one, the lines
+/// after its record are new. A cursor that is not in a non-empty window has
+/// fallen out of it, or the trace was replaced: the whole window is new and
+/// the skip is a gap.
+fn follow_tick<'a>(window: &'a [String], cursor: Option<&str>) -> (&'a [String], bool) {
+    match cursor {
+        None => (window, false),
+        Some(c) => match window.iter().rposition(|l| record_cursor(l) == c) {
+            Some(i) => (&window[i + 1..], false),
+            None => (window, !window.is_empty()),
+        },
+    }
+}
+
 /// `--follow`: print the current window, then re-read the trace every
-/// [`FOLLOW_POLL`] and print whatever grew, until Ctrl-C. Re-reading the
-/// tail each tick (rather than holding a delta reader open) keeps this on
-/// the SAME reader as the one-shot path — the file is a bounded 1 MiB window,
-/// and a trace that was rotated or truncated simply yields a shorter list,
-/// which this loop notices by count rather than replaying history.
+/// [`FOLLOW_POLL`] and print whatever comes after the last record it printed,
+/// until Ctrl-C. Re-reading the window each tick keeps this on the SAME reader
+/// as the one-shot path. What it resumes after is a record's identity
+/// ([`record_cursor`]), never a line count: the window is a bounded 1 MiB tail,
+/// so once a trace outgrows it a count stops tracking the end.
 fn follow_trace(
     cmd: &str,
     id: &str,
@@ -1051,15 +1101,16 @@ fn follow_trace(
         let _ = std::io::stdout().flush();
     };
 
-    let mut seen = 0usize;
+    let mut cursor: Option<String> = None;
     let mut printed = 0usize;
+    let mut gaps = 0usize;
+    let mut ident = file_identity(path);
     if let Some(lines) = read_trace(path) {
-        let window = last_lines(&lines, tail);
-        seen = lines.len();
-        for line in window {
+        for line in last_lines(&lines, tail) {
             emit(line);
             printed += 1;
         }
+        cursor = lines.last().map(|l| record_cursor(l));
     }
     while !INTERRUPTED.load(Ordering::SeqCst) {
         std::thread::sleep(FOLLOW_POLL);
@@ -1069,16 +1120,27 @@ fn follow_trace(
         let Some(lines) = read_trace(path) else {
             continue; // the file is momentarily not there — keep waiting
         };
-        if lines.len() < seen {
-            // Rotated, truncated, or replaced: start counting from the new tail.
-            seen = lines.len();
-            continue;
+        // A new file (a new inode) starts over: its ids may repeat the ones
+        // printed, so the old cursor means nothing in it.
+        let now = file_identity(path);
+        let replaced = ident.is_some() && now.is_some() && now != ident;
+        ident = now;
+        let (fresh, gap) = if replaced {
+            (&lines[..], true)
+        } else {
+            follow_tick(&lines, cursor.as_deref())
+        };
+        if gap {
+            gaps += 1;
+            eprintln!("warning: records between the last printed one and this window were not in it");
         }
-        for line in lines.iter().skip(seen) {
+        for line in fresh {
             emit(line);
             printed += 1;
         }
-        seen = lines.len();
+        if let Some(last) = lines.last() {
+            cursor = Some(record_cursor(last));
+        }
     }
     Outcome::ok(cmd, format!("followed {printed} record(s) · {name}"))
         .with_data(json!({
@@ -1086,6 +1148,7 @@ fn follow_trace(
             "trace": strip_unsafe(&path.to_string_lossy()),
             "followed": true,
             "printed": printed,
+            "gaps": gaps,
         }))
 }
 
@@ -2068,6 +2131,200 @@ mod tests {
         assert_eq!(out.data.clone().unwrap()["records"], 6);
 
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    // ── --follow resumes after the last record it printed ──
+
+    /// Bytes per record in the follow fixtures. Every line is this long, so the
+    /// tail window's line count is the same before and after an append: a count
+    /// cannot see the append.
+    const FOLLOW_RECORD_BYTES: usize = 4096;
+
+    /// One eidolon-shaped trace line with journal id `id`, padded to `size`
+    /// bytes.
+    fn padded_record(id: usize, size: usize) -> String {
+        let line = |text: &str| {
+            format!(
+                r#"{{"id":{id},"parent":null,"ts_ms":1789603005561,"kind":{{"ExternalMessage":{{"from":"orchestrator","channel":null,"text":"{text}"}}}}}}"#
+            )
+        };
+        let pad = size.saturating_sub(line("").len());
+        line(&"x".repeat(pad))
+    }
+
+    /// `ids` written as one trace file, one padded record per line.
+    fn write_trace(path: &std::path::Path, ids: std::ops::Range<usize>) {
+        let body: String = ids
+            .map(|id| padded_record(id, FOLLOW_RECORD_BYTES) + "\n")
+            .collect();
+        std::fs::write(path, body).unwrap();
+    }
+
+    static GROW_CALLS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    static SHRINK_CALLS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+    /// The real transcript-tail reader, with a script on the follow's ticks:
+    /// the initial read is call 0, the first tick (call 1) appends one record,
+    /// and the second tick (call 2) ends the loop.
+    fn growing_trace(path: &std::path::Path) -> Option<Vec<String>> {
+        use std::io::Write;
+        let call = GROW_CALLS.fetch_add(1, Ordering::SeqCst);
+        if call == 1 {
+            let mut f = std::fs::OpenOptions::new().append(true).open(path).unwrap();
+            writeln!(f, "{}", padded_record(400, FOLLOW_RECORD_BYTES)).unwrap();
+        }
+        if call == 2 {
+            INTERRUPTED.store(true, Ordering::SeqCst);
+        }
+        aoide_protocol::agents::eidolon_trace_tail(path)
+    }
+
+    /// The trace is replaced by three shorter records on the first tick, then
+    /// the loop ends on the second.
+    fn replaced_trace(path: &std::path::Path) -> Option<Vec<String>> {
+        let call = SHRINK_CALLS.fetch_add(1, Ordering::SeqCst);
+        if call == 1 {
+            write_trace(path, 500..503);
+        }
+        if call == 2 {
+            INTERRUPTED.store(true, Ordering::SeqCst);
+        }
+        aoide_protocol::agents::eidolon_trace_tail(path)
+    }
+
+    /// A 400-record trace (1.6 MiB, so the 1 MiB window has already slid) followed
+    /// with a 5-record tail: one record appended while it runs must be printed
+    /// once. On the count rule the window keeps its length, so nothing prints.
+    #[test]
+    fn a_follow_prints_a_record_appended_once_the_trace_outgrows_its_window() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let root = unique_stage("trace-follow-grow");
+        let path = root.join("trace.jsonl");
+        write_trace(&path, 0..400);
+        GROW_CALLS.store(0, Ordering::SeqCst);
+        INTERRUPTED.store(false, Ordering::SeqCst);
+
+        let out = follow_trace("session.trace", "Aoide-grow", "grow", &path, growing_trace, 5, true, false);
+        assert_eq!(out.status, Status::Ok, "msg: {}", out.message);
+        let data = out.data.clone().unwrap();
+        assert_eq!(data["printed"], 6, "5 of the window, then the appended record: {data}");
+        assert_eq!(data["gaps"], 0, "{data}");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The trace is replaced by records the cursor never saw: the new window
+    /// prints whole, and the one skip is counted as a gap.
+    #[test]
+    fn a_follow_on_a_replaced_trace_prints_the_new_window_and_counts_a_gap() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let root = unique_stage("trace-follow-replaced");
+        let path = root.join("trace.jsonl");
+        write_trace(&path, 0..400);
+        SHRINK_CALLS.store(0, Ordering::SeqCst);
+        INTERRUPTED.store(false, Ordering::SeqCst);
+
+        let out = follow_trace("session.trace", "Aoide-replaced", "replaced", &path, replaced_trace, 5, true, false);
+        assert_eq!(out.status, Status::Ok, "msg: {}", out.message);
+        let data = out.data.clone().unwrap();
+        assert_eq!(data["printed"], 8, "5 of the window, then the 3 replacement records: {data}");
+        assert_eq!(data["gaps"], 1, "{data}");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The trace is replaced by a new file (a new inode) whose records reuse the
+    /// ids the follow printed: the new file prints whole, and its replacement is
+    /// a gap, even though the old cursor id is in the new window. Red on the base,
+    /// where the id alone resumes the follow inside the new file.
+    #[test]
+    fn a_follow_on_a_trace_replaced_by_overlapping_ids_says_so_and_prints_the_new_one() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let root = unique_stage("trace-follow-overlap");
+        let path = root.join("trace.jsonl");
+        write_trace(&path, 0..400);
+        SHRINK_CALLS.store(0, Ordering::SeqCst);
+        INTERRUPTED.store(false, Ordering::SeqCst);
+
+        let out = follow_trace("session.trace", "Aoide-overlap", "overlap", &path, replaced_by_a_new_file, 5, true, false);
+        assert_eq!(out.status, Status::Ok, "msg: {}", out.message);
+        let data = out.data.clone().unwrap();
+        assert_eq!(data["gaps"], 1, "a replacement is a gap even where its ids overlap: {data}");
+        assert_eq!(data["printed"], 10, "5 of the old window, then the 5 records of the new file: {data}");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The follow reads a `.eid` journal through the producer's export door, not
+    /// only a `trace.jsonl`: each tick the export grows and the journal changes
+    /// with it, so the follow prints the new records and counts no gap. Coverage
+    /// of the door's path, not a fix: it is green on the base.
+    #[test]
+    fn a_follow_on_an_eid_journal_prints_what_the_export_adds() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let root = unique_stage("trace-eid-follow");
+        let bin = root.join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let export = root.join("journal.export.jsonl");
+        let script = bin.join("eidolon");
+        std::fs::write(
+            &script,
+            format!("#!/bin/sh\ncase \"$*\" in *--help*) echo '--after'; exit 0;; esac\ncat '{}'\n", export.display()),
+        )
+        .unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let journal = root.join("journal.eid");
+        SHRINK_CALLS.store(0, Ordering::SeqCst);
+        INTERRUPTED.store(false, Ordering::SeqCst);
+
+        let out = with_fake_eidolon_path(&bin, || {
+            follow_trace("session.trace", "Aoide-eid", "eid", &journal, grows_an_eid_journal, 5, true, false)
+        });
+        assert_eq!(out.status, Status::Ok, "msg: {}", out.message);
+        let data = out.data.clone().unwrap();
+        assert_eq!(data["gaps"], 0, "a grown journal is no gap: {data}");
+        assert_eq!(data["printed"], 7, "5 of the first export, then the 2 it added: {data}");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// One export per tick: 400 records, then 402, then the follow is interrupted.
+    /// The journal's length grows with each, so the door's memo misses.
+    fn grows_an_eid_journal(path: &std::path::Path) -> Option<Vec<String>> {
+        let call = SHRINK_CALLS.fetch_add(1, Ordering::SeqCst);
+        let export = path.with_file_name("journal.export.jsonl");
+        match call {
+            0 => write_trace(&export, 0..400),
+            1 => write_trace(&export, 0..402),
+            _ => INTERRUPTED.store(true, Ordering::SeqCst),
+        }
+        std::fs::write(path, "x".repeat(call * 10 + 1)).unwrap();
+        aoide_protocol::agents::eidolon_trace_tail(path)
+    }
+
+    /// Runs `f` with `dir` first on PATH, restoring PATH after.
+    fn with_fake_eidolon_path<T>(dir: &std::path::Path, f: impl FnOnce() -> T) -> T {
+        let old = std::env::var("PATH").unwrap_or_default();
+        std::env::set_var("PATH", format!("{}:{old}", dir.display()));
+        let out = f();
+        std::env::set_var("PATH", old);
+        out
+    }
+
+    /// Writes a fresh trace beside `path` and renames it over `path`, so the
+    /// follow sees a new inode with ids 397..402 (397 to 399 are already printed).
+    fn replaced_by_a_new_file(path: &std::path::Path) -> Option<Vec<String>> {
+        let call = SHRINK_CALLS.fetch_add(1, Ordering::SeqCst);
+        if call == 1 {
+            let fresh = path.with_extension("new");
+            write_trace(&fresh, 397..402);
+            std::fs::rename(&fresh, path).unwrap();
+        }
+        if call == 2 {
+            INTERRUPTED.store(true, Ordering::SeqCst);
+        }
+        aoide_protocol::agents::eidolon_trace_tail(path)
     }
 
     #[test]

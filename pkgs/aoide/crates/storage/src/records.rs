@@ -606,6 +606,11 @@ pub struct SessionRecord {
         skip_serializing_if = "Option::is_none"
     )]
     pub harness_session_id: Option<String>,
+    /// The transcript path a hook named for this session, kept only when the
+    /// profile's admission check passed (`CONTRACTS.md` "The session record" ·
+    /// `transcriptPath`). Absent on a record no admitted hook has named one for.
+    #[serde(rename = "transcriptPath", default, skip_serializing_if = "Option::is_none")]
+    pub transcript_path: Option<String>,
     /// WHEN the harness's own `SessionStart` hook was recorded for this
     /// session (ISO-8601 UTC). One fact, one writer: the hook door's
     /// `SessionStart` arm stamps it as it registers the harness's session,
@@ -1478,6 +1483,22 @@ mod tests {
         assert_eq!(parent.extra.len(), 1, "the known fields stay named fields, never extra entries");
         let json = serde_json::to_string(&parent).unwrap();
         assert!(json.contains(r#""futureField":[1,2]"#), "serialised: {json}");
+    }
+
+    #[test]
+    fn session_record_transcript_path_round_trips_and_stays_absent_when_unset() {
+        let mut rec = SessionRecord {
+            session_id: "s".into(),
+            ..Default::default()
+        };
+        rec.transcript_path = Some("/home/u/.claude/projects/-x/s.jsonl".into());
+        let json = serde_json::to_string(&rec).unwrap();
+        assert!(json.contains("\"transcriptPath\":\"/home/u/.claude/projects/-x/s.jsonl\""), "{json}");
+        let back: SessionRecord = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.transcript_path, rec.transcript_path);
+
+        let legacy: SessionRecord = serde_json::from_str(r#"{ "sessionId": "s", "agent": "claude" }"#).unwrap();
+        assert_eq!(legacy.transcript_path, None);
     }
 
     #[test]

@@ -713,12 +713,17 @@ pub fn pending_approve(inv: &Invocation) -> Outcome {
     // `permit.rs::type_verdict`. `args: vec![text]` (a single element) round
     // -trips the exact original text through `session_send`'s own
     // `inv.args.join(" ")`, whitespace and all.
-    let inner = super::send::session_send(&Invocation {
-        path: vec!["send".to_string()],
-        args: vec![text.clone()],
-        flags,
-        door: inv.door,
-    });
+    let operator = o.get("operator").and_then(Value::as_bool).unwrap_or(false);
+    let inner = super::send::session_send_held(
+        &Invocation {
+            path: vec!["send".to_string()],
+            args: vec![text.clone()],
+            flags,
+            door: inv.door,
+        },
+        &session_id,
+        operator,
+    );
 
     let audit_status = if inner.status == Status::Ok { "delivered" } else { "error" };
     audit_pending(
@@ -1057,6 +1062,68 @@ mod tests {
             out.message
         );
 
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A held eidolon send, approved by the person, goes as the sender it was
+    /// held as: the recorded operator fact, never the approver's own process.
+    /// Red on the base: approve re-drives through `session_send`, which read
+    /// `AOIDE_SESSION_ID` from this process and so marked every approve operator.
+    #[test]
+    fn an_agent_send_held_then_approved_by_the_person_goes_as_a_peer() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&[
+            "AOIDE_STAGE_DIR",
+            "XDG_RUNTIME_DIR",
+            "AOIDE_AUDIT_LOG",
+            "AOIDE_CONDUCT_AUTOGATE",
+            "AOIDE_SESSION_ID",
+            "PATH",
+        ]);
+        let root = setup("pnd-native-peer");
+        let id = "apn1";
+        let socket = conduct_socket_path(id);
+        std::fs::create_dir_all(socket.parent().unwrap()).unwrap();
+        let _listener = UnixListener::bind(&socket).unwrap();
+        do_session_start(
+            id,
+            Some("eidolon"),
+            Some("/w"),
+            None,
+            None,
+            Some(true),
+            Some(socket.to_str().unwrap()),
+            None,
+            None,
+        );
+        let bin = root.join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let script = bin.join("eidolon");
+        std::fs::write(
+            &script,
+            format!(
+                "#!/bin/sh\nprintf '%s\\n' \"$@\" > '{0}/record.argv'\ncat > '{0}/record.stdin'\necho 'delivered to x'\n",
+                root.display()
+            ),
+        )
+        .unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::env::set_var("PATH", format!("{}:{}", bin.display(), std::env::var("PATH").unwrap_or_default()));
+
+        let queued = stamp_ago(3_600);
+        std::fs::write(
+            pending_path(),
+            format!(
+                r#"{{"schemaVersion":"0","pending":[{{"sessionId":"{id}","text":"from an agent","submit":false,"queuedAt":"{queued}","from":"agent-7","operator":false}}]}}"#
+            ),
+        )
+        .unwrap();
+
+        let out = pending_approve(&named_invocation("approve", "0"));
+        assert_eq!(out.status, Status::Ok, "msg: {}", out.message);
+        let argv = std::fs::read_to_string(root.join("record.argv")).unwrap();
+        assert!(!argv.contains("--operator"), "a held agent send goes as a peer when approved: {argv}");
         let _ = std::fs::remove_dir_all(&root);
     }
 

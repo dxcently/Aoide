@@ -5689,6 +5689,7 @@ mod tests {
     /// helper of the same name.
     fn session(id: &str, cwd: &str, state: &str, parent: Option<&str>) -> SessionRecord {
         SessionRecord {
+            transcript_path: None,
             session_id: id.into(),
             enduring_agent_id: None,
             project: None,
