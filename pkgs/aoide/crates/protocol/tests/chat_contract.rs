@@ -48,10 +48,8 @@ fn each_line_is_the_fixture_byte_for_byte() {
 #[test]
 fn the_contract_block_is_the_fixture() {
     let doc_path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../../../CONTRACTS.md");
-    let Ok(doc) = std::fs::read_to_string(doc_path) else {
-        eprintln!("CONTRACTS.md is not in this source tree; the block compare runs in a checkout");
-        return;
-    };
+    let doc = std::fs::read_to_string(doc_path)
+        .expect("CONTRACTS.md is in this source tree: the block compare has nothing to compare without it");
     let section = doc
         .split("### The chat line — **v1**")
         .nth(1)
