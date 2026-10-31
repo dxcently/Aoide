@@ -225,8 +225,9 @@ blank one is refused too.
   `SessionRecord.transcript_path` only through `send.rs`'s
   `admit_transcript_path`, which asks the profile's `TranscriptSpec.admit`
   (`protocol/src/agents.rs`). A refusal is audited and nothing is stamped.
-  The raw hook path still feeds `refresh_transcript_fields` unchanged, so the
-  say/tool/title read is not yet gated by this admission.
+  A profile with an admission (claude) reads only the admitted path. A profile
+  with none (pi) still reads the raw hook path, so its say/tool/title read is
+  not gated by any admission. That is an open item for Rook.
 - **The hook door's two self-reported facts, and the ONE rule that resolves
   them.** A hook process is the only process that can read what a harness
   reports about itself, so it reads its parent claim once
@@ -317,7 +318,9 @@ blank one is refused too.
   never lands one: its send parks in `pending.json`, and a held send is filed
   when a local approver releases it. `aoide-server`'s A2A spawn holds its
   opening turn the same way, so it files nothing either.
-- **`send --harness <name>`** — `send.rs::deliver_local_with`
+- **`send --harness <name>`** (opt-in: a plain send into a shell is normal use,
+  and the guard is the caller's; every chat-originated send passes it) —
+  `send.rs::deliver_local_with`
   refuses a target that is a shell wrap (`shell: true`) or a wrap of another
   agent, as `not-that-harness`, audited, nothing typed. The check runs before the
   gate, so `--yes` does not pass it. A harness's own wrap is unchanged.
@@ -1077,8 +1080,12 @@ blank one is refused too.
   `trace.rs::resolve_local`, the one resolver `session trace` now shares. A
   harness with `ChatSupport::Unsupported` is refused with its reason. Each
   tick re-reads the session's record, so a transcript that `/clear` or
-  `/resume` moved is followed from its first line. The wrap-to-live-child
-  relation is not resolved separately. State lines: `awaiting` is `waiting`,
+  `/resume` moved is followed from its first line only when the record names
+  the new transcript. The wrap's live child is not re-resolved, so `/clear` or
+  `/resume` may start a new record this follow does not switch to; open for a
+  later lane. A harness with a transcript and `Unsupported` (kimi, pi) is refused
+  with its reason: a transcript-only harness may be unsupported with a reason,
+  and the trace tests stay on the trace readers. State lines: `awaiting` is `waiting`,
   `idle`/`stopped`/`done` are `settled`. A Claude permission prompt is an ask
   line while the session is `awaiting` and its `permit-<id>` card stands; the
   fingerprint is the card's `received_at`. Doors: the default (Cli and the
