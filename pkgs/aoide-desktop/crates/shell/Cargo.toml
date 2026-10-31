@@ -11,7 +11,7 @@ doctest = false
 [features]
 # The fake `aoide` and fake `eidolon` (src/bin), for this crate's tests only,
 # and the fakes of the door and exec crates they run on.
-fakes = ["aoide-desktop-door/fake", "aoide-desktop-exec/fakes"]
+fakes = ["aoide-door/fake", "aoide-desktop-exec/fakes"]
 
 [[bin]]
 name = "fake-aoide"
@@ -24,7 +24,7 @@ path = "src/bin/fake-eidolon.rs"
 required-features = ["fakes"]
 
 [dependencies]
-aoide-desktop-door = { path = "../door" }
+aoide-door = { path = "../../../aoide/crates/door" }
 aoide-desktop-exec = { path = "../exec" }
 libc.workspace = true
 serde.workspace = true

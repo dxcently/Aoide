@@ -3,7 +3,7 @@
 # lives at `crates/cli`, single-charter crates under `crates/*`.
 [workspace]
 resolver = "2"
-members = ["crates/protocol", "crates/storage", "crates/conduct", "crates/client", "crates/server", "crates/strillix-rice", "crates/conductor", "crates/test-support", "crates/cli", "crates/upkeep", "crates/screen", "crates/strillix", "crates/secrets"]
+members = ["crates/protocol", "crates/storage", "crates/conduct", "crates/client", "crates/server", "crates/strillix-rice", "crates/conductor", "crates/test-support", "crates/cli", "crates/upkeep", "crates/screen", "crates/strillix", "crates/secrets", "crates/door"]
 
 # The one release-version source for the whole workspace (User-directed:
 # prebeta is 0.0.X, the patch bumps by one at the end of each completed

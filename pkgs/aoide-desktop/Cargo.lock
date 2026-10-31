@@ -3,15 +3,6 @@
 version = 4
 
 [[package]]
-name = "aoide-desktop-door"
-version = "0.1.0"
-dependencies = [
- "libc",
- "serde",
- "serde_json",
-]
-
-[[package]]
 name = "aoide-desktop-exec"
 version = "0.1.0"
 dependencies = [
@@ -25,12 +16,21 @@ dependencies = [
 name = "aoide-desktop-shell"
 version = "0.1.0"
 dependencies = [
- "aoide-desktop-door",
  "aoide-desktop-exec",
+ "aoide-door",
  "libc",
  "serde",
  "serde_json",
  "sha2",
+]
+
+[[package]]
+name = "aoide-door"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

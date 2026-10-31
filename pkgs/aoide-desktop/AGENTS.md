@@ -1,8 +1,9 @@
 # AGENTS.md: aoide-desktop
 
 The invariants that span this directory's crates. The layout is in README.md,
-and each crate's own invariants are in its AGENTS.md (`crates/door/AGENTS.md`,
-`crates/exec/AGENTS.md`, `crates/shell/AGENTS.md`).
+and each crate's own invariants are in its AGENTS.md (`crates/exec/AGENTS.md`,
+`crates/shell/AGENTS.md`). The door client is a core crate, `pkgs/aoide/crates/door`,
+and its invariants are in that crate's AGENTS.md.
 
 ## The workspace
 
@@ -11,13 +12,15 @@ and each crate's own invariants are in its AGENTS.md (`crates/door/AGENTS.md`,
   lock, and nothing here moves it.
 - The shared requirements (serde, serde_json, libc, sha2) live in
   `[workspace.dependencies]`, with the requirements `pkgs/aoide` uses, except
-  sha2: this workspace pins 0.10, where `pkgs/aoide` pins 0.11.
+  sha2: this workspace pins 0.10, where `pkgs/aoide` pins 0.11. The door is
+  not a member: it is `pkgs/aoide`'s `aoide-door`, a path dependency of shell,
+  as aoide-protocol is of exec.
 - Every cargo command runs with `--offline`.
 
 ## Tests
 
-- Use the fakes only: the door's `fake` feature, and the shell's `fakes`
-  feature for its fake aoide and fake eidolon. Never the installed `eidolon` or
+- Use the fakes only: the door's `fake` feature (`aoide-door`, core), and the
+  shell's `fakes` feature for its fake aoide and fake eidolon. Never the installed `eidolon` or
   `aoide`, and never a GUI.
 - The fake aoide and the fake eidolon are the shell's bins, with
   `required-features = ["fakes"]`. The door's client tests need the door's
@@ -53,10 +56,13 @@ and each crate's own invariants are in its AGENTS.md (`crates/door/AGENTS.md`,
   because the sandbox refuses its setuid chmod (EPERM at exec lib.rs:1053)
   before any pin check.
 - The lints are the guard. The root manifest's `[workspace.lints]` forbids
-  `unsafe_code`, `disallowed_methods` and `disallowed_types`. Door and shell
-  take that table with `[lints] workspace = true`, so no attribute in either
-  can lift the three, however it is spelled: rustc refuses the lift with
-  E0453. The `unsafe_code` forbid also refuses `#[no_mangle]`, `#[export_name]`,
+  `unsafe_code`, `disallowed_methods` and `disallowed_types`. Shell takes that
+  table with `[lints] workspace = true`, and the door, which is core's
+  `aoide-door`, carries its own `[lints.rust] unsafe_code = "forbid"`, so no
+  attribute in either can lift the forbid, however it is spelled: rustc
+  refuses the lift with E0453. The door is outside this workspace's clippy
+  run, so the process-start list below does not lint it; the door starts no
+  process and has no `Command` in its source. The `unsafe_code` forbid also refuses `#[no_mangle]`, `#[export_name]`,
   `#[link_section]` and `global_asm!`, so no door or shell code defines a symbol
   that a libc call in exec could reach. Exec's own table allows the three, so
   exec is the one crate of this workspace where `unsafe`, a process start or a
@@ -64,10 +70,11 @@ and each crate's own invariants are in its AGENTS.md (`crates/door/AGENTS.md`,
   outside it.
 - `clippy.toml` lists the std paths that start a process or send a signal:
   `Command` (the type), `Command::new`, `CommandExt::pre_exec`,
-  `CommandExt::exec` and `Child::kill`, which sends SIGKILL. In door and shell,
-  a call through an alias of any of them fails the clippy run. It lists no libc
+  `CommandExt::exec` and `Child::kill`, which sends SIGKILL. In shell, a call
+  through an alias of any of them fails the clippy run; the door is not in
+  this run, and it has no such call. It lists no libc
   path, because every libc function is `unsafe` to call, so the `unsafe` forbid
-  already stops a libc call in door and shell. The gate compares `clippy.toml`
+  already stops a libc call in shell. The gate compares `clippy.toml`
   with its golden text in `gates.rs`, so a path dropped from it, or a missing
   file, fails (`the_manifests_are_the_golden_ones`).
 - The forbids are errors on their own, and `-D warnings` makes every other
@@ -76,8 +83,9 @@ and each crate's own invariants are in its AGENTS.md (`crates/door/AGENTS.md`,
   by the sandbox. The pre-check form of that run is `cargo clippy --offline
   --workspace --all-targets --all-features -- -D warnings`.
 - The text scan is a tripwire, not the guard. `crates/shell/tests/gates.rs`
-  reads every `.rs` file under this directory, and every file under `ui/` once
-  that exists, skipping the root's `target`. It bars six words in each one:
+  reads every `.rs` file under this directory and under the door
+  (`../aoide/crates/door`), and every file under `ui/` once that exists,
+  skipping the root's `target`. It bars six words in each one:
   `aoided.sock`, `"dispatch"`, `"subscribe"`, `/api/launch`, `sh -c` and
   `SIGKILL`. A second scan bars `extern` and `#[link` in every file under door's
   and shell's `src`, whatever its extension, so an `include!` of a `.inc` file
@@ -90,7 +98,7 @@ and each crate's own invariants are in its AGENTS.md (`crates/door/AGENTS.md`,
   only from a new member or a changed manifest, which moves a golden manifest,
   or from a dependency, which is not linted.
 - The config and member checks, in the same file:
-  - no `build.rs` lies under this directory (`no_member_has_a_build_script`);
+  - no `build.rs` lies under this directory or the door (`no_member_has_a_build_script`);
   - no symbolic link lies under this directory, since a walk through one
     could read outside it (every test that walks the tree);
   - the root's `clippy.toml` is the only clippy config: a `clippy.toml` below
@@ -122,10 +130,10 @@ and each crate's own invariants are in its AGENTS.md (`crates/door/AGENTS.md`,
     and shell, such a file compiles under the forbid. The read misses a build
     script or a proc macro of a dependency, a linked library, and code that
     only a build the gate does not make compiles, such as one without `fakes`;
-  - exactly four `Cargo.toml` files lie under this directory, and each equals
-    its golden text in the same file, less blank lines and comment lines
-    (`the_manifests_are_the_golden_ones`). A new member brings its golden in
-    the same commit.
+  - exactly three `Cargo.toml` files lie under this directory, and each equals
+    its golden text in the same file, less blank lines and comment lines, and
+    the door's manifest equals its golden too (`the_manifests_are_the_golden_ones`).
+    A new member brings its golden in the same commit.
 - The scan reads nothing outside this directory but those dep-info files and
   the nix build's cargo config, which it reads only to compare with the golden
   template. A target whose path lies outside it would change a golden manifest.

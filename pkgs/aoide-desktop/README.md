@@ -7,19 +7,21 @@ GUI-free libraries; the window is a later crate.
 
 ## Crates
 
-- `crates/door` (`aoide-desktop-door`): the loopback door client. See
-  `crates/door/README.md`.
+- The loopback door client is core's `aoide-door` (`pkgs/aoide/crates/door`),
+  not a crate here. See its README.md. The shell depends on it by path.
 - `crates/exec` (`aoide-desktop-exec`): starts a process or sends a signal, and
   so does its path dependency aoide-protocol. It is the one member that depends
   on aoide-protocol, and it
   re-exports that crate's `untrusted` module, the app's only way to it. See
   `crates/exec/README.md`.
 - `crates/shell` (`aoide-desktop-shell`): the app's own doors and the asks they
-  raise, over the door and exec crates. See `crates/shell/README.md`.
+  raise, over the door and exec crates. See `crates/shell/README.md`. Its door
+  use (launch, watch, and its direct answer) stays its own; aoided's `aoide ask`
+  verbs are not yet the app's path to an Eidolon ask.
 
 The window crate will call the shell. The shell sits on the door and exec
-crates. The door depends on nothing else in this directory, and exec depends
-on nothing else in it either.
+crates. The door depends on nothing else, and exec depends on nothing else in
+this directory either.
 
 ## The gate
 

@@ -1,8 +1,11 @@
-# aoide-desktop-door
+# aoide-door
 
-The client half of `eidolon web`, the loopback door a session serves. The app
-reaches a session through this crate and no other: it sends the door's four
-routes, and it decodes what the door's events stream carries.
+The client half of `eidolon web`, the loopback door a session serves. The desktop
+shell reaches a session through this crate and no other: it sends the door's four
+routes, and it decodes what the door's events stream carries. The crate is core's
+(`pkgs/aoide/crates/door`), and the desktop shell depends on it by path.
+The tests need the `fake` feature:
+`cargo test -p aoide-door --features fake`.
 
 It is blocking HTTP/1.1 over `std::net::TcpStream`, with no async runtime, no
 HTTP library and no GUI crate. Its dependencies are serde, serde_json and libc

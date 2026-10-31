@@ -58,7 +58,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use aoide_desktop_door::fake::FakeDoor;
+use aoide_door::fake::FakeDoor;
 use aoide_desktop_exec::test_doors;
 use serde_json::{json, Value};
 

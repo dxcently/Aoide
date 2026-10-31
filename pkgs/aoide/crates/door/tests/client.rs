@@ -8,8 +8,8 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use aoide_desktop_door::fake::{FakeDoor, MAX_BODY};
-use aoide_desktop_door::{AnswerOutcome, Ask, CancelOutcome, Door, DoorError, Frame, Mode, SayOutcome};
+use aoide_door::fake::{FakeDoor, MAX_BODY};
+use aoide_door::{AnswerOutcome, Ask, CancelOutcome, Door, DoorError, Frame, Mode, SayOutcome};
 use serde_json::{json, Value};
 
 static NEXT: AtomicU64 = AtomicU64::new(0);

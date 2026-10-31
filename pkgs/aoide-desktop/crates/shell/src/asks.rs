@@ -13,7 +13,7 @@
 use std::net::SocketAddr;
 use std::path::Path;
 
-use aoide_desktop_door::Ask;
+use aoide_door::Ask;
 use crate::exec::untrusted::{visible_json, visible_json_line};
 use serde_json::json;
 use sha2::{Digest, Sha256};
@@ -292,7 +292,7 @@ mod tests {
         let question = Ask::Question {
             ask_id: 2,
             prompt: "pick".into(),
-            options: vec![aoide_desktop_door::AskOption { label: "yes".into(), description: None }],
+            options: vec![aoide_door::AskOption { label: "yes".into(), description: None }],
         };
         assert!(dialog(&question, "yes").is_none(), "a question answer skips the confirm");
     }

@@ -6,8 +6,8 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
 
-use aoide_desktop_door::fake::FakeDoor;
-use aoide_desktop_door::{Door, DoorError, Mode};
+use aoide_door::fake::FakeDoor;
+use aoide_door::{Door, DoorError, Mode};
 use aoide_desktop_shell::exec::make_fifo;
 
 #[test]

@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use aoide_desktop_door::{token_path, Ask, Door, DoorError, Frame};
+use aoide_door::{token_path, Ask, Door, DoorError, Frame};
 use aoide_desktop_shell::asks::{ask_id, Sent, Shown};
 use aoide_desktop_shell::doors::{launch_plan, Close, Doors, DoorsError, Event, LaunchPlan, TurnState, ASKS_BOUND, EVENTS_BOUND};
 use aoide_desktop_shell::exec::{check_pin, test_doors, Exec, ExecError, Pinned};

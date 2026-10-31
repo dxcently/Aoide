@@ -1,5 +1,5 @@
 [package]
-name = "aoide-desktop-door"
+name = "aoide-door"
 version = "0.1.0"
 edition = "2021"
 publish = false
@@ -17,5 +17,7 @@ libc.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 
-[lints]
-workspace = true
+[lints.rust]
+# The desktop workspace forbade this for the door; core has no workspace
+# lints table, so the door keeps its own forbid.
+unsafe_code = "forbid"

@@ -1,4 +1,4 @@
-# AGENTS.md: aoide-desktop-door
+# AGENTS.md: aoide-door
 
 The invariants to hold while editing this crate. The seams and the composition
 are in README.md.
@@ -71,11 +71,11 @@ are in README.md.
   by the deadline ends the stream as `Io`, a timeout, however it is framed. An
   unknown frame type is `Frame::Other`. An unknown field is ignored. Neither is
   an error.
-- No `unsafe` in this crate: the workspace forbids `unsafe_code` for every
+- No `unsafe` in this crate: its manifest forbids `unsafe_code` for every
   target. The effective uid comes from `/proc/self/status`. The open and the
   stat use std.
 - The crate's dependency tree names none of tauri, wry, tao, gtk, webkit2gtk,
-  glib, soup, tokio or hyper (`cargo tree -p aoide-desktop-door`).
+  glib, soup, tokio or hyper (`cargo tree -p aoide-door`).
 - A stream is closed through its `Closer`, from any thread. Dropping `Events`
   is not a close: the thread reading an idle stream stays blocked on it, and
   `Closer::close` shuts both halves down so that read returns. The client must

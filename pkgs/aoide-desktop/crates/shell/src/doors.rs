@@ -38,7 +38,7 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use aoide_desktop_door::{
+use aoide_door::{
     check_runtime, runtime_from_env, token_path, AnswerOutcome, Ask, CancelOutcome, Closer, Door, DoorError, Events,
     Frame,
 };

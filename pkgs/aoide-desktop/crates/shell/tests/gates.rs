@@ -27,7 +27,7 @@ const NO_FOREIGN: [&str; 2] = [concat!("ext", "ern"), concat!("#[", "link")];
 /// comment lines, so a change to a manifest moves its golden in the same commit.
 const ROOT_MANIFEST: &str = r##"[workspace]
 resolver = "2"
-members = ["crates/door", "crates/exec", "crates/shell"]
+members = ["crates/exec", "crates/shell"]
 [workspace.dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -40,7 +40,7 @@ disallowed_methods = "forbid"
 disallowed_types = "forbid"
 "##;
 const DOOR_MANIFEST: &str = r##"[package]
-name = "aoide-desktop-door"
+name = "aoide-door"
 version = "0.1.0"
 edition = "2021"
 publish = false
@@ -52,9 +52,12 @@ fake = []
 libc.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-[lints]
-workspace = true
+[lints.rust]
+unsafe_code = "forbid"
 "##;
+/// The door is a core crate now, beside this workspace, and is scanned here
+/// by the same tests as the members.
+const DOOR: &str = "../aoide/crates/door";
 const EXEC_MANIFEST: &str = r##"[package]
 name = "aoide-desktop-exec"
 version = "0.1.0"
@@ -83,7 +86,7 @@ publish = false
 [lib]
 doctest = false
 [features]
-fakes = ["aoide-desktop-door/fake", "aoide-desktop-exec/fakes"]
+fakes = ["aoide-door/fake", "aoide-desktop-exec/fakes"]
 [[bin]]
 name = "fake-aoide"
 path = "src/bin/fake-aoide.rs"
@@ -93,7 +96,7 @@ name = "fake-eidolon"
 path = "src/bin/fake-eidolon.rs"
 required-features = ["fakes"]
 [dependencies]
-aoide-desktop-door = { path = "../door" }
+aoide-door = { path = "../../../aoide/crates/door" }
 aoide-desktop-exec = { path = "../exec" }
 libc.workspace = true
 serde.workspace = true
@@ -141,20 +144,26 @@ fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
-/// Each `.rs` under the desktop workspace root, and each file under `ui/` once
-/// that exists, as its path relative to the root and its text.
+/// Each `.rs` under the desktop workspace root and under the door, and each
+/// file under `ui/` once that exists, as its path relative to the root (the
+/// door's as `DOOR/...`) and its text.
 fn sources() -> Vec<(String, String)> {
     let root = root();
+    let door = root.join(DOOR);
     let ui = root.join("ui");
     let mut paths = Vec::new();
     walk(&root, &mut paths);
+    walk(&door, &mut paths);
     paths.retain(|p| p.extension().is_some_and(|e| e == "rs") || p.starts_with(&ui));
     paths
         .into_iter()
         .map(|p| {
-            let rel = p.strip_prefix(&root).expect("a source is under the root");
+            let rel = match p.strip_prefix(&root) {
+                Ok(rel) => rel.to_string_lossy().into_owned(),
+                Err(_) => format!("{DOOR}/{}", p.strip_prefix(&door).expect("a source is under the root or the door").display()),
+            };
             let bytes = fs::read(&p).expect("a source is read");
-            (rel.to_string_lossy().into_owned(), String::from_utf8_lossy(&bytes).into_owned())
+            (rel, String::from_utf8_lossy(&bytes).into_owned())
         })
         .collect()
 }
@@ -259,7 +268,7 @@ fn no_source_holds_an_everywhere_word() {
 
 #[test]
 fn no_door_or_shell_source_holds_a_foreign_word() {
-    for member in ["crates/door", "crates/shell"] {
+    for member in ["crates/shell", DOOR] {
         let mut files = Vec::new();
         walk(&root().join(member).join("src"), &mut files);
         for path in files {
@@ -275,6 +284,7 @@ fn no_door_or_shell_source_holds_a_foreign_word() {
 fn no_member_has_a_build_script() {
     let mut files = Vec::new();
     walk(&root(), &mut files);
+    walk(&root().join(DOOR), &mut files);
     for path in files {
         let name = path.file_name().and_then(|name| name.to_str());
         assert!(name != Some("build.rs"), "{} is a build script", path.display());
@@ -389,6 +399,7 @@ fn only_the_roots_clippy_config_is_read() {
     let root = root();
     let mut files = Vec::new();
     walk(&root, &mut files);
+    walk(&root.join(DOOR), &mut files);
     for path in files {
         let name = path.file_name().and_then(|name| name.to_str()).unwrap_or_default();
         let hidden = name == ".clippy.toml";
@@ -461,14 +472,14 @@ fn the_manifests_are_the_golden_ones() {
     found.sort();
     assert_eq!(
         found,
-        ["Cargo.toml", "crates/door/Cargo.toml", "crates/exec/Cargo.toml", "crates/shell/Cargo.toml"],
-        "the manifests under the root are not the four golden ones; a new member brings its golden in the same commit"
+        ["Cargo.toml", "crates/exec/Cargo.toml", "crates/shell/Cargo.toml"],
+        "the manifests under the root are not the three golden ones; a new member brings its golden in the same commit"
     );
     for (path, golden) in [
         ("Cargo.toml", ROOT_MANIFEST),
-        ("crates/door/Cargo.toml", DOOR_MANIFEST),
         ("crates/exec/Cargo.toml", EXEC_MANIFEST),
         ("crates/shell/Cargo.toml", SHELL_MANIFEST),
+        ("../aoide/crates/door/Cargo.toml", DOOR_MANIFEST),
     ] {
         let text = fs::read_to_string(root.join(path)).expect("a manifest is read");
         assert_eq!(
