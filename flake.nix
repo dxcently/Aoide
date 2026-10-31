@@ -516,6 +516,14 @@
               librsvg
               openssl
             ];
+            # The headless smoke run: cage is the compositor, grim takes its
+            # screenshot. The font is the one text the smoke page draws with.
+            packages = with pkgs; [
+              cage
+              grim
+              dejavu_fonts
+            ];
+            FONTCONFIG_FILE = pkgs.makeFontsConf { fontDirectories = [ pkgs.dejavu_fonts ]; };
           };
         }
       );
