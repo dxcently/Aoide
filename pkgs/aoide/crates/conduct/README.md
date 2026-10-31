@@ -226,7 +226,7 @@ blank one is refused too.
   `admit_transcript_path`, which asks the profile's `TranscriptSpec.admit`
   (`protocol/src/agents.rs`). A refusal is audited and nothing is stamped.
   The raw hook path still feeds `refresh_transcript_fields` unchanged, so the
-  say/tool/title read is not yet gated by this admission (chat-core, commit 4).
+  say/tool/title read is not yet gated by this admission.
 - **The hook door's two self-reported facts, and the ONE rule that resolves
   them.** A hook process is the only process that can read what a harness
   reports about itself, so it reads its parent claim once
@@ -317,11 +317,11 @@ blank one is refused too.
   never lands one: its send parks in `pending.json`, and a held send is filed
   when a local approver releases it. `aoide-server`'s A2A spawn holds its
   opening turn the same way, so it files nothing either.
-- **`send --harness <name>`** (chat-core, commit 7) — `send.rs::deliver_local_with`
+- **`send --harness <name>`** — `send.rs::deliver_local_with`
   refuses a target that is a shell wrap (`shell: true`) or a wrap of another
   agent, as `not-that-harness`, audited, nothing typed. The check runs before the
   gate, so `--yes` does not pass it. A harness's own wrap is unchanged.
-- **A native send (chat-core, commit 8)** — a target whose profile names a
+- **A native send** — a target whose profile names a
   `native_send` (eidolon) is delivered through that CLI, `eidolon send --from
   aoide --wake [--operator] -- <id> -` with the text on stdin
   (`send.rs::native_deliver`), not through the control socket. The `--` ends
@@ -1069,7 +1069,7 @@ blank one is refused too.
   `session trace` joined the `session` family at P-EIDOLON slice E6, beside
   `session pending list`; the exact path set and its count live in `cli`'s
   golden snapshot, never here.
-- **`session chat <id> [--follow] [--json]`** (chat-core, commit 6) —
+- **`session chat <id> [--follow] [--json]`** —
   `graph/chat.rs::session_chat`, the conversation as chat lines
   (`CONTRACTS.md` "The chat line — v1"). It reads through the profile's chat
   adapter (`agent_profile(..).chat`, the same record `session trace` reads

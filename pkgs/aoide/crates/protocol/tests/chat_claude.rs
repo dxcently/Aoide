@@ -1,6 +1,7 @@
 //! Claude Code's transcript projected into chat lines. The fixture is written
 //! from Claude Code's public transcript docs (`docs-claude-transcript.jsonl`);
-//! real-session fixtures replace it when Rook's probe (ruling 198) runs.
+//! the real-session fixture `fixtures/claude-real-read-tool.jsonl` backs the
+//! real-prompt tests below.
 
 use aoide_protocol::agents::agent_profile;
 use aoide_protocol::chat::{ChatLine, ChatSupport};

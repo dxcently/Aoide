@@ -15,8 +15,8 @@
 //!
 //! Fixtures: `tests/fixtures/docs-claude-transcript.jsonl` is written from
 //! Claude Code's public transcript docs; `claude-real-read-tool.jsonl` is a real
-//! session (a throwaway project, one prompt, one Read), sanitised by Rook's probe
-//! (ruling 198). Unknown keys on any record are ignored.
+//! session (a throwaway project, one prompt, one Read), sanitised from that
+//! run. Unknown keys on any record are ignored.
 
 use super::{ChatLine, Role};
 use serde_json::Value;

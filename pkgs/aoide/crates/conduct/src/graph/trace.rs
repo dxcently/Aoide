@@ -2133,7 +2133,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    // ── --follow resumes after the last record it printed (chat-core 1) ──
+    // ── --follow resumes after the last record it printed ──
 
     /// Bytes per record in the follow fixtures. Every line is this long, so the
     /// tail window's line count is the same before and after an append: a count

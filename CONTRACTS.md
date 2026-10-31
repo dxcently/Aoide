@@ -3345,7 +3345,7 @@ record yet" (a legacy record, or a wrap with no hook-driven agent inside
 it); readers must tolerate both forms and round-trip fields they do not
 know.
 
-**Additive (chat-core):** a session record MAY also carry `transcriptPath`
+**Additive:** a session record MAY also carry `transcriptPath`
 (string), the transcript file a hook named for the session once the profile's
 admission passed. `aoide session hook` stamps it change-only
 (`conduct/src/graph/session_store.rs` `stamp_transcript_path`) and only through
