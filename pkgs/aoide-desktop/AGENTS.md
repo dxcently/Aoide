@@ -2,7 +2,7 @@
 
 The invariants that span this directory's crates. The layout is in README.md,
 and each crate's own invariants are in its AGENTS.md (`crates/exec/AGENTS.md`,
-`crates/shell/AGENTS.md`). The door client is a core crate, `pkgs/aoide/crates/door`,
+`crates/shell/AGENTS.md`, `crates/app/AGENTS.md`). The door client is a core crate, `pkgs/aoide/crates/door`,
 and its invariants are in that crate's AGENTS.md.
 
 ## The workspace
@@ -16,6 +16,10 @@ and its invariants are in that crate's AGENTS.md.
   not a member: it is `pkgs/aoide`'s `aoide-door`, a path dependency of shell,
   as aoide-protocol is of exec.
 - Every cargo command runs with `--offline`.
+- `vendor/wry` is the one vendored crate: wry 0.57.0 plus the sandbox block in
+  `create_context`, and nothing else. The gate pins it by digest
+  (`the_vendored_wry_is_0_57_0_plus_the_sandbox_block`). Change it only as the
+  README's re-sync says, in the same commit as the digest.
 
 ## Tests
 
@@ -85,7 +89,7 @@ and its invariants are in that crate's AGENTS.md.
 - The text scan is a tripwire, not the guard. `crates/shell/tests/gates.rs`
   reads every `.rs` file under this directory and under the door
   (`../aoide/crates/door`), and every file under `ui/` once that exists,
-  skipping the root's `target`. It bars six words in each one:
+  skipping the root's `target` and `vendor`. It bars six words in each one:
   `aoided.sock`, `"dispatch"`, `"subscribe"`, `/api/launch`, `sh -c` and
   `SIGKILL`. A second scan bars `extern` and `#[link` in every file under door's
   and shell's `src`, whatever its extension, so an `include!` of a `.inc` file
@@ -98,7 +102,9 @@ and its invariants are in that crate's AGENTS.md.
   only from a new member or a changed manifest, which moves a golden manifest,
   or from a dependency, which is not linted.
 - The config and member checks, in the same file:
-  - no `build.rs` lies under this directory or the door (`no_member_has_a_build_script`);
+  - exactly one `build.rs` lies under this directory, the app's, and its
+    tauri-build manifest equals its golden text (`the_one_build_script_is_the_apps`);
+    none lies under the door;
   - no symbolic link lies under this directory, since a walk through one
     could read outside it (every test that walks the tree);
   - the root's `clippy.toml` is the only clippy config: a `clippy.toml` below
@@ -130,10 +136,11 @@ and its invariants are in that crate's AGENTS.md.
     and shell, such a file compiles under the forbid. The read misses a build
     script or a proc macro of a dependency, a linked library, and code that
     only a build the gate does not make compiles, such as one without `fakes`;
-  - exactly three `Cargo.toml` files lie under this directory, and each equals
-    its golden text in the same file, less blank lines and comment lines, and
-    the door's manifest equals its golden too (`the_manifests_are_the_golden_ones`).
-    A new member brings its golden in the same commit.
+  - exactly four `Cargo.toml` files lie under this directory outside `vendor/`,
+    and each equals its golden text in the same file, less blank lines and
+    comment lines, and the door's manifest equals its golden too
+    (`the_manifests_are_the_golden_ones`). A new member brings its golden in
+    the same commit.
 - The scan reads nothing outside this directory but those dep-info files and
   the nix build's cargo config, which it reads only to compare with the golden
   template. A target whose path lies outside it would change a golden manifest.

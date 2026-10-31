@@ -12,6 +12,21 @@
   stdenv,
   rustPlatform,
   clippy,
+  pkg-config,
+  webkitgtk_4_1,
+  gtk3,
+  libsoup_3,
+  glib,
+  cairo,
+  pango,
+  gdk-pixbuf,
+  at-spi2-atk,
+  harfbuzz,
+  librsvg,
+  openssl,
+  # The flake's own aoide. The app pins it at compile time (AOIDE_DESKTOP_AOIDE):
+  # every build needs it, and the app starts this program only through its pin.
+  aoide,
 }:
 let
   subdir = "aoide-desktop";
@@ -37,7 +52,26 @@ rustPlatform.buildRustPackage {
   buildAndTestSubdir = subdir;
   cargoLock.lockFile = ./Cargo.lock;
 
-  nativeBuildInputs = [ clippy ];
+  nativeBuildInputs = [
+    clippy
+    pkg-config
+  ];
+
+  buildInputs = [
+    webkitgtk_4_1
+    gtk3
+    libsoup_3
+    glib
+    cairo
+    pango
+    gdk-pixbuf
+    at-spi2-atk
+    harfbuzz
+    librsvg
+    openssl
+  ];
+
+  env.AOIDE_DESKTOP_AOIDE = "${aoide}/bin/aoide";
 
   # The build phase's target, so the lints read the same artifacts the tests do.
   preCheck = ''
@@ -283,6 +317,36 @@ rustPlatform.buildRustPackage {
     "a_close_whose_store_write_fails_keeps_its_watch_and_its_record"
     "--skip"
     "a_turn_that_is_unknown_at_the_lock_is_busy_and_arms_nothing"
+    # The app's window and ACL tests, exec's start test and the chat blank-line
+    # test load or start the fake aoide, which the sandbox's pin rule refuses
+    # (`/` is not owned by root there); the workspace gate runs them in a VM.
+    "--skip"
+    "a_command_passes_as_main_and_another_label_is_refused"
+    "--skip"
+    "a_wrong_invoke_key_never_reaches_the_handler"
+    "--skip"
+    "smoke_note_passes_as_main_in_a_smoke_build"
+    "--skip"
+    "a_list_path_runs_without_a_confirm"
+    "--skip"
+    "a_floored_path_is_refused_with_no_confirm_and_no_child"
+    "--skip"
+    "a_confirm_asked_while_one_is_open_is_refused"
+    "--skip"
+    "an_act_whose_confirm_says_cancel_starts_no_child"
+    "--skip"
+    "a_second_open_of_one_id_leaves_one_child"
+    "--skip"
+    "chat_close_ends_the_child_by_interrupt_and_reaps_it"
+    "--skip"
+    "every_pushed_string_is_spelled"
+    "--skip"
+    "tests::a_started_program_gets_exactly_its_env_and_a_relative_one_is_refused"
+    "--skip"
+    "a_blank_line_on_the_stream_is_never_pushed"
+    # The sandbox has no compositor; the smoke run is the workspace gate's.
+    "--skip"
+    "the_smoke_scenarios_run_under_cage"
   ];
 
   meta.description = "The aoide desktop workspace, gated by its tests and clippy runs";

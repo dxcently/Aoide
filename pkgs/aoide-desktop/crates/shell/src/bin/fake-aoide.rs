@@ -34,6 +34,7 @@ fn main() {
     match words.as_slice() {
         ["schema", "--json"] if unset("FAKE_AOIDE_NO_SCHEMA") => print!("{SCHEMA}"),
         ["config", "--json"] if unset("FAKE_AOIDE_NO_CONFIG") => print!("{}", config_text()),
+        ["note", "add", ..] => println!("{{\"ok\":true}}"),
         ["session", "trace", ..] if words.contains(&"--follow") => follow(words[words.len() - 1], false),
         ["session", "watch", ..] => follow(words[words.len() - 1], true),
         _ => refuse(),

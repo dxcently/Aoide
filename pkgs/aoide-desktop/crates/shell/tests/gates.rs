@@ -27,7 +27,7 @@ const NO_FOREIGN: [&str; 2] = [concat!("ext", "ern"), concat!("#[", "link")];
 /// comment lines, so a change to a manifest moves its golden in the same commit.
 const ROOT_MANIFEST: &str = r##"[workspace]
 resolver = "2"
-members = ["crates/exec", "crates/shell"]
+members = ["crates/exec", "crates/shell", "crates/app"]
 [workspace.dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -38,6 +38,8 @@ unsafe_code = "forbid"
 [workspace.lints.clippy]
 disallowed_methods = "forbid"
 disallowed_types = "forbid"
+[patch.crates-io]
+wry = { path = "vendor/wry" }
 "##;
 const DOOR_MANIFEST: &str = r##"[package]
 name = "aoide-door"
@@ -77,6 +79,47 @@ unsafe_code = "allow"
 [lints.clippy]
 disallowed_methods = "allow"
 disallowed_types = "allow"
+"##;
+const APP_MANIFEST: &str = r##"[package]
+name = "aoide-desktop-app"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+# A doctest is a separate crate that no clippy run lints; no member runs them.
+doctest = false
+
+[[bin]]
+name = "aoide-desktop"
+path = "src/main.rs"
+
+[[test]]
+name = "smoke"
+path = "tests/smoke.rs"
+required-features = ["smoke"]
+
+[features]
+# The headless smoke run (B2). No default or release build turns it on.
+smoke = []
+
+[dependencies]
+aoide-desktop-shell = { path = "../shell" }
+serde.workspace = true
+serde_json.workspace = true
+tauri = { version = "=2.12.5", default-features = false, features = ["wry", "custom-protocol"] }
+gtk = "=0.18.2"
+
+[build-dependencies]
+tauri-build = { version = "=2.7.4", default-features = false }
+
+[dev-dependencies]
+# The mock runtime's `test` feature, and the shell's fake aoide and eidolon.
+tauri = { version = "=2.12.5", default-features = false, features = ["wry", "custom-protocol", "test"] }
+aoide-desktop-shell = { path = "../shell", features = ["fakes"] }
+
+[lints]
+workspace = true
 "##;
 const SHELL_MANIFEST: &str = r##"[package]
 name = "aoide-desktop-shell"
@@ -125,12 +168,14 @@ fn root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
 }
 
-/// Every file under `dir`, but not under the root's own `target` directory.
+/// Every file under `dir`, but not under the root's own `target` directory or
+/// its `vendor` directory, which holds the vendored wry the last gate pins.
 /// Each entry's own file type decides what it is, so the walk follows no
 /// symbolic link: it refuses one by name, since a walk through a link could
 /// read outside the root.
 fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
     let target = root().join("target");
+    let vendor = root().join("vendor");
     for entry in fs::read_dir(dir).expect("the directory is read") {
         let entry = entry.expect("a directory entry");
         let path = entry.path();
@@ -138,7 +183,7 @@ fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
         assert!(!kind.is_symlink(), "{} is a symbolic link, and a walk through one could read outside the root", path.display());
         if !kind.is_dir() {
             out.push(path);
-        } else if path != target {
+        } else if path != target && path != vendor {
             walk(&path, out);
         }
     }
@@ -280,15 +325,146 @@ fn no_door_or_shell_source_holds_a_foreign_word() {
     }
 }
 
+/// The one build script, the app's: tauri-build's manifest of the window's
+/// commands. Its golden text is compared without blank and comment lines.
+const BUILD_SCRIPT: &str = r##"const COMMANDS: &[&str] = &["palette", "run", "sessions", "chat_open", "chat_say", "chat_close", "smoke_note"];
+
+fn main() {
+    // A smoke build reads the smoke capability too. No other build does.
+    let capabilities = if std::env::var_os("CARGO_FEATURE_SMOKE").is_some() {
+        "./capabilities/*.json"
+    } else {
+        "./capabilities/main.json"
+    };
+    tauri_build::try_build(
+        tauri_build::Attributes::new()
+            .capabilities_path_pattern(capabilities)
+            .app_manifest(tauri_build::AppManifest::new().commands(COMMANDS)),
+    )
+    .expect("tauri-build writes the app's permissions");
+}
+"##;
+
 #[test]
-fn no_member_has_a_build_script() {
+fn the_one_build_script_is_the_apps() {
+    let root = root();
     let mut files = Vec::new();
-    walk(&root(), &mut files);
-    walk(&root().join(DOOR), &mut files);
-    for path in files {
+    walk(&root, &mut files);
+    let mut scripts: Vec<String> = files
+        .iter()
+        .filter(|path| path.file_name().is_some_and(|name| name == "build.rs"))
+        .map(|path| path.strip_prefix(&root).expect("a build script is under the root").to_string_lossy().into_owned())
+        .collect();
+    scripts.sort();
+    assert_eq!(scripts, ["crates/app/build.rs"], "the only build script is the app's");
+    let mut door_files = Vec::new();
+    walk(&root.join(DOOR), &mut door_files);
+    for path in door_files {
         let name = path.file_name().and_then(|name| name.to_str());
         assert!(name != Some("build.rs"), "{} is a build script", path.display());
     }
+    let text = fs::read_to_string(root.join("crates/app/build.rs")).expect("the app's build script is read");
+    assert_eq!(golden_lines(&text), golden_lines(BUILD_SCRIPT), "the app's build script differs from its golden text");
+}
+
+/// The lines of `text` after a `#[tauri::command]`, and the names the attribute marks.
+fn command_fns(text: &str) -> Vec<(String, Option<String>)> {
+    let lines: Vec<&str> = text.lines().collect();
+    let mut out = Vec::new();
+    for (i, line) in lines.iter().enumerate() {
+        if line.trim() != "#[tauri::command]" {
+            continue;
+        }
+        let next = lines[i + 1..]
+            .iter()
+            .map(|l| l.trim())
+            .find(|l| !l.starts_with("#[") && !l.starts_with("//") && !l.is_empty())
+            .unwrap_or("");
+        let name = next
+            .split_once("fn ")
+            .map(|(_, rest)| rest.split(['(', '<']).next().unwrap_or("").trim().to_owned());
+        out.push((next.to_owned(), name));
+    }
+    out
+}
+
+#[test]
+fn every_tauri_command_is_an_async_fn() {
+    let mut found = 0;
+    for (path, text) in sources() {
+        if !path.starts_with("crates/app/src/") {
+            continue;
+        }
+        for (next, _) in command_fns(&text) {
+            found += 1;
+            assert!(
+                next.starts_with("async fn ") || next.starts_with("pub async fn "),
+                "{path}: a #[tauri::command] is followed by `{next}`, not an `async fn` (every command runs off the main thread)"
+            );
+        }
+    }
+    assert!(found > 0, "the scan found no commands; the app's commands are under crates/app/src");
+}
+
+/// The names `generate_handler!` lists in the app's lib, the names build.rs's
+/// manifest lists, and the names the capabilities grant, each as a sorted
+/// list. The three must be the same set, so an unregistered command fails.
+#[test]
+fn every_handler_command_is_in_the_manifest_and_granted_to_main() {
+    let root = root();
+    let lib = fs::read_to_string(root.join("crates/app/src/lib.rs")).expect("the app's lib is read");
+    let start = lib.find("generate_handler![").expect("the lib names its handler");
+    let body = &lib[start + "generate_handler![".len()..];
+    let body = &body[..body.find("\n    ]").expect("the handler list closes")];
+    // An entry may carry a `#[cfg]` line before its path; the path is what counts.
+    let mut handler: Vec<String> = body
+        .split(',')
+        .map(|entry| entry.lines().map(str::trim).filter(|l| !l.starts_with("#[")).collect::<String>())
+        .filter(|e| !e.is_empty())
+        .map(|e| e.trim_start_matches("commands::").to_owned())
+        .collect();
+    handler.sort();
+
+    let build = fs::read_to_string(root.join("crates/app/build.rs")).expect("the app's build script is read");
+    let list = &build[build.find("COMMANDS: &[&str] = &[").expect("the manifest lists commands")..];
+    let list = &list["COMMANDS: &[&str] = &[".len()..];
+    let list = &list[..list.find(']').expect("the manifest list closes")];
+    let mut manifest: Vec<String> = list
+        .split(',')
+        .map(|e| e.trim().trim_matches('"').to_owned())
+        .filter(|e| !e.is_empty())
+        .collect();
+    manifest.sort();
+
+    // main.json grants the window's commands; smoke.json grants the smoke
+    // command, which only a smoke build reads. Together they are the grants.
+    let mut granted: Vec<String> = Vec::new();
+    for capability in ["crates/app/capabilities/main.json", "crates/app/capabilities/smoke.json"] {
+        let caps: serde_json::Value = serde_json::from_str(
+            &fs::read_to_string(root.join(capability)).expect("the capability is read"),
+        )
+        .expect("the capability is JSON");
+        granted.extend(
+            caps["permissions"]
+                .as_array()
+                .expect("the capability lists permissions")
+                .iter()
+                .map(|p| p.as_str().expect("a permission is a string").strip_prefix("allow-").expect("an allow permission").replace('-', "_")),
+        );
+    }
+    granted.sort();
+
+    let mut sources_defined: Vec<String> = Vec::new();
+    for (path, text) in sources() {
+        if path.starts_with("crates/app/src/") {
+            sources_defined.extend(command_fns(&text).into_iter().filter_map(|(_, name)| name));
+        }
+    }
+    sources_defined.sort();
+
+    assert_eq!(handler, manifest, "generate_handler! and build.rs's manifest name different commands");
+    assert_eq!(handler, granted, "generate_handler! and the capabilities name different commands");
+    assert_eq!(handler, sources_defined, "every #[tauri::command] must be listed in generate_handler!");
 }
 
 #[test]
@@ -472,11 +648,12 @@ fn the_manifests_are_the_golden_ones() {
     found.sort();
     assert_eq!(
         found,
-        ["Cargo.toml", "crates/exec/Cargo.toml", "crates/shell/Cargo.toml"],
-        "the manifests under the root are not the three golden ones; a new member brings its golden in the same commit"
+        ["Cargo.toml", "crates/app/Cargo.toml", "crates/exec/Cargo.toml", "crates/shell/Cargo.toml"],
+        "the manifests under the root are not the four golden ones; a new member brings its golden in the same commit"
     );
     for (path, golden) in [
         ("Cargo.toml", ROOT_MANIFEST),
+        ("crates/app/Cargo.toml", APP_MANIFEST),
         ("crates/exec/Cargo.toml", EXEC_MANIFEST),
         ("crates/shell/Cargo.toml", SHELL_MANIFEST),
         ("../aoide/crates/door/Cargo.toml", DOOR_MANIFEST),
@@ -531,4 +708,39 @@ fn the_config_normalizer_is_pinned_by_a_table_of_known_bad_paths() {
     for (line, golden) in &refused {
         assert_ne!(normalize_nix_config(line, vendor), format!("{golden}\n"), "{line} is refused");
     }
+}
+
+/// The four lines the fork adds to wry's web_context.rs, as the file holds them.
+const SANDBOX_BLOCK: &str = "    // aoide fork: WebKit's sandbox is opt-in and is set only before the first\n    // WebView exists, which this function precedes. This is the only change\n    // from wry 0.57.0; see pkgs/aoide-desktop/README.md.\n    context.set_sandbox_enabled(true);\n";
+
+/// The digest of wry 0.57.0 as the registry ships it: sha256 over `path NUL
+/// sha256(file) LF` for each file, sorted by path.
+const WRY_0_57_0_DIGEST: &str = "f0dfea1188ecc1c4d1317e70b47542ec3bee528d8554e9013bf5354c49d33936";
+
+/// The vendored wry is wry 0.57.0 less the sandbox block, file for file: the
+/// block is removed from web_context.rs before the digest is taken.
+#[test]
+fn the_vendored_wry_is_0_57_0_plus_the_sandbox_block() {
+    use sha2::{Digest, Sha256};
+    let vendor = root().join("vendor/wry");
+    let mut files = Vec::new();
+    walk(&vendor, &mut files);
+    let mut rows: Vec<(String, String)> = Vec::new();
+    for path in files {
+        let rel = path.strip_prefix(&vendor).expect("a vendored file is under vendor/wry").to_string_lossy().into_owned();
+        let mut bytes = fs::read(&path).expect("a vendored file is read");
+        if rel == "src/webkitgtk/web_context.rs" {
+            let text = String::from_utf8(bytes).expect("web_context.rs is UTF-8");
+            assert_eq!(text.matches(SANDBOX_BLOCK).count(), 1, "web_context.rs holds the sandbox block once");
+            bytes = text.replacen(SANDBOX_BLOCK, "", 1).into_bytes();
+        }
+        rows.push((rel, format!("{:x}", Sha256::digest(&bytes))));
+    }
+    rows.sort();
+    let listing: String = rows.iter().map(|(rel, hash)| format!("{rel}\0{hash}\n")).collect();
+    assert_eq!(
+        format!("{:x}", Sha256::digest(listing.as_bytes())),
+        WRY_0_57_0_DIGEST,
+        "vendor/wry is not wry 0.57.0 plus the sandbox block; re-sync it as the README says"
+    );
 }

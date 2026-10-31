@@ -12,6 +12,14 @@
       "implemented": true
     },
     {
+      "path": ["note", "add"],
+      "verb": "act",
+      "summary": "Add a note.",
+      "args": [{"name": "text", "type": "string", "required": true}],
+      "flags": [],
+      "implemented": true
+    },
+    {
       "path": ["config"],
       "verb": "show",
       "summary": "Show the effective runtime config.",

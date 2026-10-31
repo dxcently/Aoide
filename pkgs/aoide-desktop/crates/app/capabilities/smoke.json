@@ -1,0 +1,6 @@
+{
+  "identifier": "smoke",
+  "description": "The smoke run's note command, granted to main in a smoke build only.",
+  "windows": ["main"],
+  "permissions": ["allow-smoke-note"]
+}

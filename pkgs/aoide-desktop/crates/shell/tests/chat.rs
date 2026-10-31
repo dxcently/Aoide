@@ -181,6 +181,14 @@ fn the_chat_record_is_parsed_in_one_module_only() {
 }
 
 #[test]
+fn a_blank_line_on_the_stream_is_never_pushed() {
+    let (exec, _) = load("blank", &[b"{\"kind\":\"say\"}", b"", b"   ", b"not json"], &[]);
+    let mut chat = follow(&exec, "eidolon-1").expect("the trace answers");
+    assert_eq!(chat.next(WAIT), Some(Push::Record(json!({"kind": "say"}))));
+    assert_eq!(chat.next(WAIT), Some(Push::Other("not json".to_owned())), "blank lines are dropped, not pushed as Other");
+}
+
+#[test]
 fn a_line_that_is_not_utf8_arrives_as_other_and_a_line_past_the_cap_as_dropped() {
     let not_utf8: &[u8] = b"\xff\xfe{\"kind\":\"say\"}";
     let long = vec![b'a'; 1024 * 1024 + 10];

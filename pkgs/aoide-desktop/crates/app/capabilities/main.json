@@ -1,0 +1,13 @@
+{
+  "identifier": "main",
+  "description": "The main window's commands, and nothing else.",
+  "windows": ["main"],
+  "permissions": [
+    "allow-palette",
+    "allow-run",
+    "allow-sessions",
+    "allow-chat-open",
+    "allow-chat-say",
+    "allow-chat-close"
+  ]
+}

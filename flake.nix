@@ -113,6 +113,10 @@
           strillix-rices = {
             inherit (self) aoideOptions;
           };
+          # The desktop pins its own flake's aoide (default.nix), per system.
+          aoide-desktop = pkgs: {
+            aoide = inputs.aoide.packages.${pkgs.stdenv.hostPlatform.system}.default;
+          };
         };
       };
 
@@ -512,6 +516,19 @@
               librsvg
               openssl
             ];
+            # The headless smoke run: cage is the compositor, grim takes its
+            # screenshot. The font is the one text the smoke page draws with.
+            packages = with pkgs; [
+              cage
+              grim
+              dejavu_fonts
+            ];
+            FONTCONFIG_FILE = pkgs.makeFontsConf { fontDirectories = [ pkgs.dejavu_fonts ]; };
+            # The VM has no /run/opengl-driver, so libglvnd finds no EGL vendor
+            # and WebKit's eglGetDisplay fails. These point at the shell's mesa.
+            __EGL_VENDOR_LIBRARY_DIRS = "${pkgs.mesa}/share/glvnd/egl_vendor.d";
+            LIBGL_DRIVERS_PATH = "${pkgs.mesa}/lib/dri";
+            GBM_BACKENDS_PATH = "${pkgs.mesa}/lib/gbm";
           };
         }
       );
