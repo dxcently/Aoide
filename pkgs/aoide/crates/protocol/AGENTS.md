@@ -276,8 +276,9 @@
   `resume` an earlier read returned), or `resume: None` for a source with no
   byte offsets (the printer dedupes those by line id). A read never returns
   an unterminated last line. The contract test
-  (`tests/chat_contract.rs`) fails when `CONTRACTS.md` is missing: it has no
-  skip. Every transcript read opens through
+  (`tests/chat_contract.rs`) fails when `CONTRACTS.md` is missing. The nix
+  check skips it by name (`pkgs/aoide/default.nix` `checkFlags`), since the
+  nix source holds no root `CONTRACTS.md`; the checkout gate runs it. Every transcript read opens through
   `agents::open_transcript`: no-follow, and the owner checked on the open
   descriptor, so a link swapped in after admission is refused. Its profile names it once in the `chat` field
   (`ChatSupport::Adapter`), or names the reason it has none

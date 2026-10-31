@@ -102,6 +102,11 @@ rustPlatform.buildRustPackage {
     "commands::preview_tools::tests::file_matched_inline_component_children_resolve_positionally_against_conductors_real_session_card"
     "--skip"
     "commands::preview_tools::tests::conductor_qmls_repeater_delegate_is_a_real_child_never_the_repeaters_own_id"
+    # The nix source is pkgs/aoide alone and holds no CONTRACTS.md, so this
+    # test has nothing to compare here. The workspace gate, run from a
+    # checkout, runs it; it stays a hard failure wherever the file is absent.
+    "--skip"
+    "the_contract_block_is_the_fixture"
   ];
 
   # task #117 (resolved): the sandbox check runs parallel again. The
