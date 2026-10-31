@@ -26,6 +26,13 @@ pub fn handler<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + 
     ]
 }
 
+/// Whether the window may navigate to `url`: the app's own origin and no other.
+/// Linux's app URL is `tauri://localhost` with no slash, and a non-special
+/// scheme's origin is opaque, so the scheme and the host are what is compared.
+pub fn navigation_allowed(url: &tauri::Url) -> bool {
+    url.scheme() == "tauri" && url.host_str() == Some("localhost")
+}
+
 /// Starts the app: refuses any argument, pins the program before GTK starts,
 /// then opens the one window.
 pub fn run() {
@@ -56,7 +63,7 @@ pub fn run() {
             tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::App("index.html".into()))
                 .incognito(true)
                 .devtools(false)
-                .on_navigation(|url| url.as_str().starts_with("tauri://localhost/"))
+                .on_navigation(navigation_allowed)
                 .build()?;
             Ok(())
         })
