@@ -1679,6 +1679,7 @@ pub(in crate::graph) fn deliver_local_as(
     // line: the native call names the sender `aoide`, and `--operator` marks a
     // send by the person, judged over the calling process ([`production_person`]),
     // never over `AOIDE_SESSION_ID`.
+    let native_landing = agent_profile(&rec.agent).and_then(|p| p.native_send).is_some();
     if let Some(native) = agent_profile(&rec.agent).and_then(|p| p.native_send) {
         if let Err(e) = native_deliver(&native(&id, person(&file.sessions)), &text) {
             let out = Outcome::error(cmd, format!("native send to `{id}` failed: {e}"))
@@ -1762,11 +1763,14 @@ pub(in crate::graph) fn deliver_local_as(
         }
     }
 
-    let out = Outcome::ok(cmd, format!("delivered to `{id}` ({})", gate.label()))
+    // A native send lands in the harness's own CLI, which reports nothing back:
+    // it is `delivered-unverified` here, the word the spawn path uses too.
+    let word = if native_landing { "delivered-unverified" } else { "delivered" };
+    let out = Outcome::ok(cmd, format!("{word} to `{id}` ({})", gate.label()))
         .changed(changed)
         .with_data(json!({
             "id": id,
-            "state": "delivered",
+            "state": word,
             "delivered": true,
             "submit": submit,
             "title": title,
@@ -1777,9 +1781,9 @@ pub(in crate::graph) fn deliver_local_as(
     match inv.door {
         Door::Mcp => {
             let note = pending_origin(inv, || attested.clone()).ok().and_then(|origin| origin.note());
-            audit_send_noted(inv, "delivered", &out.message, &text, note);
+            audit_send_noted(inv, word, &out.message, &text, note);
         }
-        _ => audit_send(inv, "delivered", &out.message, &text),
+        _ => audit_send(inv, word, &out.message, &text),
     }
     out
 }
@@ -4816,6 +4820,25 @@ mod tests {
         );
         assert_eq!(std::fs::read_to_string(bin.join("record.stdin")).unwrap(), "hello there");
         assert!(nothing_connected(&listener), "an eidolon send takes the native path, not the socket");
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&bin);
+    }
+
+    /// A native send hands the text to the harness's CLI and verifies nothing
+    /// about its landing, so the outcome and the audit say `delivered-unverified`,
+    /// never `delivered`. Red on the base, which says `delivered`.
+    #[test]
+    fn a_native_send_reports_delivered_unverified_never_delivered() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (root, id, _listener) = door_fixture("eidolon-unverified", None);
+        set_wrap(&id, |r| r.agent = "eidolon".into());
+        let bin = fake_eidolon("unverified");
+        with_fake_eidolon(&bin, || {
+            let inv = send_on(Door::Cli, &["hello"], &[("id", &id), ("yes", "true")]);
+            let out = deliver_local_as(&inv, &id, |_| None, |_| true);
+            assert_eq!(out.status, aoide_protocol::output::Status::Ok, "{}", out.message);
+            assert_eq!(out.data.as_ref().unwrap()["state"], "delivered-unverified", "{:?}", out.data);
+        });
         let _ = std::fs::remove_dir_all(&root);
         let _ = std::fs::remove_dir_all(&bin);
     }

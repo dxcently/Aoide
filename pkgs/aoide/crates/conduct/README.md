@@ -211,7 +211,9 @@ blank one is refused too.
   `resurrect`'s restore delivery passes). The result says which it was:
   `delivered`, `delivered-unverified` (no declared fact for that name — the
   text went out once output settled and whether it submitted is unknown), or
-  `not-ready` (nothing typed). `--undying` (P-C3, durable-sessions
+  `not-ready` (nothing typed). A native send never reports `delivered`: the CLI
+  says nothing about the landing, so its outcome and its audit line are
+  `delivered-unverified`, and the spawn path says the same. `--undying` (P-C3, durable-sessions
   plan) marks the spawned id in `state/undying.json` once — and only once —
   the registration wait actually succeeds; an id that never registers has no
   live session behind it, so nothing is marked.

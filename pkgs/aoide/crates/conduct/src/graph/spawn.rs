@@ -1294,6 +1294,10 @@ pub(in crate::graph) fn launch_session(inv: &Invocation, spawner: Option<&str>) 
                         // This door could not approve the opening turn: it is
                         // queued for a human, not typed.
                         "held-pending".to_string()
+                    } else if inner.data.as_ref().and_then(|d| d.get("state")).and_then(serde_json::Value::as_str)
+                        == Some("delivered-unverified")
+                    {
+                        "delivered-unverified".to_string()
                     } else if ready == Ready::Verified {
                         "delivered".to_string()
                     } else {
