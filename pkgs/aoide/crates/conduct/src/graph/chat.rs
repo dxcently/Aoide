@@ -215,18 +215,21 @@ fn read_tick(
         .map(|r| r.agent.clone())
         .or_else(|| ended.map(|e| e.agent.clone()))
         .unwrap_or_default();
+    // The record's name is the file's own text: lookups use it, and anything a
+    // terminal shows gets its unsafe characters stripped.
+    let shown = aoide_protocol::untrusted::strip_unsafe(&agent);
     let Some(profile) = agent_profile(&agent) else {
         return Err(Outcome::error(
             cmd,
-            format!("`{id}` runs `{agent}`, which has no registered agent profile here"),
+            format!("`{id}` runs `{shown}`, which has no registered agent profile here"),
         )
-        .with_data(json!({ "reason": "unknown-agent", "sessionId": id, "agent": agent })));
+        .with_data(json!({ "reason": "unknown-agent", "sessionId": id, "agent": shown })));
     };
     let adapter = match chat_adapter(profile) {
         Ok(a) => a,
         Err(reason) => {
             return Err(Outcome::error(cmd, format!("`{id}` has no chat: {reason}"))
-                .with_data(json!({ "reason": "no-chat-adapter", "sessionId": id, "agent": agent })))
+                .with_data(json!({ "reason": "no-chat-adapter", "sessionId": id, "agent": shown })))
         }
     };
     let (state, cwd, hint) = match (row, ended) {
@@ -397,6 +400,34 @@ mod tests {
     fn a_state_outside_the_table_builds_no_line() {
         let mut printed = Printed::default();
         assert!(state_line("s-1", "working", printed.next_transition()).is_none());
+    }
+
+    /// A session record's agent is the file's own text: an escape in it reaches
+    /// no error message or JSON datum a terminal would print. Red on the base,
+    /// where the raw name was echoed into the refusal.
+    #[test]
+    fn a_hostile_agent_name_reaches_no_error_text() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let root = crate::graph::testutil::unique_stage("chat-agent-strip");
+        let stage = root.join("stage");
+        std::fs::create_dir_all(&stage).unwrap();
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        std::fs::write(
+            sessions_path(),
+            r#"{"sessions":[{"sessionId":"s-1","agent":"claude\u001b[31mX","state":"awaiting"}]}"#,
+        )
+        .unwrap();
+        let inv = Invocation {
+            path: vec!["session".into(), "chat".into()],
+            args: vec!["s-1".into()],
+            flags: Default::default(),
+            door: aoide_protocol::Door::Cli,
+        };
+        let out = session_chat(&inv);
+        assert!(!out.message.contains('\u{1b}'), "{:?}", out.message);
+        let data = out.data.as_ref().map(|d| d.to_string()).unwrap_or_default();
+        assert!(!data.contains('\u{1b}'), "{data}");
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
