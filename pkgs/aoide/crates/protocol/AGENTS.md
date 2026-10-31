@@ -275,7 +275,9 @@
   Option<Chunk>`: the complete lines after the byte offset `from` (the
   `resume` an earlier read returned), or `resume: None` for a source with no
   byte offsets (the printer dedupes those by line id). A read never returns
-  an unterminated last line. Its profile names it once in the `chat` field
+  an unterminated last line. Every transcript read opens through
+  `agents::open_transcript`: no-follow, and the owner checked on the open
+  descriptor, so a link swapped in after admission is refused. Its profile names it once in the `chat` field
   (`ChatSupport::Adapter`), or names the reason it has none
   (`ChatSupport::Unsupported`). A profile with a trace reader must have an
   adapter (`tests/chat_profiles.rs`).

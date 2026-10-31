@@ -125,11 +125,15 @@ fn transcript_decision(profile: &AgentProfile, sid: &str, path: &str) -> (Option
     }
 }
 
-/// Records an admitted hook transcript on the session, or audits the refusal
-/// and records nothing.
-fn admit_transcript_path(profile: &AgentProfile, sid: &str, hint: &str) {
+/// Records an admitted hook transcript on the session and returns it, or audits
+/// the refusal, records nothing, and returns none. Every later read of the
+/// transcript starts from this admitted path, never from the hook's raw one.
+fn admit_transcript_path(profile: &AgentProfile, sid: &str, hint: &str) -> Option<String> {
     match transcript_decision(profile, sid, hint) {
-        (Some(admitted), _) => stamp_transcript_path(sid, &admitted),
+        (Some(admitted), _) => {
+            stamp_transcript_path(sid, &admitted);
+            Some(admitted)
+        }
         (None, refusal) => {
             let _ = aoide_protocol::append_audit(
                 &aoide_protocol::default_audit_log(),
@@ -143,6 +147,7 @@ fn admit_transcript_path(profile: &AgentProfile, sid: &str, hint: &str) {
                     untrusted_data: Some(hint.chars().take(AUDIT_REFUSED_TEXT_MAX).collect()),
                 },
             );
+            None
         }
     }
 }
@@ -3103,19 +3108,18 @@ fn hook_for_profile_gated(
             (profile.hook_event_map)(evt),
             HookClass::Stop | HookClass::PostToolUse | HookClass::PromptSubmit | HookClass::Notification
         );
+        let raw = payload.get("transcript_path").and_then(Value::as_str);
+        let mut admitted = None;
         if !is_sub {
-            if let Some(hint) = payload.get("transcript_path").and_then(Value::as_str) {
-                admit_transcript_path(profile, sid, hint);
+            if let Some(hint) = raw {
+                admitted = admit_transcript_path(profile, sid, hint);
             }
         }
         if !is_sub && say_boundary {
-            refresh_transcript_fields(
-                profile,
-                sid,
-                cwd,
-                payload.get("transcript_path").and_then(Value::as_str),
-                payload_ceiling(&payload),
-            );
+            // A profile with an admission reads only the path it admitted. One
+            // without keeps the hook's own path: an open item, see the lane log.
+            let hint = if profile.transcript.admit.is_some() { admitted.as_deref() } else { raw };
+            refresh_transcript_fields(profile, sid, cwd, hint, payload_ceiling(&payload));
         }
         // A background Task keeps running after the parent's turn settles, so
         // catch its words on every one of the parent's own hooks (not just the

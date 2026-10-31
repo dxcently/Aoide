@@ -403,7 +403,7 @@ fn transcript_path_for(
 ) -> Option<PathBuf> {
     if let Some(h) = hinted.filter(|s| !s.is_empty()) {
         let p = PathBuf::from(h);
-        if p.is_file() {
+        if open_transcript(&p).is_some() {
             return Some(p);
         }
     }
@@ -412,7 +412,7 @@ fn transcript_path_for(
     let file = format!("{session_id}.jsonl");
     if let Some(cwd) = cwd.filter(|s| !s.is_empty()) {
         let p = projects.join(munge_project_dir(cwd)).join(&file);
-        if p.is_file() {
+        if open_transcript(&p).is_some() {
             return Some(p);
         }
     }
@@ -427,11 +427,25 @@ fn transcript_path_for(
     // `projects/` and a handful of stats, no directory contents walked.
     for e in std::fs::read_dir(&projects).ok()?.flatten() {
         let p = e.path().join(&file);
-        if p.is_file() {
+        if open_transcript(&p).is_some() {
             return Some(p);
         }
     }
     None
+}
+
+/// Open a transcript for reading. The open does not follow a symlink, and the
+/// owner is checked on the open descriptor (`fstat`), not on the path, so a link
+/// swapped in after the hook was admitted fails the open and is never read.
+fn open_transcript(path: &Path) -> Option<std::fs::File> {
+    use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+    let f = std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(path)
+        .ok()?;
+    let m = f.metadata().ok()?;
+    (m.file_type().is_file() && m.uid() == unsafe { libc::geteuid() } as u32).then_some(f)
 }
 
 /// Collapse a possibly-multiline string to one whitespace-normalised line,
@@ -453,7 +467,7 @@ fn one_line_clip(s: &str, max: usize) -> String {
 /// records, never the whole history.
 fn transcript_tail_bounded(path: &Path, budget: u64) -> Vec<String> {
     use std::io::{Read, Seek, SeekFrom};
-    let Ok(mut f) = std::fs::File::open(path) else {
+    let Some(mut f) = open_transcript(path) else {
         return Vec::new();
     };
     let Ok(len) = f.metadata().map(|m| m.len()) else {
@@ -494,7 +508,7 @@ const CHAT_TICK_BYTES: u64 = 8 * 1024 * 1024;
 /// nothing is cut by a fixed tail. `None` when the path is not a file.
 fn claude_chat_read(path: &Path, from: Option<u64>) -> Option<crate::chat::Chunk> {
     use std::io::{Read, Seek, SeekFrom};
-    let mut f = std::fs::File::open(path).ok()?;
+    let mut f = open_transcript(path)?;
     let len = f.metadata().ok()?.len();
     let start = match from {
         Some(off) if off <= len && len - off <= CHAT_TICK_BYTES => off,
@@ -5599,5 +5613,33 @@ mod tests {
             "a 40 KB tool result is delivered whole, its head included"
         );
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A transcript admitted at a hook, then swapped for a symlink before it is
+    /// read, is refused: the read opens without following the link, so nothing
+    /// behind it is read. Red on the base, where `File::open` follows the link.
+    #[test]
+    fn a_transcript_swapped_for_a_symlink_after_admission_is_refused() {
+        let root = std::env::temp_dir().join(format!("aoide-h3-{}", std::process::id()));
+        let bucket = root.join("projects").join("-w");
+        std::fs::create_dir_all(&bucket).unwrap();
+        let sid = "sess-h3";
+        let line = |text: &str| {
+            let rec = serde_json::json!({"type": "assistant", "uuid": text, "message": {"role": "assistant",
+                "content": [{"type": "text", "text": text}]}});
+            format!("{rec}\n")
+        };
+        let path = bucket.join(format!("{sid}.jsonl"));
+        std::fs::write(&path, line("admitted")).unwrap();
+        assert!(claude_transcript_refusal(&path, sid).is_none(), "the file is admitted before the swap");
+
+        let elsewhere = root.join("elsewhere.jsonl");
+        std::fs::write(&elsewhere, line("swapped in")).unwrap();
+        std::fs::remove_file(&path).unwrap();
+        std::os::unix::fs::symlink(&elsewhere, &path).unwrap();
+
+        assert!(claude_chat_read(&path, None).is_none(), "a link swapped in after admission is refused");
+        assert!(transcript_tail(&path).is_empty(), "and nothing behind the link is read");
+        let _ = std::fs::remove_dir_all(&root);
     }
 }
