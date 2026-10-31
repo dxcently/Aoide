@@ -82,9 +82,17 @@ pub(super) struct Printed {
     /// Where the next byte-cursor read resumes, when the source has one.
     offset: Option<u64>,
     cursor: Option<String>,
+    /// The state transitions this run has printed; a state line's id names one.
+    transitions: u64,
 }
 
 impl Printed {
+    /// The number of the next state transition, counted from the run's start.
+    fn next_transition(&mut self) -> u64 {
+        self.transitions += 1;
+        self.transitions
+    }
+
     /// Where the read of `path` resumes: the byte offset after the last line
     /// printed, or none when the file is new to this run or was replaced.
     fn resume_from(&self, path: &Path, ident: Option<(u64, u64)>) -> Option<u64> {
@@ -131,6 +139,13 @@ impl Printed {
         }
         fresh
     }
+}
+
+/// The state line for a transition to `state`, or none for a state outside
+/// the table. Its id names the transition, so a state that comes back is a new line.
+fn state_line(session: &str, state: &str, transition: u64) -> Option<ChatLine> {
+    let st = state_of(state)?;
+    Some(ChatLine::new(session, &format!("state:{state}:{transition}"), None, Role::System).state(st))
 }
 
 /// The chat line that says lines before this one were left out.
@@ -255,8 +270,8 @@ fn read_tick(
     }
 
     if last_state.as_deref() != Some(state.as_str()) {
-        if let Some(st) = state_of(&state) {
-            lines.push(ChatLine::new(id, &format!("state:{state}"), None, Role::System).state(st));
+        if let Some(line) = state_line(id, &state, printed.next_transition()) {
+            lines.push(line);
         }
         *last_state = Some(state.clone());
     }
@@ -357,6 +372,31 @@ mod tests {
         let out = printed.tick(a, &[line("9", "z")]);
         let ids: Vec<String> = out.iter().map(line_id).collect();
         assert!(ids.iter().any(|id| id.starts_with("gap:")), "a gone cursor is a gap: {ids:?}");
+    }
+
+    /// A state line's id names its transition, so a state that comes back
+    /// (awaiting, idle, awaiting) prints three distinct lines, and the cursor
+    /// over them finds each one. Red on the base, which reused `state:awaiting`.
+    #[test]
+    fn a_state_line_id_is_unique_per_transition() {
+        let mut printed = Printed::default();
+        let ids: Vec<String> = ["awaiting", "idle", "awaiting"]
+            .iter()
+            .filter_map(|s| state_line("s-1", s, printed.next_transition()))
+            .map(|l| line_id(&l))
+            .collect();
+        let mut unique = ids.clone();
+        unique.sort();
+        unique.dedup();
+        assert_eq!(unique.len(), 3, "{ids:?}");
+    }
+
+    /// A state outside the one table builds no line: the reader refuses it
+    /// rather than printing a state it cannot name.
+    #[test]
+    fn a_state_outside_the_table_builds_no_line() {
+        let mut printed = Printed::default();
+        assert!(state_line("s-1", "working", printed.next_transition()).is_none());
     }
 
     #[test]

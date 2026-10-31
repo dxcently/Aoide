@@ -40,8 +40,6 @@ pub enum Role {
 }
 
 impl Role {
-    pub const ALL: [Role; 4] = [Role::User, Role::Agent, Role::Tool, Role::System];
-
     pub fn name(self) -> &'static str {
         match self {
             Role::User => "user",
@@ -51,10 +49,6 @@ impl Role {
         }
     }
 
-    /// The role a name spells, or `None` for a name outside the table.
-    pub fn parse(name: &str) -> Option<Role> {
-        Role::ALL.into_iter().find(|r| r.name() == name)
-    }
 }
 
 /// Where a chat is in its turn: `waiting` for an answer, `settled` when the
@@ -349,16 +343,6 @@ fn clean(raw: &str, max: usize) -> (String, bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn a_role_outside_the_table_parses_to_nothing() {
-        assert_eq!(Role::parse("agent"), Some(Role::Agent));
-        assert_eq!(Role::parse("wizard"), None);
-        assert_eq!(Role::parse(""), None);
-        for r in Role::ALL {
-            assert_eq!(Role::parse(r.name()), Some(r));
-        }
-    }
 
     #[test]
     fn the_constructor_strips_every_string_it_is_given() {
