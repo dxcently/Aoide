@@ -14,6 +14,8 @@
 //! a pure re-export shim onto this crate.
 
 mod actions;
+/// aoided's ask puller: the asks each `eidolon web` door holds, in `asks.json`.
+pub mod asks;
 pub use actions::{session_kill, session_project};
 // The P-CX desktop Codex/ChatGPT association design
 // (`docs/architecture/CODEX-INTEGRATION.md`): the pure reconciler plus its

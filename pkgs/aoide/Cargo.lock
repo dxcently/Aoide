@@ -153,6 +153,7 @@ name = "aoide-conduct"
 version = "0.0.26"
 dependencies = [
  "aoide-client",
+ "aoide-door",
  "aoide-protocol",
  "aoide-storage",
  "aoide-test-support",

@@ -3154,6 +3154,12 @@ in the message.
   primitive (`aoide_protocol::pick::choose_many`) in this crate.
 - **A new hook event or harness profile** extends `aoide_protocol::agents`,
   not this crate — the harness-profile table lives one layer down.
+- **A new harness whose asks a door serves** is one door client crate plus
+  its entry in the ask puller (`graph/asks.rs`), read from the puller's
+  listing and dial, and named there once. Eidolon's web door is the only entry.
+  Its token-file name rule (`port_of_token_name`) and its session binding
+  (`bind_session`, byte-for-byte on `logPath`) are that entry's, and a second
+  harness adds its own beside them, never a copy.
 - **A new `job` verb** is a `fn(inv, host: Host)` beside the others in
   `graph/job.rs`, reached through a `pub fn job_*(inv)` that passes `HOST`.
   The `Host` argument is what lets a test run it as `Host::Other`. Its probe

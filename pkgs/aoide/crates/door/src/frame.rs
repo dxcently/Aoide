@@ -4,7 +4,7 @@
 //! `stream.rs`, `wire.rs` and `user.rs` write. A frame type this client does not
 //! know is [`Frame::Other`], kept as data.
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::error::DoorError;
@@ -36,7 +36,7 @@ pub enum Frame {
 }
 
 /// An ask the door raised: an approval of a tool call, or a question.
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "kebab-case")]
 pub enum Ask {
     Approval {
@@ -58,7 +58,7 @@ pub enum Ask {
     },
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AskOption {
     pub label: String,
     pub description: Option<String>,

@@ -986,6 +986,16 @@ blank one is refused too.
   `sync_codex_app_threads`; `reap.rs::profile_for` already dispatches an
   eidolon-enrolled record to `EIDOLON_PROFILE` for free, off `rec.agent`
   alone, the same generic path every other harness takes.
+- `graph/asks.rs` — aoided's ask puller. It lists `<runtime>/eidolon/web-<port>.token`
+  (read only; nothing there is deleted or renamed), dials each door through
+  `aoide-door`, and binds a door to the session whose `logPath` is the hello's
+  `session`, byte for byte. Each frame of the door's stream moves
+  `state/stage/asks.json` under the stage lock: an ask lands, a settle removes it,
+  a hello clears its door's asks, and the stream's end clears them too. A door no
+  record holds, or one whose checks fail, is skipped and audited once per (port,
+  reason) and waits out a backoff before it is dialled again. `run` is the thread
+  aoided starts beside the shellbridge. It spawns one reader per door, since each
+  stream is a blocking read of its own.
 - `shellbridge`, `notifications` — the socket loop and the core verbs. Their CLI
   commands (registry lines) live in `strillix`, and so do the desktop verbs; both
   files stay resident here (see charter smudge below). The socket answers three

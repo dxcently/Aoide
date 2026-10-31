@@ -185,6 +185,11 @@ toml_edit = "0.25"
 # edge introduces a cycle (`aoide-secrets` depends on nothing in
 # `aoide-server`/`aoide-client`/`aoide-storage`/`aoide-conduct`).
 aoide-secrets = { path = "crates/secrets" }
+# `aoide-door` — the loopback client of `eidolon web` (moved from the desktop
+# workspace): aoided's ask puller dials each door, and the desktop shell names it
+# by path. No external dependency of its own beyond the workspace's serde, serde_json
+# and libc.
+aoide-door = { path = "crates/door" }
 
 [profile.release]
 opt-level = "s"

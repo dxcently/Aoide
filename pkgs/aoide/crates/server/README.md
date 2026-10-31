@@ -33,6 +33,8 @@ terminal's rights to its remote callers.
 - The resident daemon also serves the core shellbridge: `run_loop` spawns
   `aoide_conduct::shellbridge::run_core` once its own socket is bound, so
   `aoide/shellbridge.sock` (the core arms, not gated on strillix) starts with aoided.
+  Beside it, `run_loop` spawns `aoide_conduct::graph::asks::run`, the ask puller that
+  keeps the asks each `eidolon web` door holds in `state/stage/asks.json`.
   `run_loop` seeds the core's stage files (`seed_core_stage`) before it takes
   the watcher's baseline, so the seed is part of the baseline.
 - `daemon` — the `aoided` daemon. `run` is the one-shot policy self-check
