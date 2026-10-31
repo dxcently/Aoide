@@ -3,7 +3,7 @@
 The desktop app for Aoide: a Tauri 2 window over the orchestration the terminal
 already drives. This directory is its own Cargo workspace, with its own lock;
 AGENTS.md holds the rule that keeps it apart from the core lock. Its crates are
-GUI-free libraries; the window is a later crate.
+GUI-free libraries; `crates/app` is the one window and the one binary.
 
 ## Crates
 
@@ -16,9 +16,11 @@ GUI-free libraries; the window is a later crate.
   `crates/exec/README.md`.
 - `crates/shell` (`aoide-desktop-shell`): the app's own doors and the asks they
   raise, over the door and exec crates. See `crates/shell/README.md`.
+- `crates/app` (`aoide-desktop-app`): the one window over the shell, and the
+  `aoide-desktop` binary. Its six Tauri commands are granted to the `main`
+  window alone. See `crates/app/README.md`.
 
-The window crate will call the shell. The shell sits on the door and exec
-crates. The door depends on nothing else in this directory, and exec depends
+The app crate calls the shell. The shell sits on the door and exec crates. The door depends on nothing else in this directory, and exec depends
 on nothing else in it either.
 
 ## The gate

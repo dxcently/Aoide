@@ -12,6 +12,21 @@
   stdenv,
   rustPlatform,
   clippy,
+  pkg-config,
+  webkitgtk_4_1,
+  gtk3,
+  libsoup_3,
+  glib,
+  cairo,
+  pango,
+  gdk-pixbuf,
+  at-spi2-atk,
+  harfbuzz,
+  librsvg,
+  openssl,
+  # The flake's own aoide. The app pins it at compile time (AOIDE_DESKTOP_AOIDE):
+  # every build needs it, and the app starts this program only through its pin.
+  aoide,
 }:
 let
   subdir = "aoide-desktop";
@@ -36,7 +51,26 @@ rustPlatform.buildRustPackage {
   buildAndTestSubdir = subdir;
   cargoLock.lockFile = ./Cargo.lock;
 
-  nativeBuildInputs = [ clippy ];
+  nativeBuildInputs = [
+    clippy
+    pkg-config
+  ];
+
+  buildInputs = [
+    webkitgtk_4_1
+    gtk3
+    libsoup_3
+    glib
+    cairo
+    pango
+    gdk-pixbuf
+    at-spi2-atk
+    harfbuzz
+    librsvg
+    openssl
+  ];
+
+  env.AOIDE_DESKTOP_AOIDE = "${aoide}/bin/aoide";
 
   # The build phase's target, so the lints read the same artifacts the tests do.
   preCheck = ''

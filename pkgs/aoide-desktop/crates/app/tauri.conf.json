@@ -1,0 +1,19 @@
+{
+  "productName": "aoide-desktop",
+  "version": "0.1.0",
+  "identifier": "io.github.dxcently.aoide-desktop",
+  "build": {
+    "frontendDist": "../../ui"
+  },
+  "app": {
+    "windows": [],
+    "withGlobalTauri": true,
+    "security": {
+      "freezePrototype": true,
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src ipc:; frame-src 'self'; object-src 'none'; form-action 'none'; base-uri 'none'"
+    }
+  },
+  "bundle": {
+    "active": false
+  }
+}

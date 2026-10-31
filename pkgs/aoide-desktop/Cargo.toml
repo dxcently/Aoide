@@ -3,7 +3,7 @@
 # workspace pins 0.10, where pkgs/aoide pins 0.11.
 [workspace]
 resolver = "2"
-members = ["crates/door", "crates/exec", "crates/shell"]
+members = ["crates/door", "crates/exec", "crates/shell", "crates/app"]
 
 [workspace.dependencies]
 serde = { version = "1", features = ["derive"] }

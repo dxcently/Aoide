@@ -2,7 +2,7 @@
 
 The invariants that span this directory's crates. The layout is in README.md,
 and each crate's own invariants are in its AGENTS.md (`crates/door/AGENTS.md`,
-`crates/exec/AGENTS.md`, `crates/shell/AGENTS.md`).
+`crates/exec/AGENTS.md`, `crates/shell/AGENTS.md`, `crates/app/AGENTS.md`).
 
 ## The workspace
 
@@ -90,7 +90,8 @@ and each crate's own invariants are in its AGENTS.md (`crates/door/AGENTS.md`,
   only from a new member or a changed manifest, which moves a golden manifest,
   or from a dependency, which is not linted.
 - The config and member checks, in the same file:
-  - no `build.rs` lies under this directory (`no_member_has_a_build_script`);
+  - exactly one `build.rs` lies under this directory, the app's, and its
+    tauri-build manifest equals its golden text (`the_one_build_script_is_the_apps`);
   - no symbolic link lies under this directory, since a walk through one
     could read outside it (every test that walks the tree);
   - the root's `clippy.toml` is the only clippy config: a `clippy.toml` below
@@ -122,7 +123,7 @@ and each crate's own invariants are in its AGENTS.md (`crates/door/AGENTS.md`,
     and shell, such a file compiles under the forbid. The read misses a build
     script or a proc macro of a dependency, a linked library, and code that
     only a build the gate does not make compiles, such as one without `fakes`;
-  - exactly four `Cargo.toml` files lie under this directory, and each equals
+  - exactly five `Cargo.toml` files lie under this directory, and each equals
     its golden text in the same file, less blank lines and comment lines
     (`the_manifests_are_the_golden_ones`). A new member brings its golden in
     the same commit.

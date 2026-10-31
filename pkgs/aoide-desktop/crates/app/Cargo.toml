@@ -1,0 +1,35 @@
+[package]
+name = "aoide-desktop-app"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+# A doctest is a separate crate that no clippy run lints; no member runs them.
+doctest = false
+
+[[bin]]
+name = "aoide-desktop"
+path = "src/main.rs"
+
+[features]
+# The headless smoke run (B2). No default or release build turns it on.
+smoke = []
+
+[dependencies]
+aoide-desktop-shell = { path = "../shell" }
+serde.workspace = true
+serde_json.workspace = true
+tauri = { version = "=2.12.5", default-features = false, features = ["wry", "custom-protocol"] }
+gtk = "=0.18.2"
+
+[build-dependencies]
+tauri-build = { version = "=2.7.4", default-features = false }
+
+[dev-dependencies]
+# The mock runtime's `test` feature, and the shell's fake aoide and eidolon.
+tauri = { version = "=2.12.5", default-features = false, features = ["wry", "custom-protocol", "test"] }
+aoide-desktop-shell = { path = "../shell", features = ["fakes"] }
+
+[lints]
+workspace = true

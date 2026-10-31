@@ -27,7 +27,7 @@ const NO_FOREIGN: [&str; 2] = [concat!("ext", "ern"), concat!("#[", "link")];
 /// comment lines, so a change to a manifest moves its golden in the same commit.
 const ROOT_MANIFEST: &str = r##"[workspace]
 resolver = "2"
-members = ["crates/door", "crates/exec", "crates/shell"]
+members = ["crates/door", "crates/exec", "crates/shell", "crates/app"]
 [workspace.dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -74,6 +74,42 @@ unsafe_code = "allow"
 [lints.clippy]
 disallowed_methods = "allow"
 disallowed_types = "allow"
+"##;
+const APP_MANIFEST: &str = r##"[package]
+name = "aoide-desktop-app"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+# A doctest is a separate crate that no clippy run lints; no member runs them.
+doctest = false
+
+[[bin]]
+name = "aoide-desktop"
+path = "src/main.rs"
+
+[features]
+# The headless smoke run (B2). No default or release build turns it on.
+smoke = []
+
+[dependencies]
+aoide-desktop-shell = { path = "../shell" }
+serde.workspace = true
+serde_json.workspace = true
+tauri = { version = "=2.12.5", default-features = false, features = ["wry", "custom-protocol"] }
+gtk = "=0.18.2"
+
+[build-dependencies]
+tauri-build = { version = "=2.7.4", default-features = false }
+
+[dev-dependencies]
+# The mock runtime's `test` feature, and the shell's fake aoide and eidolon.
+tauri = { version = "=2.12.5", default-features = false, features = ["wry", "custom-protocol", "test"] }
+aoide-desktop-shell = { path = "../shell", features = ["fakes"] }
+
+[lints]
+workspace = true
 "##;
 const SHELL_MANIFEST: &str = r##"[package]
 name = "aoide-desktop-shell"
@@ -271,14 +307,128 @@ fn no_door_or_shell_source_holds_a_foreign_word() {
     }
 }
 
+/// The one build script, the app's: tauri-build's manifest of the window's
+/// commands. Its golden text is compared without blank and comment lines.
+const BUILD_SCRIPT: &str = r##"const COMMANDS: &[&str] = &["palette", "run", "sessions", "chat_open", "chat_say", "chat_close"];
+
+fn main() {
+    let capabilities = "./capabilities/main.json";
+    tauri_build::try_build(
+        tauri_build::Attributes::new()
+            .capabilities_path_pattern(capabilities)
+            .app_manifest(tauri_build::AppManifest::new().commands(COMMANDS)),
+    )
+    .expect("tauri-build writes the app's permissions");
+}
+"##;
+
 #[test]
-fn no_member_has_a_build_script() {
+fn the_one_build_script_is_the_apps() {
+    let root = root();
     let mut files = Vec::new();
-    walk(&root(), &mut files);
-    for path in files {
-        let name = path.file_name().and_then(|name| name.to_str());
-        assert!(name != Some("build.rs"), "{} is a build script", path.display());
+    walk(&root, &mut files);
+    let mut scripts: Vec<String> = files
+        .iter()
+        .filter(|path| path.file_name().is_some_and(|name| name == "build.rs"))
+        .map(|path| path.strip_prefix(&root).expect("a build script is under the root").to_string_lossy().into_owned())
+        .collect();
+    scripts.sort();
+    assert_eq!(scripts, ["crates/app/build.rs"], "the only build script is the app's");
+    let text = fs::read_to_string(root.join("crates/app/build.rs")).expect("the app's build script is read");
+    assert_eq!(golden_lines(&text), golden_lines(BUILD_SCRIPT), "the app's build script differs from its golden text");
+}
+
+/// The lines of `text` after a `#[tauri::command]`, and the names the attribute marks.
+fn command_fns(text: &str) -> Vec<(String, Option<String>)> {
+    let lines: Vec<&str> = text.lines().collect();
+    let mut out = Vec::new();
+    for (i, line) in lines.iter().enumerate() {
+        if line.trim() != "#[tauri::command]" {
+            continue;
+        }
+        let next = lines[i + 1..]
+            .iter()
+            .map(|l| l.trim())
+            .find(|l| !l.starts_with("#[") && !l.starts_with("//") && !l.is_empty())
+            .unwrap_or("");
+        let name = next
+            .split_once("fn ")
+            .map(|(_, rest)| rest.split(['(', '<']).next().unwrap_or("").trim().to_owned());
+        out.push((next.to_owned(), name));
     }
+    out
+}
+
+#[test]
+fn every_tauri_command_is_an_async_fn() {
+    let mut found = 0;
+    for (path, text) in sources() {
+        if !path.starts_with("crates/app/src/") {
+            continue;
+        }
+        for (next, _) in command_fns(&text) {
+            found += 1;
+            assert!(
+                next.starts_with("async fn ") || next.starts_with("pub async fn "),
+                "{path}: a #[tauri::command] is followed by `{next}`, not an `async fn` (every command runs off the main thread)"
+            );
+        }
+    }
+    assert!(found > 0, "the scan found no commands; the app's commands are under crates/app/src");
+}
+
+/// The names `generate_handler!` lists in the app's lib, the names build.rs's
+/// manifest lists, and the names capabilities/main.json grants, each as a sorted
+/// list. The three must be the same set, so an unregistered command fails.
+#[test]
+fn every_handler_command_is_in_the_manifest_and_granted_to_main() {
+    let root = root();
+    let lib = fs::read_to_string(root.join("crates/app/src/lib.rs")).expect("the app's lib is read");
+    let start = lib.find("generate_handler![").expect("the lib names its handler");
+    let body = &lib[start + "generate_handler![".len()..];
+    let body = &body[..body.find(']').expect("the handler list closes")];
+    let mut handler: Vec<String> = body
+        .split(',')
+        .map(str::trim)
+        .filter(|e| !e.is_empty())
+        .map(|e| e.trim_start_matches("commands::").to_owned())
+        .collect();
+    handler.sort();
+
+    let build = fs::read_to_string(root.join("crates/app/build.rs")).expect("the app's build script is read");
+    let list = &build[build.find("COMMANDS: &[&str] = &[").expect("the manifest lists commands")..];
+    let list = &list["COMMANDS: &[&str] = &[".len()..];
+    let list = &list[..list.find(']').expect("the manifest list closes")];
+    let mut manifest: Vec<String> = list
+        .split(',')
+        .map(|e| e.trim().trim_matches('"').to_owned())
+        .filter(|e| !e.is_empty())
+        .collect();
+    manifest.sort();
+
+    let caps: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(root.join("crates/app/capabilities/main.json")).expect("the capability is read"),
+    )
+    .expect("the capability is JSON");
+    let mut granted: Vec<String> = caps["permissions"]
+        .as_array()
+        .expect("the capability lists permissions")
+        .iter()
+        .map(|p| p.as_str().expect("a permission is a string").strip_prefix("allow-").expect("an allow permission").replace('-', "_"))
+        .collect();
+    granted.sort();
+
+    let mut sources_defined: Vec<String> = Vec::new();
+    for (path, text) in sources() {
+        if path.starts_with("crates/app/src/") {
+            sources_defined.extend(command_fns(&text).into_iter().filter_map(|(_, name)| name));
+        }
+    }
+    sources_defined.sort();
+
+    assert_eq!(handler, manifest, "generate_handler! and build.rs's manifest name different commands");
+    assert_eq!(handler, granted, "generate_handler! and capabilities/main.json name different commands");
+    assert_eq!(handler, sources_defined, "every #[tauri::command] must be listed in generate_handler!");
 }
 
 #[test]
@@ -461,11 +611,12 @@ fn the_manifests_are_the_golden_ones() {
     found.sort();
     assert_eq!(
         found,
-        ["Cargo.toml", "crates/door/Cargo.toml", "crates/exec/Cargo.toml", "crates/shell/Cargo.toml"],
+        ["Cargo.toml", "crates/app/Cargo.toml", "crates/door/Cargo.toml", "crates/exec/Cargo.toml", "crates/shell/Cargo.toml"],
         "the manifests under the root are not the four golden ones; a new member brings its golden in the same commit"
     );
     for (path, golden) in [
         ("Cargo.toml", ROOT_MANIFEST),
+        ("crates/app/Cargo.toml", APP_MANIFEST),
         ("crates/door/Cargo.toml", DOOR_MANIFEST),
         ("crates/exec/Cargo.toml", EXEC_MANIFEST),
         ("crates/shell/Cargo.toml", SHELL_MANIFEST),

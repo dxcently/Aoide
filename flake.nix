@@ -113,6 +113,10 @@
           strillix-rices = {
             inherit (self) aoideOptions;
           };
+          # The desktop pins its own flake's aoide (default.nix), per system.
+          aoide-desktop = pkgs: {
+            aoide = inputs.aoide.packages.${pkgs.stdenv.hostPlatform.system}.default;
+          };
         };
       };
 

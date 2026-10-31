@@ -60,6 +60,13 @@
 #     extra = { foo = { extraArg = <flake value>; }; };
 #   }).discover pkgs;
 #
+# An entry may also be a function of the package set (`pkgs`, or `final` in the
+# overlay): the walker calls it there, so a value that depends on the system
+# reaches a package at every site that reads this file, and no site needs its
+# own copy:
+#
+#   extra = { foo = pkgs: { extraArg = <flake value for pkgs.stdenv.system>; }; };
+#
 # Keeping the override here (not in flake.nix) preserves the single source: the
 # flake output and both overlays still read the same set, and a package whose
 # extras a context forgets fails loudly (a required argument `callPackage`
@@ -114,9 +121,20 @@ let
   # supplies callPackage (nixpkgs legacyPackages in the flake output, `final`
   # in the overlay); `extra` (this file's own argument) supplies the arguments
   # callPackage cannot fill by itself.
+  # An `extra` entry is either an attrset, or a function of the package set it is
+  # called through (`pkgs`, or `final` in the overlay). A function lets a
+  # per-system value reach a package; `extraFor` applies that one rule at both
+  # sites below.
+  extraFor =
+    pkgs: name:
+    let
+      e = extra.${name} or { };
+    in
+    if builtins.isFunction e then e pkgs else e;
+
   discover =
     pkgs:
-    lib.genAttrs packageNames (name: pkgs.callPackage (pkgsDir + "/${name}") (extra.${name} or { }));
+    lib.genAttrs packageNames (name: pkgs.callPackage (pkgsDir + "/${name}") (extraFor pkgs name));
 
   # Entries under pkgsDir that are none of the three admitted shapes above
   # (shelved `_`-dir, callPackage target, self-flaked): a half-created
@@ -187,6 +205,6 @@ in
         else
           throw "pkgs/${name}: another overlay in nixpkgs.overlays already provides '${name}', which this walker also supplies — the walker yields only to a name listed in intentionalOverrides (lib/pkgs.nix). List it there if replacing the walker's build is deliberate, or give the other overlay a name this walker does not supply."
       else
-        final.callPackage (pkgsDir + "/${name}") (extra.${name} or { })
+        final.callPackage (pkgsDir + "/${name}") (extraFor final name)
     );
 }
