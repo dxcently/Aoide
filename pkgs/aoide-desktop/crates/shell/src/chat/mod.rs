@@ -119,18 +119,28 @@ impl Chat {
 
     /// The next message from the stream, or `None` when none comes within `wait`.
     pub fn next(&mut self, wait: Duration) -> Option<Push> {
-        let event = match self.pending.take() {
-            Some(event) => event,
-            None => self.follow.next(wait)?,
-        };
-        Some(push(event))
+        loop {
+            let event = match self.pending.take() {
+                Some(event) => event,
+                None => self.follow.next(wait)?,
+            };
+            if !is_blank(&event) {
+                return Some(push(event));
+            }
+        }
     }
 
     /// Ends the stream and returns what it printed after the end was asked for,
     /// through its last line.
     pub fn close(self) -> Result<Vec<Push>, ExecError> {
-        Ok(self.follow.end()?.rest.into_iter().map(push).collect())
+        Ok(self.follow.end()?.rest.into_iter().filter(|event| !is_blank(event)).map(push).collect())
     }
+}
+
+/// A line of only whitespace, such as the empty line a trailing newline leaves.
+/// It is never pushed.
+fn is_blank(event: &Event) -> bool {
+    matches!(event, Event::Line(bytes) if bytes.iter().all(u8::is_ascii_whitespace))
 }
 
 fn push(event: Event) -> Push {

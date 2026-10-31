@@ -224,8 +224,10 @@ are in README.md.
   names each one and its reason. The reasons are spelled.
 - Every line a stream prints goes through `chat::record::line` before it leaves
   the crate. A JSON object becomes a `Push::Record` with each string and key
-  spelled by `visible`. Any other line becomes a `Push::Other`, spelled. Raw
-  records pass through otherwise, since core's normalized chat line is not
+  spelled by `visible`. Any other line becomes a `Push::Other`, spelled. A line
+  of only whitespace, such as the empty line a trailing newline leaves, is never
+  pushed: `Chat::next` and `Chat::close` drop it (`a_blank_line_on_the_stream_is_never_pushed`).
+  Raw records pass through otherwise, since core's normalized chat line is not
   yet emitted.
 - The JSON is parsed in `chat/record.rs` alone. `tests/chat.rs` fails for a
   `serde_json::from_str` anywhere else in `src/chat/`.
