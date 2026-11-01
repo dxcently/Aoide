@@ -56,6 +56,21 @@ struct Fixture {
 /// of every call in a scratch dir for `tag`. `baseline` counts the calls
 /// `Exec::load` made, which the tests do not count.
 fn fixture(tag: &str, lines: &[&[u8]], confirm: Box<dyn Confirm>) -> Fixture {
+    fixture_with(tag, lines, confirm, &[])
+}
+
+/// A session listing as `session find --all --json` prints it: `(id, agent, kind)`.
+fn listing(rows: &[(&str, &str, &str)]) -> String {
+    let rows: Vec<_> = rows
+        .iter()
+        .map(|(id, agent, kind)| serde_json::json!({"sessionId": id, "carries": {"agent": agent, "kind": kind}}))
+        .collect();
+    serde_json::json!({"status": "ok", "command": "session.find", "message": "", "gated": false, "data": {"sessions": rows}})
+        .to_string()
+}
+
+/// `fixture` with more variables for the fake aoide.
+fn fixture_with(tag: &str, lines: &[&[u8]], confirm: Box<dyn Confirm>, extra: &[(&str, String)]) -> Fixture {
     let dir = std::env::temp_dir().join(format!("aoide-app-{tag}-{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).expect("a scratch dir is made");
@@ -73,6 +88,7 @@ fn fixture(tag: &str, lines: &[&[u8]], confirm: Box<dyn Confirm>) -> Fixture {
         ("FAKE_AOIDE_FOLLOW_FILE", follow.display().to_string()),
     ]
     .into_iter()
+    .chain(extra.iter().map(|(k, v)| (*k, v.clone())))
     .map(|(k, v)| (k.into(), v.into()))
     .collect();
     let exec = Exec::load(&fake_aoide(), &dir.join("home"), env).expect("the fake loads");
@@ -203,4 +219,54 @@ impl Confirm for ArcConfirm {
     fn confirm(&self, verb: &str, text: &str) -> bool {
         self.0.confirm(verb, text)
     }
+}
+
+fn send_argv(record: &Path) -> Option<Vec<String>> {
+    fs::read_to_string(record).unwrap_or_default().lines().find_map(|line| {
+        let call: serde_json::Value = serde_json::from_str(line).expect("a record line is JSON");
+        let args: Vec<String> = call["args"].as_array()?.iter().map(|a| a.as_str().unwrap().to_owned()).collect();
+        (args.first().map(String::as_str) == Some("send")).then_some(args)
+    })
+}
+
+fn sessions_file(tag: &str, rows: &[(&str, &str, &str)]) -> (&'static str, String) {
+    let path = std::env::temp_dir().join(format!("aoide-app-sessions-{tag}-{}.json", std::process::id()));
+    fs::write(&path, listing(rows)).expect("the listing is written");
+    ("FAKE_AOIDE_SESSIONS", path.display().to_string())
+}
+
+#[test]
+fn a_send_names_the_harness_the_session_was_listed_with_and_a_shell_names_none() {
+    let listed = sessions_file("harness", &[("s1", "claude", "agent"), ("sh1", "shell", "shell")]);
+    let fx = fixture_with("harness", &[], Box::new(Answer::default()), &[listed]);
+    fx.window.sessions().expect("the sessions are listed");
+    fx.window.chat_say("s1", "hi").expect("the send runs");
+    assert_eq!(send_argv(&fx.record).expect("a send ran"), ["send", "--json", "--id=s1", "--harness=claude", "--submit", "--yes", "--", "hi"]);
+    let _ = fs::remove_file(&fx.record);
+    fx.window.chat_say("sh1", "ls").expect("the send runs");
+    assert_eq!(send_argv(&fx.record).expect("a send ran"), ["send", "--json", "--id=sh1", "--submit", "--yes", "--", "ls"]);
+}
+
+#[test]
+fn a_send_to_an_unlisted_session_is_refused_and_starts_no_send() {
+    let listed = sessions_file("unlisted", &[("s1", "claude", "agent")]);
+    let fx = fixture_with("unlisted", &[], Box::new(Answer::default()), &[listed]);
+    let refused = fx.window.chat_say("ghost", "hi").expect_err("an unlisted session is refused");
+    assert!(refused.contains("no session `ghost` is listed"), "{refused}");
+    assert_eq!(send_argv(&fx.record), None, "no send started");
+}
+
+#[test]
+fn a_send_core_refuses_reaches_the_page_as_an_error_and_not_a_reply() {
+    let listed = sessions_file("refused", &[("s1", "claude", "agent")]);
+    let why = "`s1` is not a `claude` session: it runs `kimi`, so nothing was typed";
+    let fx = fixture_with(
+        "refused",
+        &[],
+        Box::new(Answer::default()),
+        &[listed, ("FAKE_AOIDE_EXIT", "1".to_owned()), ("FAKE_AOIDE_STDERR", why.to_owned())],
+    );
+    fx.window.sessions().expect("the sessions are listed");
+    let error = fx.window.chat_say("s1", "hi").expect_err("a refused send is an error");
+    assert!(error.contains("is not a `claude` session"), "{error}");
 }

@@ -8,6 +8,8 @@
 //! `FAKE_AOIDE_STDERR` and `FAKE_AOIDE_STDERR_BYTES` bytes of `x` to stderr,
 //! and exits with `FAKE_AOIDE_EXIT` (default 0).
 //!
+//! `session find` prints the file `FAKE_AOIDE_SESSIONS` names, when it is set.
+//!
 //! A held follow is `session chat --follow`, `session trace --follow` or
 //! `session watch`, on the id it names: an id starting `hook-` keeps no trace,
 //! no chat and no PTY, so all three refuse; an id starting `pty-` keeps no
@@ -37,6 +39,7 @@ fn main() {
         ["schema", "--json"] if unset("FAKE_AOIDE_NO_SCHEMA") => print!("{SCHEMA}"),
         ["config", "--json"] if unset("FAKE_AOIDE_NO_CONFIG") => print!("{}", config_text()),
         ["note", "add", ..] => println!("{{\"ok\":true}}"),
+        ["session", "find", ..] if !unset("FAKE_AOIDE_SESSIONS") => print!("{}", listing()),
         ["session", "chat", ..] if words.contains(&"--follow") => follow("chat", words[words.len() - 1]),
         ["session", "trace", ..] if words.contains(&"--follow") => follow("trace", words[words.len() - 1]),
         ["session", "watch", ..] => follow("watch", words[words.len() - 1]),
@@ -81,6 +84,11 @@ fn follow(verb: &'static str, id: &str) -> ! {
 
 fn unset(name: &str) -> bool {
     std::env::var_os(name).is_none()
+}
+
+fn listing() -> String {
+    let path = std::env::var_os("FAKE_AOIDE_SESSIONS").unwrap_or_default();
+    std::fs::read_to_string(path).unwrap_or_default()
 }
 
 fn config_text() -> String {

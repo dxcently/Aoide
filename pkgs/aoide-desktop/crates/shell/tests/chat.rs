@@ -63,15 +63,23 @@ fn env_names(call: &Value) -> Vec<String> {
 #[test]
 fn say_sends_with_its_id_submit_and_yes_and_the_text_as_one_positional() {
     let (exec, record) = load("say", &[], &[]);
-    say(&exec, "s1", "hi there").expect("the send runs");
+    say(&exec, "s1", None, "hi there").expect("the send runs");
     let last = records(&record).pop().expect("the send is recorded");
     assert_eq!(argv_of(&last), ["send", "--json", "--id=s1", "--submit", "--yes", "--", "hi there"]);
 }
 
 #[test]
+fn say_names_the_harness_after_the_id_when_the_session_has_one() {
+    let (exec, record) = load("say-harness", &[], &[]);
+    say(&exec, "s1", Some("claude"), "hi").expect("the send runs");
+    let last = records(&record).pop().expect("the send is recorded");
+    assert_eq!(argv_of(&last), ["send", "--json", "--id=s1", "--harness=claude", "--submit", "--yes", "--", "hi"]);
+}
+
+#[test]
 fn text_that_starts_with_dashes_and_holds_a_newline_stays_one_positional() {
     let (exec, record) = load("say-text", &[], &[]);
-    say(&exec, "s1", "--yes\nrm -rf").expect("the send runs");
+    say(&exec, "s1", None, "--yes\nrm -rf").expect("the send runs");
     let args = argv_of(&records(&record).pop().expect("the send is recorded"));
     assert_eq!(args.len(), 7, "{args:?}");
     assert_eq!(args[6], "--yes\nrm -rf");
@@ -88,7 +96,7 @@ fn say_scrubs_the_session_id_and_both_autogate_switches_from_the_send_child() {
             ("AOIDE_CONDUCT_SIBLING_AUTOGATE", "1"),
         ],
     );
-    say(&exec, "s1", "hi").expect("the send runs");
+    say(&exec, "s1", None, "hi").expect("the send runs");
     let names = env_names(&records(&record).pop().expect("the send is recorded"));
     for dropped in ["AOIDE_SESSION_ID", "AOIDE_CONDUCT_AUTOGATE", "AOIDE_CONDUCT_SIBLING_AUTOGATE"] {
         assert!(!names.iter().any(|n| n == dropped), "{dropped} reaches the send child: {names:?}");

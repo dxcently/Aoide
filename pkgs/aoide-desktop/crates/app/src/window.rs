@@ -27,6 +27,7 @@ pub struct Window {
     confirm: Box<dyn Confirm>,
     busy: AtomicBool,
     chats: Mutex<HashMap<String, Reader>>,
+    harnesses: Mutex<HashMap<String, Option<String>>>,
     live: Arc<AtomicUsize>,
 }
 
@@ -65,6 +66,7 @@ impl Window {
             confirm,
             busy: AtomicBool::new(false),
             chats: Mutex::new(HashMap::new()),
+            harnesses: Mutex::new(HashMap::new()),
             live: Arc::new(AtomicUsize::new(0)),
         }
     }
@@ -106,9 +108,13 @@ impl Window {
         Ok(reply(out))
     }
 
-    /// The sessions the person has, as `session find --all` prints them.
+    /// The sessions the person has, as `session find --all` prints them. The
+    /// harness each one runs is kept for the sends that name it.
     pub fn sessions(&self) -> Result<Reply, String> {
-        self.run(&["session".to_owned(), "find".to_owned()], &[FlagIn { name: "all".to_owned(), value: None }], &[])
+        let listed =
+            self.run(&["session".to_owned(), "find".to_owned()], &[FlagIn { name: "all".to_owned(), value: None }], &[])?;
+        *self.harnesses.lock().expect("the harness map is not poisoned") = harnesses_in(&listed.stdout);
+        Ok(listed)
     }
 
     /// Opens chat `id`: follows its stream and pushes each message to `sink` from
@@ -141,9 +147,28 @@ impl Window {
         Ok(())
     }
 
-    /// Sends `text` to chat `id` through `aoide send`, and returns the outcome.
+    /// Sends `text` to chat `id` through `aoide send`, naming the harness the
+    /// session was listed with, so core refuses a session that no longer runs
+    /// it. A session that is not listed is refused before any child starts. A
+    /// send core refuses is an error, never a reply.
     pub fn chat_say(&self, id: &str, text: &str) -> Result<Reply, String> {
-        chat::say(&self.exec, id, text).map(reply).map_err(|e| visible(&e.to_string()))
+        let harness = self.harness_of(id)?;
+        let sent = reply(chat::say(&self.exec, id, harness.as_deref(), text).map_err(|e| visible(&e.to_string()))?);
+        match sent.code {
+            Some(0) => Ok(sent),
+            code => Err(refusal_of_send(&sent, code)),
+        }
+    }
+
+    /// The harness session `id` was listed with, listing the sessions once when
+    /// it is not known yet.
+    fn harness_of(&self, id: &str) -> Result<Option<String>, String> {
+        let known = |window: &Self| window.harnesses.lock().expect("the harness map is not poisoned").get(id).cloned();
+        if let Some(harness) = known(self) {
+            return Ok(harness);
+        }
+        self.sessions()?;
+        known(self).ok_or_else(|| format!("refused: no session `{}` is listed, so nothing was sent", visible(id)))
     }
 
     /// Ends chat `id`: its reader interrupts the child and reaps it before this returns.
@@ -196,6 +221,30 @@ fn argv_text(path: &[String], flags: &[FlagIn], positionals: &[String]) -> Strin
         lines.extend(positionals.iter().cloned());
     }
     lines.iter().map(|line| visible(line)).collect::<Vec<_>>().join("\n")
+}
+
+/// The harness each listed session runs, by session id: none for a shell or a
+/// row that names no agent.
+fn harnesses_in(listing: &Value) -> HashMap<String, Option<String>> {
+    let rows = listing["data"]["sessions"].as_array().into_iter().flatten();
+    rows.filter_map(|row| {
+        let id = row["sessionId"].as_str()?;
+        let carries = &row["carries"];
+        let agent = carries["agent"].as_str().filter(|agent| !agent.is_empty());
+        let shell = carries["kind"].as_str() == Some("shell");
+        Some((id.to_owned(), agent.filter(|_| !shell).map(str::to_owned)))
+    })
+    .collect()
+}
+
+/// Why a send that did not exit zero failed: core's message, else its stderr.
+fn refusal_of_send(sent: &Reply, code: Option<i32>) -> String {
+    let message = sent.stdout["message"].as_str().filter(|m| !m.is_empty());
+    let why = message.map(str::to_owned).unwrap_or_else(|| sent.stderr.trim().to_owned());
+    match why.as_str() {
+        "" => format!("the send exited with {code:?}"),
+        _ => why,
+    }
 }
 
 fn reply(out: Output) -> Reply {

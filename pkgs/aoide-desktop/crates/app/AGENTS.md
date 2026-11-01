@@ -28,6 +28,11 @@ in `../../AGENTS.md`.
 - One confirm at a time: `Window::ask` takes `busy` and refuses a second ask.
 - `chat_close` joins the reader before it returns. A reader ends by stop flag,
   then interrupts and reaps its child through `Chat::close`.
+- `chat_say` names the harness the session was listed with and sends nothing to
+  a session it cannot list (`a_send_names_the_harness_the_session_was_listed_with_and_a_shell_names_none`,
+  `a_send_to_an_unlisted_session_is_refused_and_starts_no_send`). A send that
+  exits non-zero is an `Err`, so the page shows an error, never a bubble
+  (`a_send_core_refuses_reaches_the_page_as_an_error_and_not_a_reply`).
 - Every string the window pushes or replies with passes `visible` (or `spell`
   for JSON). `every_pushed_string_is_spelled` holds that for a chat line.
 - `run()` takes no argument unless the `smoke` feature is on. A build without

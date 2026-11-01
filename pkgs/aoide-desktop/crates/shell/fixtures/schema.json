@@ -40,8 +40,20 @@
         {"name": "json", "type": "bool", "description": "Structured I/O."},
         {"name": "yes", "type": "bool", "description": "Deliver without the gate."},
         {"name": "submit", "type": "bool", "description": "Press enter after the text."},
-        {"name": "id", "type": "string", "description": "Target session id.", "value": "session-id"}
+        {"name": "id", "type": "string", "description": "Target session id.", "value": "session-id"},
+        {"name": "harness", "type": "string", "description": "Refuse unless the target runs this harness.", "value": "name"}
       ]
+    },
+    {
+      "path": ["session", "find"],
+      "verb": "show",
+      "summary": "Find sessions.",
+      "args": [],
+      "flags": [
+        {"name": "json", "type": "bool", "description": "Structured I/O."},
+        {"name": "all", "type": "bool", "description": "Also list done sessions."}
+      ],
+      "implemented": true
     },
     {
       "path": ["session", "chat"],

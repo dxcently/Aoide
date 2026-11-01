@@ -43,6 +43,11 @@ child goes through the shell's palette and exec.
   starts no child.
 - A chat's messages are spelled with `visible` and `spell` before they leave
   Rust.
+- `sessions` keeps the harness each listed session runs. `chat_say` sends with
+  `--harness <agent>` for that session, and with none for a shell. A session
+  the window has not listed is listed once, and refused if it is still absent.
+  A send that core refuses exits non-zero, and `chat_say` returns that as an
+  error with core's message, never as a reply.
 
 ## The smoke run
 

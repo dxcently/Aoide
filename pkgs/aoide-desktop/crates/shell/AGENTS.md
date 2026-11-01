@@ -212,8 +212,11 @@ are in README.md.
 
 ## The chat (chat/)
 
-- `chat::say` is the one send. Its argv is `send --json --id=<id> --submit
-  --yes -- <text>`. `--yes` is the person's own act: the composer types the
+- `chat::say` is the one send. Its argv is `send --json --id=<id>
+  [--harness=<agent>] --submit --yes -- <text>`. The harness is the agent the
+  session was listed with; core compares it with the session's record before
+  the gate, so a send is refused, not delivered, to a session that runs
+  something else. A session with no harness (a shell) takes none. `--yes` is the person's own act: the composer types the
   text, and nothing else calls `say`. A frame, a document or a hostile page
   never reaches it. The send child runs with the scrubbed environment exec gives
   a `send`, which drops the session id and both autogate switches.

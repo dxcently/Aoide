@@ -262,8 +262,10 @@ window that shows the palette; `call` is the check and the spawn only.
 ## How a chat is followed
 
 ```
-chat::say(exec, id, text)
-  exec.call(send, --id=<id>, --submit, --yes, -- <text>)
+chat::say(exec, id, harness, text)
+  exec.call(send, --id=<id>, [--harness=<agent>], --submit, --yes, -- <text>)
+  --harness: the agent the session was listed with; core refuses the send
+             when the session no longer runs it. A shell has none.
   --yes: the composer types it, so it is the person's own act
   the child's env is child_env's for a send: no session id, no autogate
 

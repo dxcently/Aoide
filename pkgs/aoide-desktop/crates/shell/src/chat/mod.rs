@@ -22,14 +22,17 @@ use record::Push;
 const ANSWER_WAIT: Duration = Duration::from_secs(5);
 
 /// Sends `text` to session `id` as the person's own act: `--yes`, since the
-/// composer is the person typing. The child runs with the scrubbed environment
-/// `child_env` gives a `send`.
-pub fn say(exec: &Exec, id: &str, text: &str) -> Result<Output, ExecError> {
-    let flags = [
-        Flag { name: "id", value: Some(id) },
-        Flag { name: "submit", value: None },
-        Flag { name: "yes", value: None },
-    ];
+/// composer is the person typing. `harness` is the agent the session was listed
+/// with: core refuses the send, before the gate, when the session no longer
+/// runs it. A session with no harness (a shell) sends without it. The child
+/// runs with the scrubbed environment `child_env` gives a `send`.
+pub fn say(exec: &Exec, id: &str, harness: Option<&str>, text: &str) -> Result<Output, ExecError> {
+    let mut flags = vec![Flag { name: "id", value: Some(id) }];
+    if harness.is_some() {
+        flags.push(Flag { name: "harness", value: harness });
+    }
+    flags.push(Flag { name: "submit", value: None });
+    flags.push(Flag { name: "yes", value: None });
     exec.call(&["send"], &flags, &[text], None)
 }
 
