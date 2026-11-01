@@ -1010,14 +1010,17 @@ mod verb_tests {
     const SESSION: &str = "s0";
 
     /// The env a verb reads: the stage dir, the runtime dir the fake door writes
-    /// its token into, and an audit log of this test's own.
+    /// its token into, and an audit log of this test's own. The two variables
+    /// it sets go back to what they were when it drops.
     struct Env {
         asks: PathBuf,
         audit: PathBuf,
         runtime: PathBuf,
+        _restore: crate::graph::testutil::EnvVars,
     }
 
     fn env(tag: &str) -> Env {
+        let restore = crate::graph::testutil::EnvVars::save(&["AOIDE_STAGE_DIR", "XDG_RUNTIME_DIR"]);
         let root = crate::graph::testutil::unique_stage(tag);
         let stage = root.join("stage");
         let runtime = root.join("run");
@@ -1026,7 +1029,7 @@ mod verb_tests {
         std::fs::set_permissions(&runtime, std::fs::Permissions::from_mode(0o700)).unwrap();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
         std::env::set_var("XDG_RUNTIME_DIR", &runtime);
-        Env { asks: stage.join("asks.json"), audit: root.join("audit.log"), runtime }
+        Env { asks: stage.join("asks.json"), audit: root.join("audit.log"), runtime, _restore: restore }
     }
 
     fn invocation(args: &[&str], flags: &[(&str, &str)], door: Caller, audit: &Path) -> Invocation {

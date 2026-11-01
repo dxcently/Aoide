@@ -1802,6 +1802,19 @@ in the message.
   moment its own test forgot (or never needed) an override. Same rule:
   don't remove it, and a test proving something about the ledger installs
   its own `$AOIDE_STATE_DIR` override on top, same as any other env var.
+- **A test that sets `$AOIDE_STAGE_DIR` or `$AOIDE_STATE_DIR` puts it back
+  before it lets go of `env_lock()`, and a test that reads the stage pins
+  its own.** `EnvVars::save` (`graph/testutil.rs`) declared after the lock
+  does the first: its drop runs before the lock's, so the next test starts
+  from what this one found. A fixture that sets the variable for its caller
+  (`door_fixture` in `send.rs`, `env` in `asks.rs`) is paired with that save
+  by the caller or holds one itself. A value left behind is read by every
+  later test that resolves the stage without setting it: `conducting_stage_dir`
+  follows `$AOIDE_STAGE_DIR` before `$AOIDE_STATE_DIR`, so a test that sets
+  only the state dir (`build_graph` reads the remote-children ledger from the
+  stage) reads and writes the last leaker's directory, and rows another test
+  filed there ride into its document. The `doc.rs` tests that build a graph
+  set both variables to directories of their own.
 - **A nested headless session is windowless BY CONSTRUCTION — never
   pid-ancestry-walk it to a window (task #89).**
   It is NOT enough to gate the backfill call sites alone — a

@@ -408,6 +408,7 @@ mod tests {
     #[test]
     fn a_hostile_agent_name_reaches_no_error_text() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = crate::graph::testutil::EnvVars::save(&["AOIDE_STAGE_DIR"]);
         let root = crate::graph::testutil::unique_stage("chat-agent-strip");
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();

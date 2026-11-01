@@ -1973,10 +1973,12 @@ mod tests {
         // whose own resolved graph nests as `children` — never flattened
         // into this document's own top-level `nodes`/`edges`.
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _stage = EnvVars::save(&["AOIDE_STAGE_DIR"]);
         let saved = std::env::var("AOIDE_STATE_DIR").ok();
         let dir = std::env::temp_dir().join(format!("aoide-node-fold-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::env::set_var("AOIDE_STATE_DIR", &dir);
+        std::env::set_var("AOIDE_STAGE_DIR", dir.join("stage"));
 
         aoide_storage::node_store::save_nodes(&[aoide_storage::node_store::Node {
             name: "yomi-strix".into(),
@@ -2038,10 +2040,12 @@ mod tests {
         // once a pull goes stale. Either way: an explicit `state`, no
         // `children`, never a crash.
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _stage = EnvVars::save(&["AOIDE_STAGE_DIR"]);
         let saved = std::env::var("AOIDE_STATE_DIR").ok();
         let dir = std::env::temp_dir().join(format!("aoide-node-fold-stale-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::env::set_var("AOIDE_STATE_DIR", &dir);
+        std::env::set_var("AOIDE_STAGE_DIR", dir.join("stage"));
 
         // Never pulled: no cache file at all.
         aoide_storage::node_store::save_nodes(&[aoide_storage::node_store::Node {
@@ -2216,9 +2220,10 @@ mod tests {
         // `ledger_session_exit`, independent of which roster-exit path
         // called it.
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _env = EnvVars::save(&["AOIDE_STATE_DIR"]);
+        let _env = EnvVars::save(&["AOIDE_STATE_DIR", "AOIDE_STAGE_DIR"]);
         let state = unique_stage("ledger-restore");
         std::env::set_var("AOIDE_STATE_DIR", &state);
+        std::env::set_var("AOIDE_STAGE_DIR", state.join("stage"));
 
         let mut rec = session("term-1", "/home/khoa/Aoide", "idle", "2026-01-01T00:00:00Z", None);
         rec.restore = Some(aoide_storage::records::RestoreSnapshot {
@@ -2240,9 +2245,10 @@ mod tests {
     #[test]
     fn ledger_session_exit_writes_explicit_null_when_no_restore() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _env = EnvVars::save(&["AOIDE_STATE_DIR"]);
+        let _env = EnvVars::save(&["AOIDE_STATE_DIR", "AOIDE_STAGE_DIR"]);
         let state = unique_stage("ledger-restore-null");
         std::env::set_var("AOIDE_STATE_DIR", &state);
+        std::env::set_var("AOIDE_STAGE_DIR", state.join("stage"));
 
         let rec = session("agent-1", "/w", "done", "2026-01-01T00:00:00Z", None);
         ledger_session_exit(&rec, "2026-01-01T01:00:00Z");
@@ -2256,9 +2262,10 @@ mod tests {
     #[test]
     fn ledger_session_exit_projects_the_records_log_path() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _env = EnvVars::save(&["AOIDE_STATE_DIR"]);
+        let _env = EnvVars::save(&["AOIDE_STATE_DIR", "AOIDE_STAGE_DIR"]);
         let state = unique_stage("ledger-log-path");
         std::env::set_var("AOIDE_STATE_DIR", &state);
+        std::env::set_var("AOIDE_STAGE_DIR", state.join("stage"));
 
         let mut rec = session("eid-1", "/w", "done", "2026-01-01T00:00:00Z", None);
         rec.log_path = Some("/r/eid-1.eid".to_string());
@@ -2311,9 +2318,10 @@ mod tests {
         // `parentSessionId` is untouched, so no `spawned` edge is minted and
         // the session stays anchored/root locally.
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _env = EnvVars::save(&["AOIDE_STATE_DIR"]);
+        let _env = EnvVars::save(&["AOIDE_STATE_DIR", "AOIDE_STAGE_DIR"]);
         let state = unique_stage("remote-parent");
         std::env::set_var("AOIDE_STATE_DIR", &state);
+        std::env::set_var("AOIDE_STAGE_DIR", state.join("stage"));
 
         let mut child = session("a2a-1", "/remote/cwd", "running", "1", None);
         child.remote_parent = Some(remote_parent("yomi-strix", "ab".repeat(32).as_str(), "par1"));
@@ -2347,9 +2355,10 @@ mod tests {
         // (autogate grant, sibling rule, project inheritance all read it), and
         // the remote field never writes it.
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _env = EnvVars::save(&["AOIDE_STATE_DIR"]);
+        let _env = EnvVars::save(&["AOIDE_STATE_DIR", "AOIDE_STAGE_DIR"]);
         let state = unique_stage("remote-collision");
         std::env::set_var("AOIDE_STATE_DIR", &state);
+        std::env::set_var("AOIDE_STAGE_DIR", state.join("stage"));
 
         let par1 = session("par1", "/here", "running", "1", None);
         let mut child = session("a2a-1", "/remote/cwd", "running", "2", None);
@@ -2377,9 +2386,10 @@ mod tests {
         // orphaning it — and a key no registered node claims falls back to the
         // stored label rather than rendering blank.
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _env = EnvVars::save(&["AOIDE_STATE_DIR"]);
+        let _env = EnvVars::save(&["AOIDE_STATE_DIR", "AOIDE_STAGE_DIR"]);
         let state = unique_stage("remote-rename");
         std::env::set_var("AOIDE_STATE_DIR", &state);
+        std::env::set_var("AOIDE_STAGE_DIR", state.join("stage"));
 
         let key = "ab".repeat(32);
         aoide_storage::node_store::save_nodes(&[aoide_storage::node_store::Node {
@@ -2423,9 +2433,10 @@ mod tests {
         // matched on the parent's own session id, and rides only when
         // non-empty (an ordinary record stays byte-for-byte as before).
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _env = EnvVars::save(&["AOIDE_STATE_DIR"]);
+        let _env = EnvVars::save(&["AOIDE_STATE_DIR", "AOIDE_STAGE_DIR"]);
         let state = unique_stage("remote-children");
         std::env::set_var("AOIDE_STATE_DIR", &state);
+        std::env::set_var("AOIDE_STAGE_DIR", state.join("stage"));
 
         let key = "ab".repeat(32);
         aoide_storage::node_store::save_nodes(&[aoide_storage::node_store::Node {
@@ -2473,9 +2484,10 @@ mod tests {
         // path's own end-to-end half lives beside it (`manage.rs`'s
         // `session prune` test, `reap.rs`'s superseded-tombstone test).
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _env = EnvVars::save(&["AOIDE_STATE_DIR"]);
+        let _env = EnvVars::save(&["AOIDE_STATE_DIR", "AOIDE_STAGE_DIR"]);
         let state = unique_stage("remote-prune");
         std::env::set_var("AOIDE_STATE_DIR", &state);
+        std::env::set_var("AOIDE_STAGE_DIR", state.join("stage"));
 
         let key = "ab".repeat(32);
         aoide_storage::remote_children::append_remote_child(&ledger_row("done-par", "nodeb", &key, "C")).unwrap();
@@ -2572,9 +2584,10 @@ mod tests {
         // `node pull` caches — so the far subtree nests through the fold A
         // already does, and `remoteChildren` is only the link into it.
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _env = EnvVars::save(&["AOIDE_STATE_DIR"]);
+        let _env = EnvVars::save(&["AOIDE_STATE_DIR", "AOIDE_STAGE_DIR"]);
         let state = unique_stage("remote-nest");
         std::env::set_var("AOIDE_STATE_DIR", &state);
+        std::env::set_var("AOIDE_STAGE_DIR", state.join("stage"));
 
         // ── B's own records → B's own document (what the door stamped) ──
         let key_a = "ab".repeat(32);

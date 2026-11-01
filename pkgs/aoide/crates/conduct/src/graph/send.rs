@@ -4771,6 +4771,7 @@ mod tests {
     #[test]
     fn a_shell_wrap_is_refused_for_harness_claude_even_with_yes() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(DOOR_ENV);
         let (root, id, listener) = door_fixture("harness-shell", None);
         set_wrap(&id, |r| r.shell = true);
         let out = session_send(&send_on(Door::Cli, &["ls"], &[("id", &id), ("harness", "claude"), ("yes", "true")]));
@@ -4783,6 +4784,7 @@ mod tests {
     #[test]
     fn a_wrap_of_another_harness_is_refused_for_harness_claude() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(DOOR_ENV);
         let (root, id, listener) = door_fixture("harness-kimi", None);
         set_wrap(&id, |r| r.agent = "kimi".into());
         let out = session_send(&send_on(Door::Cli, &["ls"], &[("id", &id), ("harness", "claude"), ("yes", "true")]));
@@ -4794,6 +4796,7 @@ mod tests {
     #[test]
     fn a_claude_wrap_passes_the_harness_check_and_reaches_its_socket() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(DOOR_ENV);
         let (root, id, listener) = door_fixture("harness-claude", None);
         let out = session_send(&send_on(Door::Cli, &["ls"], &[("id", &id), ("harness", "claude"), ("yes", "true")]));
         assert_ne!(out.data.as_ref().and_then(|d| d["reason"].as_str()), Some("not-that-harness"), "{}", out.message);
@@ -4875,6 +4878,7 @@ mod tests {
     #[test]
     fn an_eidolon_send_goes_through_its_native_send_with_the_text_on_stdin() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(DOOR_ENV);
         let (root, id, listener) = door_fixture("eidolon-native", None);
         set_wrap(&id, |r| r.agent = "eidolon".into());
         let bin = fake_eidolon("native");
@@ -4905,6 +4909,7 @@ mod tests {
     #[test]
     fn a_native_send_reports_delivered_unverified_never_delivered() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(DOOR_ENV);
         let (root, id, _listener) = door_fixture("eidolon-unverified", None);
         set_wrap(&id, |r| r.agent = "eidolon".into());
         let bin = fake_eidolon("unverified");
@@ -4921,6 +4926,7 @@ mod tests {
     #[test]
     fn an_eidolon_send_from_an_agent_session_goes_as_a_peer() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(DOOR_ENV);
         let (root, id, _listener) = door_fixture("eidolon-peer", None);
         set_wrap(&id, |r| r.agent = "eidolon".into());
         let bin = fake_eidolon("peer");
@@ -4942,6 +4948,7 @@ mod tests {
     #[test]
     fn an_agent_send_dispatched_through_the_daemon_goes_as_a_peer() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(DOOR_ENV);
         let (root, id, _listener) = door_fixture("daemon-peer", None);
         set_wrap(&id, |r| r.agent = "eidolon".into());
         let bin = fake_eidolon("daemon-peer");
@@ -4964,6 +4971,7 @@ mod tests {
     #[test]
     fn a_held_send_records_the_person_fact_it_was_held_as() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(DOOR_ENV);
         let (root, id, _listener) = door_fixture("held-fact", None);
         set_wrap(&id, |r| r.agent = "eidolon".into());
         let person = deliver_local_as(&send_on(Door::Cli, &["from me"], &[("id", &id)]), &id, |_| None, |_| true);
@@ -4978,6 +4986,7 @@ mod tests {
     #[test]
     fn an_eidolon_send_held_for_approval_runs_nothing() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(DOOR_ENV);
         let (root, id, _listener) = door_fixture("eidolon-held", None);
         set_wrap(&id, |r| r.agent = "eidolon".into());
         let bin = fake_eidolon("held");
