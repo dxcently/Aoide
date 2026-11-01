@@ -14,18 +14,21 @@ child goes through the shell's palette and exec.
 - `src/smoke.rs` (smoke builds only): the smoke directory, the record, the
   ready file and the scenario confirm.
 - `src/window.rs`: `Window`. `palette`, `run`, `sessions`, `chat_open`,
-  `chat_say`, `chat_close`. It holds the exec, the confirm, a busy flag, and
-  one reader thread per open chat.
-- `src/commands.rs`: the six `#[tauri::command]` async functions, and under
-  `smoke` the seventh, `smoke_note`. Each runs its body on a blocking thread.
+  `chat_say`, `chat_close`, `asks_open`, `asks_close`. It holds the exec, the
+  confirm, a busy flag, one reader thread per open chat, the asks reader, and
+  the record of the asks it has pushed.
+- `src/commands.rs`: the eight `#[tauri::command]` async functions, and under
+  `smoke` the ninth, `smoke_note`. Each runs its body on a blocking thread.
 - `src/confirm.rs`: the `Confirm` trait and the GTK dialog, shown on the main
   thread with plain text and Cancel as the default.
 - `src/wire.rs`: the push shape a chat sends down its channel, tagged by
   `type`: `line` (one v1 chat line: `id`, `role`, `from`, `text`, `thinking`,
   `clipped`, `tool`, `ask`, `state`), `record` (any other JSON object a stream
-  printed), `other` (text), `dropped` (a line past the cap) and `end`.
-- `build.rs`: tauri-build's manifest, `COMMANDS` (the seven names).
-- `capabilities/main.json`: the six `allow-*` permissions, granted to `main`.
+  printed), `other` (text), `dropped` (a line past the cap) and `end`. The asks
+  channel has its own tagged push, `AskPush`: `open` (an ask, as the shell's
+  `View`), `gone` (`session`, `ask_id`), `other`, `dropped` and `end`.
+- `build.rs`: tauri-build's manifest, `COMMANDS` (the nine names).
+- `capabilities/main.json`: the eight `allow-*` permissions, granted to `main`.
 - `capabilities/smoke.json`: `allow-smoke-note`, read by a smoke build only.
 - `smoke/`: one JSON file per smoke scenario: `empty`, `chat` and `hostile`.
 - `tests/smoke.rs`: the headless harness, `required-features = ["smoke"]`.
@@ -52,6 +55,12 @@ child goes through the shell's palette and exec.
   the window has not listed is listed once, and refused if it is still absent.
   A send that core refuses exits non-zero, and `chat_say` returns that as an
   error with core's message, never as a reply.
+- `asks_open` follows core's `ask watch --json` through the shell's `asks::watch`
+  and pushes each change on its channel, from one reader thread: one held child
+  for the window. The window keeps each ask it pushes in a record keyed by
+  session and ask id; an ask added again replaces its record, and a removal
+  drops it only from the door that reported it. `asks_close` interrupts the child
+  and reaps it before it returns, and the record is cleared when the reader ends.
 
 ## The page
 

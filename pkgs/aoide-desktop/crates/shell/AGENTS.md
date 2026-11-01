@@ -183,6 +183,22 @@ are in README.md.
   204, 409, 422 or 401 leaves it listed.
 - A stream's asks are cleared when it opens, and rebuilt from its replay.
 
+## The ask watch (asks.rs)
+
+- The app learns of an ask from core's `ask watch --json` and from nothing
+  else. `change` is the one place a line of it is read, and a line that is not
+  a row it reads, or a row that is not core's view, is `Other` and never a
+  card (`a_row_that_is_not_cores_view_is_other_and_never_a_card`).
+- A `Held` is the app's record of what the page was shown: core's fingerprint
+  and core's visible form of the ask. It is built from core's row, never from
+  anything the page says.
+- `watch` is one held child. A child that ends within `REFUSAL_WAIT` has
+  refused, and its stderr is the error. `close` interrupts it and reads what it
+  printed from then on; nothing follows the end.
+- The row's strings are core's visible form already, with each backslash
+  doubled, so the app does not spell them again: it refuses a row that holds a
+  raw character instead.
+
 ## The fakes and the tests
 
 - The fake eidolon waits up to 20 s for its events stream to close after

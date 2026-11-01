@@ -9,6 +9,12 @@
 //! and exits with `FAKE_AOIDE_EXIT` (default 0).
 //!
 //! `session find` prints the file `FAKE_AOIDE_SESSIONS` names, when it is set.
+//! `ask watch` is a held follow too, printing the lines of the file
+//! `FAKE_AOIDE_ASKS_FILE` names and no frame of its own, or refusing with the
+//! text of `FAKE_AOIDE_ASKS_REFUSE` when that is set; it keeps no stream for an
+//! id, and its end envelope is `{"command":"ask.watch",...}`. Any other `ask`
+//! call (`ask answer`) falls to the refusal below, which exits `FAKE_AOIDE_EXIT`
+//! (default 0).
 //!
 //! A held follow is `session chat --follow`, `session trace --follow` or
 //! `session watch`, on the id it names: an id starting `hook-` keeps no trace,
@@ -43,13 +49,20 @@ fn main() {
         ["session", "chat", ..] if words.contains(&"--follow") => follow("chat", words[words.len() - 1]),
         ["session", "trace", ..] if words.contains(&"--follow") => follow("trace", words[words.len() - 1]),
         ["session", "watch", ..] => follow("watch", words[words.len() - 1]),
+        ["ask", "watch", ..] => follow("ask", ""),
         _ => refuse(),
     }
 }
 
 /// Serves one held follow on `id`, or refuses it when `id` has no such stream.
+/// The `ask` follow has no id and takes its lines from `FAKE_AOIDE_ASKS_FILE`.
 fn follow(verb: &'static str, id: &str) -> ! {
     let watch = verb == "watch";
+    let asks = verb == "ask";
+    if let Some(why) = std::env::var("FAKE_AOIDE_ASKS_REFUSE").ok().filter(|_| asks) {
+        eprintln!("{why}");
+        std::process::exit(1);
+    }
     let refused = id.starts_with("hook-") || (!watch && id.starts_with("pty-"));
     if refused {
         eprintln!("{verb} refused: the session `{id}` keeps no stream of this kind");
@@ -63,14 +76,16 @@ fn follow(verb: &'static str, id: &str) -> ! {
             write_bytes(&mut out, 512 * 1024);
             let _ = out.write_all(b"\n");
         }
-        println!("{{\"command\":\"session.{verb}\",\"gated\":false,\"message\":\"closed\",\"status\":\"ok\"}}");
+        let command = if asks { "ask.watch".to_owned() } else { format!("session.{verb}") };
+        println!("{{\"command\":\"{command}\",\"gated\":false,\"message\":\"closed\",\"status\":\"ok\"}}");
         std::process::exit(0)
     });
     let mut out = io::stdout();
     if watch {
         let _ = writeln!(out, "{{\"frame\":\"live\",\"id\":\"{id}\"}}");
     }
-    let lines = std::env::var("FAKE_AOIDE_FOLLOW_FILE").ok().and_then(|path| std::fs::read(path).ok());
+    let file = if asks { "FAKE_AOIDE_ASKS_FILE" } else { "FAKE_AOIDE_FOLLOW_FILE" };
+    let lines = std::env::var(file).ok().and_then(|path| std::fs::read(path).ok());
     for line in lines.unwrap_or_default().split(|b| *b == b'\n') {
         let _ = out.write_all(line);
         let _ = out.write_all(b"\n");

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-asks-open"
+description = "Enables the asks_open command without any pre-configured scope."
+commands.allow = ["asks_open"]
+
+[[permission]]
+identifier = "deny-asks-open"
+description = "Denies the asks_open command without any pre-configured scope."
+commands.deny = ["asks_open"]

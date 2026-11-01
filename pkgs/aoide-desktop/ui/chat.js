@@ -7,11 +7,14 @@ const chatTitle = document.getElementById("chat-title");
 const statusLine = document.getElementById("status");
 const log = document.getElementById("log");
 const errorLine = document.getElementById("error");
+const asksBox = document.getElementById("asks");
+const asksNote = document.getElementById("asks-note");
 const composer = document.getElementById("composer");
 const input = document.getElementById("input");
 const sendButton = document.getElementById("send");
 
 let open = null;
+const pending = new Map();
 
 function node(tag, className, text) {
   const made = document.createElement(tag);
@@ -83,6 +86,82 @@ function askCard(line) {
   const session = open ? open.id : "<session>";
   card.appendChild(node("div", "ask-how", "answer with: aoide ask answer " + session + " " + ask.id + " <label> --expect <fingerprint>"));
   return card;
+}
+
+function choicesList(view) {
+  const choices = node("ul", "ask-choices");
+  for (const answer of view.answers) choices.appendChild(node("li", "", answer));
+  for (const option of view.options) {
+    const item = node("li", "");
+    item.appendChild(node("span", "ask-label", option.label));
+    if (option.description) item.appendChild(node("span", "ask-description", option.description));
+    choices.appendChild(item);
+  }
+  return choices;
+}
+
+function openAskCard(view) {
+  const card = node("div", "ask");
+  card.appendChild(node("div", "ask-kind", view.kind));
+  card.appendChild(node("div", "ask-prompt", view.prompt));
+  if (view.call !== undefined) card.appendChild(node("pre", "ask-call", view.call));
+  card.appendChild(choicesList(view));
+  card.appendChild(node("div", "ask-how", "fingerprint " + view.fingerprint));
+  return card;
+}
+
+function drawAsks() {
+  asksBox.textContent = "";
+  const mine = open ? pending.get(open.id) : undefined;
+  if (mine) for (const view of mine.values()) asksBox.appendChild(openAskCard(view));
+  for (const item of sessionList.children) {
+    const held = pending.get(item.dataset.session);
+    item.classList.toggle("asking", held !== undefined && held.size > 0);
+  }
+}
+
+function onAskPush(push) {
+  switch (push.type) {
+    case "open": {
+      const held = pending.get(push.ask.session) || new Map();
+      held.set(push.ask.ask_id, push.ask);
+      pending.set(push.ask.session, held);
+      drawAsks();
+      break;
+    }
+    case "gone": {
+      const held = pending.get(push.session);
+      if (held) {
+        held.delete(push.ask_id);
+        if (held.size === 0) pending.delete(push.session);
+      }
+      drawAsks();
+      break;
+    }
+    case "other":
+      asksNote.textContent = push.text;
+      break;
+    case "dropped":
+      asksNote.textContent = "an asks line of " + push.bytes + " bytes was dropped";
+      break;
+    case "end":
+      pending.clear();
+      asksNote.textContent = "the asks watch closed";
+      drawAsks();
+      break;
+    default:
+      break;
+  }
+}
+
+async function openAsks() {
+  const channel = new Channel();
+  channel.onmessage = onAskPush;
+  try {
+    await invoke("asks_open", { channel });
+  } catch (error) {
+    asksNote.textContent = String(error);
+  }
 }
 
 function stateText(state) {
@@ -159,6 +238,7 @@ async function openChat(id, title) {
   chatTitle.textContent = title;
   open = { id };
   markSelected(id);
+  drawAsks();
   const channel = new Channel();
   channel.onmessage = onPush;
   try {
@@ -201,6 +281,7 @@ async function loadSessions(autoOpen) {
   for (const session of sessions) sessionList.appendChild(sessionItem(session));
   if (reply.code !== 0) showError(reply.stderr || "sessions failed");
   if (open) markSelected(open.id);
+  drawAsks();
   if (autoOpen && !open && sessions.length > 0) {
     const first = sessions[0];
     await openChat(first.sessionId, first.label || first.sessionId);
@@ -237,4 +318,5 @@ input.addEventListener("keydown", (event) => {
 
 document.getElementById("refresh").addEventListener("click", () => loadSessions(false));
 
+openAsks();
 loadSessions(true);

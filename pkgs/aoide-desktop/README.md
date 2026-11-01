@@ -16,10 +16,10 @@ GUI-free libraries; `crates/app` is the one window and the one binary.
   `crates/exec/README.md`.
 - `crates/shell` (`aoide-desktop-shell`): the app's own doors and the asks they
   raise, over the door and exec crates. See `crates/shell/README.md`. Its door
-  use (launch, watch, and its direct answer) stays its own; aoided's `aoide ask`
-  verbs are not yet the app's path to an Eidolon ask.
+  use (launch, watch, and its direct answer) stays its own; the asks the window
+  shows come from core's `aoide ask watch`.
 - `crates/app` (`aoide-desktop-app`): the one window over the shell, and the
-  `aoide-desktop` binary. Its six Tauri commands are granted to the `main`
+  `aoide-desktop` binary. Its eight Tauri commands are granted to the `main`
   window alone. See `crates/app/README.md`.
 
 The app crate calls the shell. The shell sits on the door and exec crates. The

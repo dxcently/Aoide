@@ -5,6 +5,11 @@
 //! confirm offers no yes; the app's own pane shows the whole input and takes the
 //! yes there, under the digest of exactly what it showed.
 //!
+//! Core reports the asks too: `aoide ask watch --json` prints a row for each
+//! open ask of an Eidolon door, with the ask in its visible form and the
+//! fingerprint core derived from it. `Watch` follows that stream and `change`
+//! reads one row into a `Held` (the window's record of an ask) or a removal.
+//!
 //! The rules are Eidolon's, from `crates/web/src/user.rs`. An approval offers
 //! `yes` and `no`, and a question offers its option labels. Only an approval's
 //! `yes` approves: `eidolon_core::user::Consent` is given when the label is
@@ -12,10 +17,13 @@
 
 use std::net::SocketAddr;
 use std::path::Path;
+use std::time::Duration;
 
 use aoide_door::Ask;
-use crate::exec::untrusted::{visible_json, visible_json_line};
-use serde_json::json;
+use crate::exec::untrusted::{is_unsafe, visible, visible_json, visible_json_line};
+use crate::exec::{Event, Exec, Follow};
+use serde::Serialize;
+use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
 /// The dialog's cap in bytes. Above it, or above [`CAP_LINES`], the native confirm offers no yes.
@@ -179,6 +187,216 @@ pub fn curl_line(addr: SocketAddr, token_file: &Path, ask: &Ask, label: &str) ->
 /// One POSIX shell word: single quotes, each `'` written `'\''`.
 fn sq(text: &str) -> String {
     format!("'{}'", text.replace('\'', r"'\''"))
+}
+
+/// One open ask as core's `ask watch` reported it: the window's record of what
+/// the page was shown. `ask` is core's visible form of the door's ask, and
+/// `fingerprint` is the one core derived from the session, the port, the ask id
+/// and that form; an answer names it with `--expect`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Held {
+    pub session: String,
+    pub port: u16,
+    pub ask_id: u64,
+    pub fingerprint: String,
+    pub ask: Ask,
+}
+
+/// One option of a question, as the page draws it.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct OptionView {
+    pub label: String,
+    pub description: String,
+}
+
+/// An ask as the page draws it. `call` is an approval's whole dialog text, and
+/// `digest` its SHA-256 in hex; `capped` says the native confirm offers no yes
+/// for it. The page is shown the fingerprint and never sends it back.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct View {
+    pub session: String,
+    pub ask_id: u64,
+    pub kind: &'static str,
+    pub prompt: String,
+    pub answers: Vec<String>,
+    pub options: Vec<OptionView>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub call: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub digest: Option<String>,
+    pub capped: bool,
+    pub fingerprint: String,
+}
+
+impl Held {
+    /// The ask as the page draws it.
+    pub fn view(&self) -> View {
+        let shown = dialog(&self.ask, YES);
+        let (kind, prompt, answers, options) = match &self.ask {
+            Ask::Approval { prompt, answers, .. } => ("approval", prompt.clone(), answers.to_vec(), Vec::new()),
+            Ask::Question { prompt, options, .. } => {
+                let options = options
+                    .iter()
+                    .map(|o| OptionView { label: o.label.clone(), description: o.description.clone().unwrap_or_default() })
+                    .collect();
+                ("question", prompt.clone(), Vec::new(), options)
+            }
+        };
+        View {
+            session: self.session.clone(),
+            ask_id: self.ask_id,
+            kind,
+            prompt,
+            answers,
+            options,
+            call: shown.as_ref().map(|d| d.text().to_owned()),
+            digest: shown.as_ref().map(|d| hex(&d.digest())),
+            capped: shown.as_ref().is_some_and(Dialog::capped),
+            fingerprint: self.fingerprint.clone(),
+        }
+    }
+}
+
+/// A digest as lowercase hex.
+pub fn hex(digest: &[u8; 32]) -> String {
+    digest.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// What one line of `ask watch --json` says.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Change {
+    /// An ask is open, or open with other content than before.
+    Added(Box<Held>),
+    /// The ask left the store: answered, settled, or its door went.
+    Removed { session: String, port: u16, ask_id: u64 },
+    /// The stream closed: core's `end` row, its closing envelope, or the child's end.
+    End,
+    /// A line that is not a row this app reads, spelled.
+    Other(String),
+    /// A line past the exec crate's cap, dropped; its length in bytes.
+    Dropped(usize),
+}
+
+/// Reads one line of `ask watch --json`. A row is an ask only when core's view
+/// of it holds no character a terminal must not be handed (core spells them), its
+/// ask is one this app reads, and the ask id inside it is the row's. Anything
+/// else is `Other`, never a card.
+pub fn change(text: &str) -> Change {
+    let Ok(value) = serde_json::from_str::<Value>(text) else {
+        return Change::Other(visible(text));
+    };
+    let closing = value["type"] == "end" || (value["command"].is_string() && value["status"].is_string());
+    if closing {
+        return Change::End;
+    }
+    row(&value).unwrap_or_else(|| Change::Other(visible(text)))
+}
+
+fn row(value: &Value) -> Option<Change> {
+    let session = value["sessionId"].as_str()?.to_owned();
+    let port = u16::try_from(value["port"].as_u64()?).ok()?;
+    let ask_id = value["askId"].as_u64()?;
+    if session.chars().any(is_unsafe) {
+        return None;
+    }
+    match value["type"].as_str()? {
+        "removed" => Some(Change::Removed { session, port, ask_id }),
+        "added" => {
+            let fingerprint = value["fingerprint"].as_str().filter(|f| !f.is_empty() && f.chars().all(|c| c.is_ascii_alphanumeric()))?;
+            let ask: Ask = serde_json::from_value(value["ask"].clone()).ok()?;
+            if !is_shown(&value["ask"]) || self::ask_id(&ask) != ask_id {
+                return None;
+            }
+            Some(Change::Added(Box::new(Held { session, port, ask_id, fingerprint: fingerprint.to_owned(), ask })))
+        }
+        _ => None,
+    }
+}
+
+/// Whether no string or key in `value` holds a character a terminal must not be
+/// handed: core's view spells each one, so a raw one is not core's view.
+fn is_shown(value: &Value) -> bool {
+    match value {
+        Value::String(text) => !text.chars().any(is_unsafe),
+        Value::Array(items) => items.iter().all(is_shown),
+        Value::Object(map) => map.iter().all(|(key, v)| !key.chars().any(is_unsafe) && is_shown(v)),
+        _ => true,
+    }
+}
+
+/// How long `ask watch` may stay silent before it is taken as running. One that
+/// refuses exits at once.
+const REFUSAL_WAIT: Duration = Duration::from_millis(500);
+
+/// What one event of the stream says; a blank line says nothing.
+fn read(event: Event) -> Option<Change> {
+    match event {
+        Event::Line(bytes) if bytes.iter().all(u8::is_ascii_whitespace) => None,
+        Event::Line(bytes) => Some(change(&String::from_utf8_lossy(&bytes))),
+        Event::Dropped(bytes) => Some(Change::Dropped(bytes)),
+        Event::Eof => Some(Change::End),
+    }
+}
+
+/// The held `aoide ask watch`: one per window. It prints nothing while no ask is
+/// open, so a child that stays up for `REFUSAL_WAIT` is the watch.
+pub struct Watch {
+    follow: Follow,
+    pending: Option<Event>,
+    ended: bool,
+}
+
+/// Starts `ask watch`. A child that ends at once has refused, and its stderr is
+/// the reason, spelled.
+pub fn watch(exec: &Exec) -> Result<Watch, String> {
+    let follow = exec.follow(&["ask", "watch"], &[], &[]).map_err(|e| visible(&e.to_string()))?;
+    match follow.next(REFUSAL_WAIT) {
+        Some(Event::Eof) => {
+            let ended = follow.end().map_err(|e| visible(&e.to_string()))?;
+            let text = String::from_utf8_lossy(&ended.stderr);
+            Err(match text.trim() {
+                "" => visible(&format!("ask watch exited with {:?}", ended.status.and_then(|s| s.code()))),
+                text => visible(text),
+            })
+        }
+        pending => Ok(Watch { follow, pending, ended: false }),
+    }
+}
+
+impl Watch {
+    /// The next change, or `None` when none comes within `wait` or the stream
+    /// has ended.
+    pub fn next(&mut self, wait: Duration) -> Option<Change> {
+        loop {
+            if self.ended {
+                return None;
+            }
+            let event = match self.pending.take() {
+                Some(event) => event,
+                None => self.follow.next(wait)?,
+            };
+            let Some(change) = read(event) else { continue };
+            self.ended = matches!(change, Change::End);
+            return Some(change);
+        }
+    }
+
+    /// Interrupts the child, reaps it, and returns what it printed from the
+    /// interrupt on, through its closing line, read as `next` reads. Nothing
+    /// follows the end.
+    pub fn close(self) -> Result<Vec<Change>, String> {
+        let Watch { follow, mut ended, .. } = self;
+        let rest = follow.end().map_err(|e| visible(&e.to_string()))?.rest;
+        let mut out = Vec::new();
+        for change in rest.into_iter().filter_map(read) {
+            if ended {
+                break;
+            }
+            ended = matches!(change, Change::End);
+            out.push(change);
+        }
+        Ok(out)
+    }
 }
 
 #[cfg(test)]

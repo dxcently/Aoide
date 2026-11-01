@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-asks-close"
+description = "Enables the asks_close command without any pre-configured scope."
+commands.allow = ["asks_close"]
+
+[[permission]]
+identifier = "deny-asks-close"
+description = "Denies the asks_close command without any pre-configured scope."
+commands.deny = ["asks_close"]

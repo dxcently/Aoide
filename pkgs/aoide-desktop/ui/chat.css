@@ -142,6 +142,11 @@ body {
 .ask-description { color: var(--dim); margin-left: 0.5rem; }
 .ask-how { color: var(--dim); font-family: ui-monospace, monospace; font-size: 12px; }
 
+.asks { max-height: 40%; overflow-y: auto; padding: 0 0.8rem; }
+.asks .ask { max-width: none; margin: 0.3rem 0; }
+.ask-call { margin: 0.3rem 0; max-height: 14rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-family: ui-monospace, monospace; font-size: 12px; }
+.session.asking .session-label { color: var(--accent); }
+
 .error { color: var(--bad); padding: 0 0.8rem; min-height: 1.2rem; font-size: 12px; white-space: pre-wrap; }
 
 .composer { display: flex; gap: 0.5rem; padding: 0.6rem 0.8rem; border-top: 1px solid var(--line); background: var(--pane); }

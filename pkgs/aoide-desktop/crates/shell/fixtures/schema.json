@@ -92,6 +92,16 @@
       ]
     },
     {
+      "path": ["ask", "watch"],
+      "verb": "watch",
+      "summary": "Stream the asks store: one line per ask added or removed, until Ctrl-C.",
+      "args": [],
+      "flags": [
+        {"name": "json", "type": "bool", "description": "Structured I/O."}
+      ],
+      "doors": ["cli"]
+    },
+    {
       "path": ["melete", "status"],
       "verb": "show",
       "summary": "Show the melete store.",

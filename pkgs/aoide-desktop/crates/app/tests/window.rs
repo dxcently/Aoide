@@ -4,10 +4,11 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use aoide_desktop_app::{Confirm, Push, Sink, Window};
+use aoide_desktop_app::{AskPush, AskSink, Confirm, Push, Sink, Window};
 use aoide_desktop_shell::exec::Exec;
 
 const WAIT: Duration = Duration::from_secs(5);
+const ASKS: &str = include_str!("../../shell/tests/fixtures/ask-watch.jsonl");
 
 /// The shell's fake aoide, built beside this test binary by the run's script.
 fn fake_aoide() -> PathBuf {
@@ -269,4 +270,105 @@ fn a_send_core_refuses_reaches_the_page_as_an_error_and_not_a_reply() {
     fx.window.sessions().expect("the sessions are listed");
     let error = fx.window.chat_say("s1", "hi").expect_err("a refused send is an error");
     assert!(error.contains("is not a `claude` session"), "{error}");
+}
+
+/// The fake aoide's asks file for `ask watch`, holding `text`.
+fn asks_file(tag: &str, text: &str) -> (&'static str, String) {
+    let path = std::env::temp_dir().join(format!("aoide-app-asks-{tag}-{}.jsonl", std::process::id()));
+    fs::write(&path, text).expect("the asks file is written");
+    ("FAKE_AOIDE_ASKS_FILE", path.display().to_string())
+}
+
+fn ask_collector() -> (AskSink, Arc<Mutex<Vec<AskPush>>>) {
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let into = seen.clone();
+    (Arc::new(move |push| into.lock().unwrap().push(push)), seen)
+}
+
+fn wait_for_asks(seen: &Mutex<Vec<AskPush>>, done: impl Fn(&[AskPush]) -> bool) {
+    let until = Instant::now() + WAIT;
+    while !done(&seen.lock().unwrap()) {
+        assert!(Instant::now() < until, "the asks did not arrive within the bound: {:?}", seen.lock().unwrap());
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+fn opened(seen: &[AskPush]) -> Vec<(String, u64)> {
+    seen.iter()
+        .filter_map(|p| match p {
+            AskPush::Open { ask } => Some((ask.session.clone(), ask.ask_id)),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn the_asks_watch_pushes_each_ask_and_close_ends_it_by_interrupt() {
+    let fx = fixture_with("asks-push", &[], Box::new(Answer::default()), &[asks_file("push", ASKS)]);
+    let (sink, seen) = ask_collector();
+    fx.window.asks_open(sink).expect("the asks open");
+    wait_for_asks(&seen, |pushes| opened(pushes).len() == 3);
+    assert_eq!(opened(&seen.lock().unwrap()), [("s-1".to_owned(), 1), ("s-1".to_owned(), 2), ("s-1".to_owned(), 3)]);
+    assert_eq!(fx.window.live_children(), 1, "one held child for the window");
+    fx.window.asks_close().expect("the asks close");
+    assert_eq!(fx.window.live_children(), 0, "the child is reaped");
+    let pushes = seen.lock().unwrap();
+    assert!(
+        pushes.iter().any(|p| matches!(p, AskPush::End)),
+        "the envelope the fake prints on SIGINT arrives after the close: {pushes:?}"
+    );
+}
+
+#[test]
+fn a_second_asks_open_leaves_one_child() {
+    let fx = fixture_with("asks-twice", &[], Box::new(Answer::default()), &[asks_file("twice", ASKS)]);
+    let (sink, _seen) = ask_collector();
+    fx.window.asks_open(sink.clone()).expect("the first open");
+    fx.window.asks_open(sink).expect("the second open");
+    assert_eq!(fx.window.live_children(), 1, "one held child for the window");
+    fx.window.asks_close().expect("the asks close");
+    assert_eq!(fx.window.live_children(), 0, "the close leaves none");
+}
+
+#[test]
+fn an_ask_that_leaves_the_store_is_pushed_gone() {
+    let first = ASKS.lines().next().unwrap();
+    let removed = first.replace("\"added\"", "\"removed\"");
+    let fx = fixture_with("asks-gone", &[], Box::new(Answer::default()), &[asks_file("gone", &format!("{first}\n{removed}\n"))]);
+    let (sink, seen) = ask_collector();
+    fx.window.asks_open(sink).expect("the asks open");
+    wait_for_asks(&seen, |pushes| pushes.iter().any(|p| matches!(p, AskPush::Gone { .. })));
+    fx.window.asks_close().expect("the asks close");
+    let pushes = seen.lock().unwrap();
+    assert!(matches!(&pushes[0], AskPush::Open { ask } if ask.ask_id == 1));
+    assert_eq!(pushes[1], AskPush::Gone { session: "s-1".to_owned(), ask_id: 1 });
+}
+
+#[test]
+fn an_asks_watch_core_refuses_is_an_error_and_leaves_no_child() {
+    let extra = [asks_file("refused", ASKS), ("FAKE_AOIDE_ASKS_REFUSE", "the asks store is unreadable".to_owned())];
+    let fx = fixture_with("asks-refused", &[], Box::new(Answer::default()), &extra);
+    let (sink, _seen) = ask_collector();
+    let why = fx.window.asks_open(sink).expect_err("a refused watch is an error");
+    assert!(why.contains("the asks store is unreadable"), "{why}");
+    assert_eq!(fx.window.live_children(), 0);
+}
+
+#[test]
+fn every_pushed_ask_string_is_spelled_and_a_raw_one_is_no_card() {
+    let raw = ASKS.lines().nth(1).unwrap().replace("Which rice?", "Which\u{202e} rice?");
+    let text = format!("{}\n{raw}\n{}\n", ASKS.lines().next().unwrap(), ASKS.lines().nth(2).unwrap());
+    let fx = fixture_with("asks-spelled", &[], Box::new(Answer::default()), &[asks_file("spelled", &text)]);
+    let (sink, seen) = ask_collector();
+    fx.window.asks_open(sink).expect("the asks open");
+    wait_for_asks(&seen, |pushes| pushes.len() == 3);
+    fx.window.asks_close().expect("the asks close");
+    let pushes = seen.lock().unwrap();
+    assert_eq!(opened(&pushes), [("s-1".to_owned(), 1), ("s-1".to_owned(), 3)], "the raw row is no card");
+    let wire: Vec<String> = pushes.iter().map(|p| serde_json::to_string(p).expect("a push serializes")).collect();
+    for push in &wire {
+        assert!(!push.contains('\u{202e}') && !push.contains('\u{1b}'), "a raw escape reaches the page: {push}");
+    }
+    assert!(wire.iter().any(|p| p.starts_with(r#"{"type":"other","text":"#)), "the raw row comes as a spelled note: {wire:?}");
+    assert!(wire.iter().any(|p| p.contains(r#""fingerprint":"0badc0de0badc0de""#) && p.starts_with(r#"{"type":"open""#)), "{wire:?}");
 }

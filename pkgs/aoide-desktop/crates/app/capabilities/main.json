@@ -8,6 +8,8 @@
     "allow-sessions",
     "allow-chat-open",
     "allow-chat-say",
-    "allow-chat-close"
+    "allow-chat-close",
+    "allow-asks-open",
+    "allow-asks-close"
   ]
 }

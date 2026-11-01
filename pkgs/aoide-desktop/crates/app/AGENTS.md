@@ -41,7 +41,15 @@ in `../../AGENTS.md`.
   exits non-zero is an `Err`, so the page shows an error, never a bubble
   (`a_send_core_refuses_reaches_the_page_as_an_error_and_not_a_reply`).
 - Every string the window pushes or replies with passes `visible` (or `spell`
-  for JSON). `every_pushed_string_is_spelled` holds that for a chat line.
+  for JSON). `every_pushed_string_is_spelled` holds that for a chat line. An ask
+  string is core's visible form already, so it is not spelled again: a row that
+  holds a raw character is not pushed as an ask
+  (`every_pushed_ask_string_is_spelled_and_a_raw_one_is_no_card`).
+- The window follows the asks with one held child. `asks_close` joins the reader
+  before it returns, and a reader ends by stop flag, then interrupts and reaps
+  its child through `Watch::close` (`the_asks_watch_pushes_each_ask_and_close_ends_it_by_interrupt`,
+  `a_second_asks_open_leaves_one_child`). The window's record of the asks is
+  built from core's rows only.
 - `run()` takes no argument unless the `smoke` feature is on. A build without
   it refuses any argument by name, with exit 2, before GTK starts. Under
   `smoke` the one argument is `--smoke <dir>`.

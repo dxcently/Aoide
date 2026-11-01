@@ -1,6 +1,7 @@
 //! The window's state and its calls. Each method is synchronous; the commands
 //! run it on a blocking thread. No method holds a lock across a confirm or a
-//! child: the chat map lock is taken only to insert or remove an entry.
+//! child: the chat map lock is taken only to insert or remove an entry, and the
+//! asks record's lock only to read or change the record.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -8,6 +9,7 @@ use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
+use aoide_desktop_shell::asks::{self, Change, Held};
 use aoide_desktop_shell::chat::record::spell;
 use aoide_desktop_shell::chat;
 use aoide_desktop_shell::exec::untrusted::visible;
@@ -17,7 +19,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::confirm::Confirm;
-use crate::wire::{wire, Sink};
+use crate::wire::{ask_wire, wire, AskSink, Sink};
 
 /// How long one poll of a chat's stream waits before the reader checks its stop flag.
 const POLL: Duration = Duration::from_millis(100);
@@ -28,10 +30,12 @@ pub struct Window {
     busy: AtomicBool,
     chats: Mutex<HashMap<String, Reader>>,
     harnesses: Mutex<HashMap<String, Option<String>>>,
+    asks: Mutex<Option<Reader>>,
+    held: Arc<Mutex<Vec<Held>>>,
     live: Arc<AtomicUsize>,
 }
 
-/// One chat's reader thread: it owns the `Chat` until `stop` is set.
+/// One reader thread: it owns a `Chat`, or the `Watch`, until `stop` is set.
 struct Reader {
     stop: Arc<AtomicBool>,
     thread: JoinHandle<()>,
@@ -67,11 +71,14 @@ impl Window {
             busy: AtomicBool::new(false),
             chats: Mutex::new(HashMap::new()),
             harnesses: Mutex::new(HashMap::new()),
+            asks: Mutex::new(None),
+            held: Arc::new(Mutex::new(Vec::new())),
             live: Arc::new(AtomicUsize::new(0)),
         }
     }
 
-    /// The held children the window runs now: one per open chat, until its reader ends.
+    /// The held children the window runs now: one per open chat and one for the
+    /// asks watch, each until its reader ends.
     pub fn live_children(&self) -> usize {
         self.live.load(Ordering::SeqCst)
     }
@@ -181,6 +188,52 @@ impl Window {
         Ok(())
     }
 
+    /// Follows core's `ask watch` and pushes each change to `sink` from one reader
+    /// thread. The window keeps each ask it pushes, keyed by session and ask id;
+    /// an answer is built from that record, never from what the page says. A
+    /// second open ends the first.
+    pub fn asks_open(&self, sink: AskSink) -> Result<(), String> {
+        self.asks_close()?;
+        let mut watch = asks::watch(&self.exec)?;
+        let stop = Arc::new(AtomicBool::new(false));
+        let stop_in = stop.clone();
+        let held = self.held.clone();
+        let live = self.live.clone();
+        live.fetch_add(1, Ordering::SeqCst);
+        let thread = std::thread::spawn(move || {
+            while !stop_in.load(Ordering::SeqCst) {
+                if let Some(change) = watch.next(POLL) {
+                    let end = matches!(change, Change::End);
+                    keep(&held, &change);
+                    sink(ask_wire(change));
+                    if end {
+                        break;
+                    }
+                }
+            }
+            if let Ok(rest) = watch.close() {
+                for change in rest {
+                    sink(ask_wire(change));
+                }
+            }
+            held.lock().expect("the asks record is not poisoned").clear();
+            live.fetch_sub(1, Ordering::SeqCst);
+        });
+        *self.asks.lock().expect("the asks reader is not poisoned") = Some(Reader { stop, thread });
+        Ok(())
+    }
+
+    /// Ends the asks watch: its reader interrupts the child and reaps it before
+    /// this returns.
+    pub fn asks_close(&self) -> Result<(), String> {
+        let reader = self.asks.lock().expect("the asks reader is not poisoned").take();
+        if let Some(reader) = reader {
+            reader.stop.store(true, Ordering::SeqCst);
+            reader.thread.join().map_err(|_| "the asks reader panicked".to_owned())?;
+        }
+        Ok(())
+    }
+
     /// One confirm at a time: a confirm asked while another is open is refused.
     fn ask(&self, verb: &str, text: &str) -> Ask {
         if self.busy.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst).is_err() {
@@ -193,6 +246,23 @@ impl Window {
         } else {
             Ask::No
         }
+    }
+}
+
+/// Applies one change to the record of the open asks. An ask is keyed by its
+/// session and ask id: one added again replaces the record, and a removal drops
+/// it only from the door that reported it.
+fn keep(held: &Mutex<Vec<Held>>, change: &Change) {
+    let mut record = held.lock().expect("the asks record is not poisoned");
+    match change {
+        Change::Added(ask) => {
+            record.retain(|h| !(h.session == ask.session && h.ask_id == ask.ask_id));
+            record.push((**ask).clone());
+        }
+        Change::Removed { session, port, ask_id } => {
+            record.retain(|h| !(h.session == *session && h.ask_id == *ask_id && h.port == *port));
+        }
+        _ => {}
     }
 }
 
