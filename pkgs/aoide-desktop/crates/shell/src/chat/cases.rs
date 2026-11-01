@@ -16,9 +16,9 @@ pub struct Case {
 /// The cases, in the order they are tried.
 pub const CASES: &[Case] = &[
     Case {
-        name: "trace",
-        words: &["session", "trace"],
-        flags: &[("follow", None), ("tail", Some("200"))],
+        name: "chat",
+        words: &["session", "chat"],
+        flags: &[("follow", None)],
     },
     Case {
         name: "watch",

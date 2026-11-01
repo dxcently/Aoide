@@ -268,7 +268,7 @@ chat::say(exec, id, text)
   the child's env is child_env's for a send: no session id, no autogate
 
 chat::follow(exec, id)                    cases::CASES, in order
-  for each case (trace, then watch):
+  for each case (chat, then watch):
     exec.follow(case.words, case.flags, [id])     a held child
     next(5 s)
       a line, or silence  -> Chat { case, pending }   this case answers
@@ -276,15 +276,27 @@ chat::follow(exec, id)                    cases::CASES, in order
   every case refused      -> FollowError::Refused { reasons }
 
 Chat::next(wait)  -> record::line(text)
-                       a JSON object: Push::Record, strings spelled
-                       any other text: Push::Other, spelled
+                       a v1 chat line:          Push::Line, the fields the page
+                                                renders, each string spelled
+                       core's closing envelope: Push::End
+                       any other JSON object:   Push::Record, strings spelled
+                       any other text:          Push::Other, spelled
                      Dropped(n) for a line past the exec crate's cap, n bytes
+                     a Line whose id was shown already is skipped
+                     after End, None
 Chat::close()     -> SIGINT through the held child; the events after it
 ```
 
-- `trace` runs `session trace --json --follow --tail=200 -- <id>`, and
-  `watch` runs `session watch --json -- <id>`. A trace prints raw journal
-  lines, not the one-shot's steps projection: projecting them is a later mode.
+- `chat` runs `session chat --json --follow -- <id>`: core reads the session's
+  source through its harness's chat adapter and prints one v1 chat line per
+  message (CONTRACTS.md, "The chat line"), then an outcome envelope. `watch`
+  runs `session watch --json -- <id>`.
+- A line is a chat line when its `v` is 1 and it names an `id` and a `role`.
+  A role outside `user`, `agent`, `tool` and `system` is `system`; a state
+  outside `waiting` and `settled` is no state; a field the contract adds later
+  is not read; a field of the wrong type is as if absent.
+- The envelope is the object that names a string `command` and a string
+  `status`. A chat line names neither.
 - A watch's first line is a JSON frame, and its other lines are text.
 
 ## The fakes
@@ -311,9 +323,11 @@ print nothing. Any other call sleeps `FAKE_AOIDE_SLEEP` seconds, writes
 `FAKE_AOIDE_STDERR_BYTES` bytes to stderr, and exits with `FAKE_AOIDE_EXIT`.
 Each call is appended to the file `FAKE_AOIDE_RECORD` names.
 
-A held follow is `session trace --follow` or `session watch`, on the id it
-names. An id starting `hook-` keeps no trace and no PTY, so both refuse; an id
-starting `pty-` keeps no trace, so only `session watch` answers. Its first
-line is a JSON frame. Each then prints the lines of the file
-`FAKE_AOIDE_FOLLOW_FILE` names, one every 30 ms, and waits. SIGINT ends it: it
-prints `{"ok":true,"followed":true}` and exits zero.
+A held follow is `session chat --follow`, `session trace --follow` or
+`session watch`, on the id it names. An id starting `hook-` keeps no trace, no
+chat and no PTY, so all three refuse; an id starting `pty-` keeps no trace and
+no chat, so only `session watch` answers. A watch's first line is a JSON frame.
+Each then prints the lines of the file `FAKE_AOIDE_FOLLOW_FILE` names, one every
+30 ms, and waits. SIGINT ends it: it prints an outcome envelope
+(`{"command":"session.<verb>","gated":false,"message":"closed","status":"ok"}`)
+and exits zero.

@@ -18,7 +18,10 @@ child goes through the shell's palette and exec.
   `smoke` the seventh, `smoke_note`. Each runs its body on a blocking thread.
 - `src/confirm.rs`: the `Confirm` trait and the GTK dialog, shown on the main
   thread with plain text and Cancel as the default.
-- `src/wire.rs`: the push shape a chat sends down its channel.
+- `src/wire.rs`: the push shape a chat sends down its channel, tagged by
+  `type`: `line` (one v1 chat line: `id`, `role`, `from`, `text`, `thinking`,
+  `clipped`, `tool`, `ask`, `state`), `record` (any other JSON object a stream
+  printed), `other` (text), `dropped` (a line past the cap) and `end`.
 - `build.rs`: tauri-build's manifest, `COMMANDS` (the seven names).
 - `capabilities/main.json`: the six `allow-*` permissions, granted to `main`.
 - `capabilities/smoke.json`: `allow-smoke-note`, read by a smoke build only.

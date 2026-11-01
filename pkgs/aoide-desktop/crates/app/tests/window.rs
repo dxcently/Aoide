@@ -191,7 +191,7 @@ fn chat_close_ends_the_child_by_interrupt_and_reaps_it() {
     assert_eq!(fx.window.live_children(), 0, "the child is reaped");
     let pushes = seen.lock().unwrap();
     assert!(
-        pushes.iter().any(|p| matches!(p, Push::Record { value } if value["followed"] == true)),
+        pushes.iter().any(|p| matches!(p, Push::End)),
         "the envelope the fake prints on SIGINT arrives after the close: {pushes:?}"
     );
 }

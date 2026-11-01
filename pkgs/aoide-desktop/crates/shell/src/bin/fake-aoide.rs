@@ -8,12 +8,14 @@
 //! `FAKE_AOIDE_STDERR` and `FAKE_AOIDE_STDERR_BYTES` bytes of `x` to stderr,
 //! and exits with `FAKE_AOIDE_EXIT` (default 0).
 //!
-//! A held follow is `session trace --follow` or `session watch`, on the id it
-//! names: an id starting `hook-` keeps no trace and no PTY, so both refuse; an
-//! id starting `pty-` keeps no trace, so only `session watch` answers. A
-//! watch's first line is a JSON frame. Both then print each line of the file
-//! `FAKE_AOIDE_FOLLOW_FILE` names, one every 30 ms, and wait. SIGINT ends them:
-//! they print `{"ok":true,"followed":true}` and exit zero.
+//! A held follow is `session chat --follow`, `session trace --follow` or
+//! `session watch`, on the id it names: an id starting `hook-` keeps no trace,
+//! no chat and no PTY, so all three refuse; an id starting `pty-` keeps no
+//! trace and no chat, so only `session watch` answers. A watch's first line is
+//! a JSON frame. Each then prints each line of the file `FAKE_AOIDE_FOLLOW_FILE`
+//! names, one every 30 ms, and waits. SIGINT ends them: they print an outcome
+//! envelope, `{"command":"session.<verb>","gated":false,"message":"closed",
+//! "status":"ok"}`, and exit zero.
 
 use std::collections::BTreeMap;
 use std::fs::OpenOptions;
@@ -35,28 +37,30 @@ fn main() {
         ["schema", "--json"] if unset("FAKE_AOIDE_NO_SCHEMA") => print!("{SCHEMA}"),
         ["config", "--json"] if unset("FAKE_AOIDE_NO_CONFIG") => print!("{}", config_text()),
         ["note", "add", ..] => println!("{{\"ok\":true}}"),
-        ["session", "trace", ..] if words.contains(&"--follow") => follow(words[words.len() - 1], false),
-        ["session", "watch", ..] => follow(words[words.len() - 1], true),
+        ["session", "chat", ..] if words.contains(&"--follow") => follow("chat", words[words.len() - 1]),
+        ["session", "trace", ..] if words.contains(&"--follow") => follow("trace", words[words.len() - 1]),
+        ["session", "watch", ..] => follow("watch", words[words.len() - 1]),
         _ => refuse(),
     }
 }
 
 /// Serves one held follow on `id`, or refuses it when `id` has no such stream.
-fn follow(id: &str, watch: bool) -> ! {
-    let trace_refused = id.starts_with("pty-") || id.starts_with("hook-");
-    if (!watch && trace_refused) || (watch && id.starts_with("hook-")) {
-        eprintln!("{} refused: the session `{id}` keeps no stream of this kind", if watch { "watch" } else { "trace" });
+fn follow(verb: &'static str, id: &str) -> ! {
+    let watch = verb == "watch";
+    let refused = id.starts_with("hook-") || (!watch && id.starts_with("pty-"));
+    if refused {
+        eprintln!("{verb} refused: the session `{id}` keeps no stream of this kind");
         std::process::exit(1);
     }
     test_doors::block_sigint().expect("SIGINT is blocked before any thread starts");
-    std::thread::spawn(|| {
+    std::thread::spawn(move || {
         test_doors::wait_sigint().expect("SIGINT is taken");
         let mut out = io::stdout();
         for _ in 0..count("FAKE_AOIDE_AFTER_INT") {
             write_bytes(&mut out, 512 * 1024);
             let _ = out.write_all(b"\n");
         }
-        println!("{{\"ok\":true,\"followed\":true}}");
+        println!("{{\"command\":\"session.{verb}\",\"gated\":false,\"message\":\"closed\",\"status\":\"ok\"}}");
         std::process::exit(0)
     });
     let mut out = io::stdout();

@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use aoide_desktop_shell::chat::record::Push as ChatPush;
+use aoide_desktop_shell::chat::record::{Line, Push as ChatPush};
 use serde::Serialize;
 use serde_json::Value;
 
@@ -11,6 +11,7 @@ use serde_json::Value;
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "type", rename_all = "kebab-case")]
 pub enum Push {
+    Line { line: Box<Line> },
     Record { value: Value },
     Other { text: String },
     Dropped { bytes: usize },
@@ -22,6 +23,7 @@ pub type Sink = Arc<dyn Fn(Push) + Send + Sync>;
 
 pub fn wire(push: ChatPush) -> Push {
     match push {
+        ChatPush::Line(line) => Push::Line { line },
         ChatPush::Record(value) => Push::Record { value },
         ChatPush::Other(text) => Push::Other { text },
         ChatPush::Dropped(bytes) => Push::Dropped { bytes },

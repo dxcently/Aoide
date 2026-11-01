@@ -44,6 +44,18 @@
       ]
     },
     {
+      "path": ["session", "chat"],
+      "verb": "watch",
+      "summary": "Read a session's conversation as chat lines.",
+      "args": [
+        {"name": "id", "type": "string", "required": true, "description": "The session."}
+      ],
+      "flags": [
+        {"name": "json", "type": "bool", "description": "Structured I/O."},
+        {"name": "follow", "type": "bool", "description": "Print new chat lines until interrupted."}
+      ]
+    },
+    {
       "path": ["session", "trace"],
       "verb": "watch",
       "summary": "Show a session's trace.",

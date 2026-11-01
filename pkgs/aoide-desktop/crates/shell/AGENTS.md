@@ -223,12 +223,15 @@ are in README.md.
   its stderr is the reason. When every case refuses, `FollowError::Refused`
   names each one and its reason. The reasons are spelled.
 - Every line a stream prints goes through `chat::record::line` before it leaves
-  the crate. A JSON object becomes a `Push::Record` with each string and key
-  spelled by `visible`. Any other line becomes a `Push::Other`, spelled. A line
-  of only whitespace, such as the empty line a trailing newline leaves, is never
+  the crate. A v1 chat line becomes a `Push::Line` holding the fields the page
+  renders, every string spelled by `visible`; core's closing envelope becomes
+  `Push::End`; any other JSON object becomes a `Push::Record` with each string
+  and key spelled. Any other line becomes a `Push::Other`, spelled. A line of
+  only whitespace, such as the empty line a trailing newline leaves, is never
   pushed: `Chat::next` and `Chat::close` drop it (`a_blank_line_on_the_stream_is_never_pushed`).
-  Raw records pass through otherwise, since core's normalized chat line is not
-  yet emitted.
+- A chat shows a line once: `Chat` keeps the ids of the lines it has pushed and
+  skips a repeat (`a_line_repeating_an_id_arrives_once`). Nothing is pushed after
+  `Push::End` (`nothing_follows_the_closing_envelope`).
 - The JSON is parsed in `chat/record.rs` alone. `tests/chat.rs` fails for a
   `serde_json::from_str` anywhere else in `src/chat/`.
 - A chat's end is `Chat::close`: a SIGINT to its held child, through exec's

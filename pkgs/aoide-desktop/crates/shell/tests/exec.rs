@@ -315,7 +315,7 @@ fn ending_a_follow_interrupts_the_child_which_prints_its_end_line_and_is_reaped(
     let status = ended.status.expect("the child exits within the bound");
     assert_eq!(status.code(), Some(0), "it ended on the interrupt, which the fake answers with an exit of zero");
     assert_ne!(status.signal(), Some(9), "the child was not killed");
-    assert_eq!(ended.rest, [Event::Line(br#"{"ok":true,"followed":true}"#.to_vec())]);
+    assert_eq!(ended.rest, [Event::Line(br#"{"command":"session.trace","gated":false,"message":"closed","status":"ok"}"#.to_vec())]);
     assert!(!Path::new(&format!("/proc/{pid}")).exists(), "the pid is gone once the call returns");
 }
 

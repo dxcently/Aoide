@@ -6,12 +6,15 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use aoide_desktop_shell::chat::cases::CASES;
-use aoide_desktop_shell::chat::record::Push;
+use aoide_desktop_shell::chat::record::{self, AskOption, Push, Role, State};
 use aoide_desktop_shell::chat::{follow, say, FollowError};
 use aoide_desktop_shell::exec::Exec;
 use serde_json::{json, Value};
 
 const FAKE: &str = env!("CARGO_BIN_EXE_fake-aoide");
+const PROTOCOL_FIXTURE: &str = include_str!("../../../../aoide/crates/protocol/tests/fixtures/chat-v1.jsonl");
+const HOSTILE_FIXTURE: &str = include_str!("fixtures/chat-hostile.jsonl");
+const ENVELOPE: &[u8] = br#"{"command":"session.chat","gated":false,"message":"chat closed","status":"ok"}"#;
 const WAIT: Duration = Duration::from_secs(5);
 
 /// A scratch dir for `tag`, holding the fake's follow file of `lines` and the
@@ -93,13 +96,13 @@ fn say_scrubs_the_session_id_and_both_autogate_switches_from_the_send_child() {
 }
 
 #[test]
-fn a_session_whose_trace_answers_is_followed_with_follow_and_tail() {
-    let (exec, record) = load("trace-args", &[b"{\"kind\":\"say\"}"], &[]);
-    let mut chat = follow(&exec, "eidolon-1").expect("the trace answers");
-    assert_eq!(chat.case(), "trace");
+fn a_session_whose_chat_answers_is_followed_with_follow() {
+    let (exec, record) = load("chat-args", &[b"{\"kind\":\"say\"}"], &[]);
+    let mut chat = follow(&exec, "eidolon-1").expect("the chat answers");
+    assert_eq!(chat.case(), "chat");
     assert_eq!(chat.next(WAIT), Some(Push::Record(json!({"kind": "say"}))));
-    let args = argv_of(&records(&record).pop().expect("the trace is recorded"));
-    assert_eq!(args, ["session", "trace", "--json", "--follow", "--tail=200", "--", "eidolon-1"]);
+    let args = argv_of(&records(&record).pop().expect("the chat is recorded"));
+    assert_eq!(args, ["session", "chat", "--json", "--follow", "--", "eidolon-1"]);
     chat.close().expect("the stream ends");
 }
 
@@ -108,7 +111,7 @@ fn a_line_arrives_spelled_and_a_line_that_is_not_json_arrives_as_other() {
     let record_line = br#"{"kind":"say","text":"a\u202eb\u001b[31m"}"#;
     let text_line = "not json \u{1b}[0m \u{202e}".as_bytes();
     let (exec, _) = load("spelled", &[record_line, text_line], &[]);
-    let mut chat = follow(&exec, "eidolon-1").expect("the trace answers");
+    let mut chat = follow(&exec, "eidolon-1").expect("the chat answers");
     assert_eq!(
         chat.next(WAIT),
         Some(Push::Record(json!({"kind": "say", "text": "a\\u{202e}b\\x1b[31m"})))
@@ -118,12 +121,12 @@ fn a_line_arrives_spelled_and_a_line_that_is_not_json_arrives_as_other() {
 }
 
 #[test]
-fn the_envelope_a_follow_prints_at_its_end_arrives_and_the_reader_survives_it() {
+fn the_envelope_a_follow_prints_at_its_end_arrives_as_the_end_and_the_reader_survives_it() {
     let (exec, _) = load("envelope", &[b"{\"kind\":\"say\"}"], &[]);
-    let mut chat = follow(&exec, "eidolon-1").expect("the trace answers");
+    let mut chat = follow(&exec, "eidolon-1").expect("the chat answers");
     assert!(chat.next(WAIT).is_some());
     let rest = chat.close().expect("the stream ends");
-    assert_eq!(rest, [Push::Record(json!({"ok": true, "followed": true}))]);
+    assert_eq!(rest, [Push::End]);
 }
 
 #[test]
@@ -142,7 +145,7 @@ fn a_hook_only_session_is_refused_and_each_case_says_why() {
     match follow(&exec, "hook-1") {
         Err(FollowError::Refused(refused)) => {
             let cases: Vec<&str> = refused.reasons.iter().map(|r| r.case).collect();
-            assert_eq!(cases, ["trace", "watch"]);
+            assert_eq!(cases, ["chat", "watch"]);
             assert!(refused.reasons.iter().all(|r| r.why.contains("keeps no stream")), "{refused:?}");
         }
         Err(other) => panic!("the session is refused as a session, not an exec error: {other}"),
@@ -180,10 +183,99 @@ fn the_chat_record_is_parsed_in_one_module_only() {
     }
 }
 
+fn lines(text: &str) -> Vec<Push> {
+    text.lines().map(record::line).collect()
+}
+
+fn line_of(push: &Push) -> &record::Line {
+    match push {
+        Push::Line(line) => line,
+        other => panic!("a chat line is expected, not {other:?}"),
+    }
+}
+
+#[test]
+fn the_protocol_fixture_arrives_as_lines_with_the_fields_the_page_renders() {
+    let pushes = lines(PROTOCOL_FIXTURE);
+    let ids: Vec<&str> = pushes.iter().map(|p| line_of(p).id.as_str()).collect();
+    assert_eq!(ids, ["1", "2", "2.0", "2.1", "3", "4", "5", "6", "7", "8", "9"]);
+    let at = |n: usize| line_of(&pushes[n]);
+    assert_eq!((at(0).role, at(0).text.as_deref()), (Role::User, Some("hello <script>")));
+    assert_eq!((at(1).role, at(1).thinking), (Role::Agent, false));
+    assert!(at(2).thinking, "the thinking flag is kept");
+    let call = at(3).tool.as_ref().expect("a call");
+    assert_eq!((call.name.as_str(), call.input.as_deref(), call.result.as_deref()), ("read", Some("{\"path\":\"slots.md\"}"), None));
+    assert!(at(5).tool.as_ref().expect("a result").error, "a failed result says so");
+    assert_eq!((at(6).role, at(6).from.as_deref()), (Role::System, Some("peer-7")));
+    assert_eq!(at(7).state, Some(State::Waiting));
+    let approval = at(8).ask.as_ref().expect("an approval");
+    assert_eq!((approval.kind.as_str(), approval.answers.as_slice()), ("approval", ["yes".to_owned(), "no".to_owned()].as_slice()));
+    let question = at(9).ask.as_ref().expect("a question");
+    assert_eq!(question.options[1], AskOption { label: "dusk".to_owned(), description: "cool palette".to_owned() });
+    assert_eq!(at(10).ask.as_ref().expect("a permission ask").fingerprint.as_deref(), Some("3f9a"));
+}
+
+#[test]
+fn an_unknown_role_is_system_and_an_unknown_field_is_ignored() {
+    let pushes = lines(r#"{"v":1,"id":"x","role":"robot","text":"hi","future":{"a":1},"state":"asleep"}"#);
+    let line = line_of(&pushes[0]);
+    assert_eq!((line.role, line.text.as_deref(), line.state), (Role::System, Some("hi"), None));
+}
+
+#[test]
+fn an_object_that_is_no_v1_line_stays_a_record() {
+    for text in [r#"{"v":2,"id":"x","role":"agent"}"#, r#"{"v":1,"role":"agent"}"#, r#"{"v":1,"id":"x"}"#, r#"{"id":"x","role":"agent"}"#] {
+        assert!(matches!(record::line(text), Push::Record(_)), "{text}");
+    }
+}
+
+#[test]
+fn hostile_text_in_every_string_of_a_line_is_spelled_and_left_as_text() {
+    let pushes = lines(HOSTILE_FIXTURE);
+    assert_eq!(pushes.len(), 3);
+    for push in &pushes {
+        let wire = serde_json::to_string(line_of(push)).expect("a line serializes");
+        assert!(!wire.contains('\u{202e}') && !wire.contains('\u{1b}'), "an escape reaches the page: {wire}");
+        assert!(wire.contains("\\u{202e}") || wire.contains("\\x1b"), "the escape is spelled: {wire}");
+    }
+    assert_eq!(line_of(&pushes[0]).text.as_deref(), Some("a\\u{202e}b \\x1b[31mred <img src=x onerror=alert(1)>"));
+    assert_eq!(line_of(&pushes[1]).from.as_deref(), Some("peer\\u{202e}7"));
+    assert_eq!(line_of(&pushes[1]).tool.as_ref().expect("a tool").name, "re\\x1bad");
+    let ask = line_of(&pushes[2]).ask.as_ref().expect("an ask");
+    assert_eq!(ask.prompt, "ok\\u{202e}?");
+    assert_eq!(ask.answers, ["y\\x1b[0m"]);
+    assert_eq!(ask.options[0].label, "<img src=x onerror=alert(1)>");
+}
+
+#[test]
+fn a_line_repeating_an_id_arrives_once() {
+    let one = br#"{"v":1,"id":"1","role":"agent","text":"a"}"#;
+    let again = br#"{"v":1,"id":"1","role":"agent","text":"a again"}"#;
+    let two = br#"{"v":1,"id":"2","role":"agent","text":"b"}"#;
+    let (exec, _) = load("dedupe", &[one, again, two], &[]);
+    let mut chat = follow(&exec, "eidolon-1").expect("the chat answers");
+    let first = chat.next(WAIT).expect("the first line");
+    let second = chat.next(WAIT).expect("the next line");
+    assert_eq!((line_of(&first).id.as_str(), line_of(&second).id.as_str()), ("1", "2"));
+    chat.close().expect("the stream ends");
+}
+
+#[test]
+fn nothing_follows_the_closing_envelope() {
+    let one = br#"{"v":1,"id":"1","role":"agent","text":"a"}"#;
+    let late = br#"{"v":1,"id":"2","role":"agent","text":"late"}"#;
+    let (exec, _) = load("stop", &[one, ENVELOPE, late], &[]);
+    let mut chat = follow(&exec, "eidolon-1").expect("the chat answers");
+    assert!(matches!(chat.next(WAIT), Some(Push::Line(_))));
+    assert_eq!(chat.next(WAIT), Some(Push::End));
+    assert_eq!(chat.next(WAIT), None, "the line after the envelope is never read out");
+    assert_eq!(chat.close().expect("the stream ends"), [], "and none comes out at the close");
+}
+
 #[test]
 fn a_blank_line_on_the_stream_is_never_pushed() {
     let (exec, _) = load("blank", &[b"{\"kind\":\"say\"}", b"", b"   ", b"not json"], &[]);
-    let mut chat = follow(&exec, "eidolon-1").expect("the trace answers");
+    let mut chat = follow(&exec, "eidolon-1").expect("the chat answers");
     assert_eq!(chat.next(WAIT), Some(Push::Record(json!({"kind": "say"}))));
     assert_eq!(chat.next(WAIT), Some(Push::Other("not json".to_owned())), "blank lines are dropped, not pushed as Other");
 }
@@ -193,7 +285,7 @@ fn a_line_that_is_not_utf8_arrives_as_other_and_a_line_past_the_cap_as_dropped()
     let not_utf8: &[u8] = b"\xff\xfe{\"kind\":\"say\"}";
     let long = vec![b'a'; 1024 * 1024 + 10];
     let (exec, _) = load("bytes", &[not_utf8, &long, br#"{"kind":"say"}"#], &[]);
-    let mut chat = follow(&exec, "eidolon-1").expect("the trace answers");
+    let mut chat = follow(&exec, "eidolon-1").expect("the chat answers");
     assert!(matches!(chat.next(WAIT), Some(Push::Other(_))), "a non-UTF-8 line is text");
     assert_eq!(chat.next(WAIT), Some(Push::Dropped(1024 * 1024 + 10)), "a line past the cap is dropped, in bytes");
     assert_eq!(chat.next(WAIT), Some(Push::Record(json!({"kind": "say"}))), "the stream goes on");

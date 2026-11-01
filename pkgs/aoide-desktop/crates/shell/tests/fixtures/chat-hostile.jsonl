@@ -1,0 +1,3 @@
+{"id":"h1","role":"agent","session":"s-1","text":"a\u202eb \u001b[31mred <img src=x onerror=alert(1)>","ts":null,"v":1}
+{"from":"peer\u202e7","id":"h2","role":"tool","session":"s-1","tool":{"name":"re\u001bad","result":"<img src=x onerror=alert(1)>"},"ts":null,"v":1}
+{"ask":{"answers":["y\u001b[0m"],"id":"a1","kind":"approval","options":[{"description":"d\u202e","label":"<img src=x onerror=alert(1)>"}],"prompt":"ok\u202e?"},"id":"h3","role":"agent","session":"s-1","ts":null,"v":1}

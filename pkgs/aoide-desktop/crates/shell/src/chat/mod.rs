@@ -1,11 +1,14 @@
 //! A chat with one session: the composer's send, and the session's stream
 //! followed as messages. The send is one `aoide send`. The stream is the first
 //! case in `cases::CASES` that answers for the session. Every line it prints
-//! reaches the page through `record::line`, which spells each string.
+//! reaches the page through `record::line`, which spells each string. A chat
+//! line is shown once whatever its source repeats, and nothing follows the
+//! closing envelope.
 
 pub mod cases;
 pub mod record;
 
+use std::collections::HashSet;
 use std::fmt;
 use std::time::Duration;
 
@@ -35,6 +38,29 @@ pub struct Chat {
     case: &'static str,
     follow: Follow,
     pending: Option<Event>,
+    shown: Shown,
+}
+
+/// What a chat has shown: the ids of its lines, and whether it has ended.
+#[derive(Default)]
+struct Shown {
+    ids: HashSet<String>,
+    ended: bool,
+}
+
+impl Shown {
+    /// `push` unless it repeats a line already shown, or follows the end.
+    fn admit(&mut self, push: Push) -> Option<Push> {
+        if self.ended {
+            return None;
+        }
+        match &push {
+            Push::Line(line) if !self.ids.insert(line.id.clone()) => return None,
+            Push::End => self.ended = true,
+            _ => {}
+        }
+        Some(push)
+    }
 }
 
 /// Why no case followed a session: each case that refused, with its taught
@@ -96,7 +122,7 @@ pub fn follow(exec: &Exec, id: &str) -> Result<Chat, FollowError> {
                 let ended = follow.end()?;
                 reasons.push(Reason { case: case.name, why: refusal_text(&ended) });
             }
-            pending => return Ok(Chat { case: case.name, follow, pending }),
+            pending => return Ok(Chat { case: case.name, follow, pending, shown: Shown::default() }),
         }
     }
     Err(FollowError::Refused(Refused { reasons }))
@@ -117,15 +143,22 @@ impl Chat {
         self.case
     }
 
-    /// The next message from the stream, or `None` when none comes within `wait`.
+    /// The next message from the stream, or `None` when none comes within `wait`
+    /// or the stream has ended.
     pub fn next(&mut self, wait: Duration) -> Option<Push> {
         loop {
+            if self.shown.ended {
+                return None;
+            }
             let event = match self.pending.take() {
                 Some(event) => event,
                 None => self.follow.next(wait)?,
             };
-            if !is_blank(&event) {
-                return Some(push(event));
+            if is_blank(&event) {
+                continue;
+            }
+            if let Some(push) = self.shown.admit(push(event)) {
+                return Some(push);
             }
         }
     }
@@ -133,7 +166,9 @@ impl Chat {
     /// Ends the stream and returns what it printed after the end was asked for,
     /// through its last line.
     pub fn close(self) -> Result<Vec<Push>, ExecError> {
-        Ok(self.follow.end()?.rest.into_iter().filter(|event| !is_blank(event)).map(push).collect())
+        let Chat { follow, mut shown, .. } = self;
+        let rest = follow.end()?.rest;
+        Ok(rest.into_iter().filter(|event| !is_blank(event)).filter_map(|event| shown.admit(push(event))).collect())
     }
 }
 
