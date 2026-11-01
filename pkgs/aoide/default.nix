@@ -107,13 +107,6 @@ rustPlatform.buildRustPackage {
     # checkout, runs it; it stays a hard failure wherever the file is absent.
     "--skip"
     "the_contract_block_is_the_fixture"
-    # Two tests that fail under the sandbox's load and are under repair: the
-    # door's stream-close wait, and a ledger test that can read another test's
-    # stage. The workspace gate keeps running both.
-    "--skip"
-    "streaming_is_true_while_a_client_holds_the_stream_and_false_within_five_seconds_of_its_close"
-    "--skip"
-    "graph::doc::tests::the_parent_node_carries_its_ledger_children_and_only_its_own"
   ];
 
   # task #117 (resolved): the sandbox check runs parallel again. The
