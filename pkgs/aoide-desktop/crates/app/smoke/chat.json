@@ -1,0 +1,1 @@
+{"confirm": false, "follow": "../../../aoide/crates/protocol/tests/fixtures/chat-v1.jsonl", "rows": 10, "shows": ["hello <script>", "slots.md", "Overwrite?", "answer with: aoide ask answer s-1"]}

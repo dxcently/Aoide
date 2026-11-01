@@ -1,0 +1,1 @@
+{"confirm": false, "follow": "../shell/tests/fixtures/chat-hostile.jsonl", "rows": 3, "shows": ["a\\u{202e}b \\x1b[31mred <img src=x onerror=alert(1)>", "peer\\u{202e}7", "ok\\u{202e}?"]}

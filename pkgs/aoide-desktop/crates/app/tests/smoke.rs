@@ -19,22 +19,41 @@ use serde::Deserialize;
 const READY_WAIT: Duration = Duration::from_secs(60);
 /// How often the harness checks for `ready`.
 const POLL: Duration = Duration::from_millis(100);
+/// How long the page has to draw a scenario's rows once `ready` is there.
+const DOM_WAIT: Duration = Duration::from_secs(40);
 
-/// A scenario file. Its confirm is what the app's dialog answers.
+/// The one session the fake aoide lists when a scenario serves a chat, as
+/// `session find --all --json` prints it.
+const LISTING: &str = r#"{"status":"ok","command":"session.find","message":"","gated":false,"data":{"sessions":[{"sessionId":"s-1","label":"s-1","state":"idle","carries":{"agent":"claude","kind":"agent"}}]}}"#;
+
+/// A scenario file. Its confirm is what the app's dialog answers. `follow` is
+/// a file, relative to this crate, whose lines the fake aoide serves as the
+/// chat of the one session it lists; `rows` is how many rows the page must draw
+/// before the shot, and `shows` the texts its log must hold when it has.
 #[derive(Deserialize)]
 struct Scenario {
     confirm: bool,
+    follow: Option<String>,
+    #[serde(default)]
+    rows: usize,
+    #[serde(default)]
+    shows: Vec<String>,
 }
 
 /// Every scenario file under `smoke/`, by name, read and parsed. A file that
-/// cannot be read or parsed fails the run.
+/// cannot be read or parsed fails the run, and so does a `follow` that names no
+/// file.
 fn scenarios() -> Result<Vec<(String, String)>, String> {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("smoke");
     let mut found = Vec::new();
     for entry in fs::read_dir(&dir).map_err(|e| format!("{}: {e}", dir.display()))? {
         let path = entry.map_err(|e| e.to_string())?.path();
         let text = fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
-        serde_json::from_str::<Scenario>(&text).map_err(|e| format!("{}: {e}", path.display()))?;
+        let scenario: Scenario = serde_json::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))?;
+        if let Some(follow) = &scenario.follow {
+            let source = Path::new(env!("CARGO_MANIFEST_DIR")).join(follow);
+            fs::metadata(&source).map_err(|e| format!("{}: {e}", source.display()))?;
+        }
         let name = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
         found.push((name, text));
     }
@@ -177,6 +196,7 @@ fn run_scenario(name: &str, text: &str, shots: &Path) -> Result<(), String> {
     fs::create_dir_all(&run).map_err(|e| e.to_string())?;
     fs::set_permissions(&run, fs::Permissions::from_mode(0o700)).map_err(|e| e.to_string())?;
     fs::write(smoke.join("scenario.json"), text).map_err(|e| e.to_string())?;
+    let scenario: Scenario = serde_json::from_str(text).map_err(|e| format!("{name}: {e}"))?;
 
     let path = std::env::var_os("PATH").unwrap_or_default();
     let mut env = vec![
@@ -196,6 +216,13 @@ fn run_scenario(name: &str, text: &str, shots: &Path) -> Result<(), String> {
     for name in FROM_DEV_SHELL {
         env.push(from_dev_shell(name)?);
     }
+    if let Some(follow) = &scenario.follow {
+        let source = Path::new(env!("CARGO_MANIFEST_DIR")).join(follow);
+        fs::copy(&source, smoke.join("follow.txt")).map_err(|e| format!("{}: {e}", source.display()))?;
+        fs::write(smoke.join("sessions.json"), LISTING).map_err(|e| e.to_string())?;
+        env.push(var("FAKE_AOIDE_FOLLOW_FILE", smoke.join("follow.txt")));
+        env.push(var("FAKE_AOIDE_SESSIONS", smoke.join("sessions.json")));
+    }
     let cage_bin = on_path("cage")?;
     let grim_bin = on_path("grim")?;
     let app = PathBuf::from(env!("CARGO_BIN_EXE_aoide-desktop"));
@@ -203,13 +230,12 @@ fn run_scenario(name: &str, text: &str, shots: &Path) -> Result<(), String> {
     let (out, err) = log_pair(&root.join("cage.log"))?;
     let mut cage = test_doors::start(&cage_bin, &args, &env, out, err).map_err(|e| format!("cage did not start: {e}"))?;
 
-    let shot = screenshot(&mut cage, &run, &smoke, &env, &grim_bin, &root, name, shots);
+    let shot = screenshot(&mut cage, &run, &smoke, &env, &grim_bin, &root, name, shots, &scenario);
     let sandbox = if shot.is_ok() { sandbox_check(cage.id()) } else { Ok(()) };
     let ended = end_cage(&mut cage);
     let _ = fs::copy(root.join("cage.log"), shots.join(format!("{name}.cage.log")));
     let status = ended?;
     let cage_ok = status.code() == Some(0) || status.signal() == Some(15);
-    let scenario: Scenario = serde_json::from_str(text).map_err(|e| format!("{name}: {e}"))?;
     println!("scenario {name}: confirm {}, cage ended {status}", scenario.confirm);
     println!("scenario {name}: HOME holds {:?}", listing(&home));
     shot?;
@@ -231,6 +257,7 @@ fn screenshot(
     root: &Path,
     name: &str,
     shots: &Path,
+    scenario: &Scenario,
 ) -> Result<(), String> {
     let started = Instant::now();
     while !smoke.join("ready").exists() {
@@ -245,6 +272,8 @@ fn screenshot(
         }
         std::thread::sleep(POLL);
     }
+    let dom = dom_note(cage, smoke, root, scenario)?;
+    println!("scenario {name}: the page holds {} rows and {} images", dom.rows, dom.img);
     let mut grab_env = env.to_vec();
     grab_env.push(var("WAYLAND_DISPLAY", "wayland-0"));
     if !run.join("wayland-0").exists() {
@@ -260,6 +289,63 @@ fn screenshot(
     }
     println!("scenario {name}: ready, screenshot {}", png.display());
     Ok(())
+}
+
+/// What the page noted about its own DOM once it had drawn the scenario.
+#[derive(Deserialize)]
+struct Dom {
+    rows: usize,
+    img: usize,
+    text: String,
+}
+
+/// The notes the app has written, each without its prefix of `name `.
+fn notes(smoke: &Path, name: &str) -> Vec<String> {
+    let record = fs::read_to_string(smoke.join("record.jsonl")).unwrap_or_default();
+    let prefix = format!("{name} ");
+    record
+        .lines()
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .filter_map(|entry| entry["note"].as_str().and_then(|note| note.strip_prefix(prefix.as_str())).map(str::to_owned))
+        .collect()
+}
+
+/// Waits for the page's `dom` note, then holds the window and the page to the
+/// scenario: the window titled `Aoide`, the rows the page was asked for, no
+/// image element, and every text it must show.
+fn dom_note(cage: &mut Child, smoke: &Path, root: &Path, scenario: &Scenario) -> Result<Dom, String> {
+    let started = Instant::now();
+    let note = loop {
+        if let Some(note) = notes(smoke, "dom").into_iter().next() {
+            break note;
+        }
+        if let Some(status) = cage.try_wait().map_err(|e| e.to_string())? {
+            return Err(format!("cage ended before the page noted its DOM: {status}"));
+        }
+        if started.elapsed() > DOM_WAIT {
+            let log = fs::read_to_string(root.join("cage.log")).unwrap_or_default();
+            let tail: String = log.chars().rev().take(2000).collect::<Vec<_>>().into_iter().rev().collect();
+            return Err(format!("the page did not note its DOM within 40 s; cage.log ends:\n{tail}"));
+        }
+        std::thread::sleep(POLL);
+    };
+    let titles = notes(smoke, "title");
+    if titles != ["Aoide"] {
+        return Err(format!("the window is titled {titles:?}, not Aoide"));
+    }
+    let dom: Dom = serde_json::from_str(&note).map_err(|e| format!("the DOM note does not parse: {e}: {note}"))?;
+    if dom.img != 0 {
+        return Err(format!("the page holds {} <img> elements", dom.img));
+    }
+    if dom.rows != scenario.rows {
+        return Err(format!("the page drew {} rows, the scenario wants {}: {}", dom.rows, scenario.rows, dom.text));
+    }
+    for shown in &scenario.shows {
+        if !dom.text.contains(shown.as_str()) {
+            return Err(format!("the page does not show {shown:?}: {}", dom.text));
+        }
+    }
+    Ok(dom)
 }
 
 /// Runs grim with `args` and waits for it.

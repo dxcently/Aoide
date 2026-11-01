@@ -1,7 +1,9 @@
 //! The smoke run's state, built only under the `smoke` feature. A smoke run
 //! takes `--smoke <dir>` and writes into that directory: `ready` once the page
 //! has loaded, and `record.jsonl` one line per command. Its confirm answers
-//! from `scenario.json` there, so no input is injected.
+//! from `scenario.json` there, so no input is injected. Once the page has
+//! loaded, the app runs a probe in it that waits for the scenario's rows and
+//! notes what the DOM holds; the page itself carries no smoke code.
 
 use std::fs::{self, OpenOptions};
 use std::io::Write;
@@ -58,9 +60,37 @@ pub fn ready() -> Result<(), String> {
     fs::write(dir()?.join("ready"), b"").map_err(|e| e.to_string())
 }
 
+/// The parts of `scenario.json` the app reads.
 #[derive(Deserialize)]
 struct Answer {
     confirm: bool,
+    #[serde(default)]
+    rows: usize,
+}
+
+fn scenario() -> Option<Answer> {
+    let text = fs::read_to_string(dir().ok()?.join("scenario.json")).ok()?;
+    serde_json::from_str(&text).ok()
+}
+
+/// The script the app runs in the page once it has loaded: it waits for the
+/// scenario's number of rows in the log, lets two frames paint, and notes what
+/// the DOM holds as `dom {"rows":..,"img":..,"text":..}`. The text is the log's
+/// own text, so a hostile line is seen as the page drew it.
+pub fn probe() -> String {
+    let rows = scenario().map_or(0, |answer| answer.rows);
+    format!(
+        r#"(async () => {{
+  const log = document.getElementById("log");
+  const began = Date.now();
+  while (log.children.length < {rows} && Date.now() - began < 20000) {{
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }}
+  await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  const dom = {{ rows: log.children.length, img: document.querySelectorAll("img").length, text: log.textContent.slice(0, 1500) }};
+  await window.__TAURI__.core.invoke("smoke_note", {{ note: "dom " + JSON.stringify(dom) }});
+}})();"#
+    )
 }
 
 /// Answers each confirm from the scenario file. A file that does not read, or
@@ -69,10 +99,6 @@ pub struct Scenario;
 
 impl Confirm for Scenario {
     fn confirm(&self, _verb: &str, _text: &str) -> bool {
-        let Ok(dir) = dir() else { return false };
-        fs::read_to_string(dir.join("scenario.json"))
-            .ok()
-            .and_then(|text| serde_json::from_str::<Answer>(&text).ok())
-            .is_some_and(|answer| answer.confirm)
+        scenario().is_some_and(|answer| answer.confirm)
     }
 }

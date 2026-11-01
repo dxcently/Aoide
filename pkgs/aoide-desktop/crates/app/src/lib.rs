@@ -104,12 +104,18 @@ pub fn run() {
             app.manage(Arc::new(Window::new(exec, confirm)));
             let builder = main_window(app);
             #[cfg(feature = "smoke")]
-            let builder = builder.on_page_load(|_, payload| {
+            let builder = builder.on_page_load(|webview, payload| {
                 let finished = payload.event() == tauri::webview::PageLoadEvent::Finished;
                 eprintln!("aoide-desktop: page load {}", if finished { "finished" } else { "started" });
                 if finished {
                     if let Err(text) = smoke::ready() {
                         eprintln!("aoide-desktop: {text}");
+                    }
+                    if let Ok(title) = webview.title() {
+                        let _ = smoke::note(&format!("title {title}"));
+                    }
+                    if let Err(e) = webview.eval(smoke::probe()) {
+                        eprintln!("aoide-desktop: the probe did not run: {e}");
                     }
                 }
             });
