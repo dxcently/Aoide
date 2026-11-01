@@ -98,4 +98,7 @@ in `../../AGENTS.md`.
   It starts every process through `test_doors::start` and ends cage with
   SIGTERM through `test_doors::terminate`, never a kill. The screenshot goes to
   `AOIDE_SMOKE_SHOTS` when that is set. It fails on a scenario file it cannot
-  read or parse.
+  read or parse. A scenario with `click` has the probe click one answer button
+  of the page and holds the fake aoide's argv record to exactly one
+  `ask answer` with the scenario's `answered` arguments; the click is the
+  smoke build's own probe, never the app's input path.

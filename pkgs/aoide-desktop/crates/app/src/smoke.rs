@@ -66,6 +66,9 @@ struct Answer {
     confirm: bool,
     #[serde(default)]
     rows: usize,
+    #[serde(default)]
+    asks: usize,
+    click: Option<String>,
 }
 
 fn scenario() -> Option<Answer> {
@@ -74,21 +77,39 @@ fn scenario() -> Option<Answer> {
 }
 
 /// The script the app runs in the page once it has loaded: it waits for the
-/// scenario's number of rows in the log, lets two frames paint, and notes what
-/// the DOM holds as `dom {"rows":..,"img":..,"text":..}`. The text is the log's
-/// own text, so a hostile line is seen as the page drew it.
+/// scenario's rows in the log and ask cards, lets two frames paint, and notes what
+/// the DOM holds as `dom {"rows":..,"asks":..,"buttons":..,"img":..,"text":..}`,
+/// then clicks the scenario's `click` answer button when it names one. The text
+/// is the log's and the asks' own text, so a hostile line is seen as the page
+/// drew it.
 pub fn probe() -> String {
-    let rows = scenario().map_or(0, |answer| answer.rows);
+    let answer = scenario();
+    let rows = answer.as_ref().map_or(0, |answer| answer.rows);
+    let asks = answer.as_ref().map_or(0, |answer| answer.asks);
+    let click = answer.and_then(|answer| answer.click).map_or_else(|| "null".to_owned(), |label| json!(label).to_string());
     format!(
         r#"(async () => {{
   const log = document.getElementById("log");
+  const asks = document.getElementById("asks");
   const began = Date.now();
-  while (log.children.length < {rows} && Date.now() - began < 20000) {{
+  while ((log.children.length < {rows} || asks.querySelectorAll(".ask").length < {asks}) && Date.now() - began < 20000) {{
     await new Promise((resolve) => setTimeout(resolve, 50));
   }}
   await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-  const dom = {{ rows: log.children.length, img: document.querySelectorAll("img").length, text: log.textContent.slice(0, 1500) }};
+  const cards = asks.querySelectorAll(".ask");
+  const dom = {{
+    rows: log.children.length,
+    asks: cards.length,
+    buttons: asks.querySelectorAll("button.ask-answer").length,
+    img: document.querySelectorAll("img").length,
+    text: (log.textContent + " " + asks.textContent).slice(0, 1500),
+  }};
   await window.__TAURI__.core.invoke("smoke_note", {{ note: "dom " + JSON.stringify(dom) }});
+  const wanted = {click};
+  if (wanted !== null) {{
+    const button = Array.from(asks.querySelectorAll("button.ask-answer")).find((b) => b.textContent.startsWith(wanted));
+    if (button) button.click();
+  }}
 }})();"#
     )
 }

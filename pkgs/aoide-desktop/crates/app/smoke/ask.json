@@ -1,0 +1,1 @@
+{"confirm": false, "asks_from": "../shell/tests/fixtures/ask-watch.jsonl", "asks": 3, "buttons": 6, "shows": ["write?", "Which rice?", "sunrise", "warm palette", "fingerprint 3f9a2c4be1d07a55", "run\\u{202e}"], "click": "sunrise", "answered": ["ask", "answer", "--json", "--expect=c01d5eed7ab1e002", "--", "s-1", "2", "sunrise"]}
