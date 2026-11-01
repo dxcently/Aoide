@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 pub use confirm::{Confirm, Gtk};
-pub use wire::{Push, Sink};
+pub use wire::{AskPush, AskSink, Push, Sink};
 pub use window::Window;
 
 use aoide_desktop_shell::exec::untrusted::visible;
@@ -26,6 +26,9 @@ pub fn handler<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + 
         commands::chat_open,
         commands::chat_say,
         commands::chat_close,
+        commands::asks_open,
+        commands::asks_close,
+        commands::ask_answer,
         #[cfg(feature = "smoke")]
         commands::smoke_note,
     ]

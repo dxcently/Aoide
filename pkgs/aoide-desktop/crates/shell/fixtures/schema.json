@@ -92,6 +92,33 @@
       ]
     },
     {
+      "path": ["ask", "watch"],
+      "verb": "watch",
+      "summary": "Stream the asks store: one line per ask added or removed, until Ctrl-C.",
+      "args": [],
+      "flags": [
+        {"name": "json", "type": "bool", "description": "Structured I/O."}
+      ],
+      "doors": ["cli"]
+    },
+    {
+      "path": ["ask", "answer"],
+      "verb": "act",
+      "summary": "Answer one open ask through the door that holds it.",
+      "args": [
+        {"name": "session", "type": "string", "required": true, "description": "The session the ask belongs to."},
+        {"name": "ask_id", "type": "string", "required": true, "description": "The ask's id."},
+        {"name": "label", "type": "string", "required": true, "description": "One of the labels the ask offers."}
+      ],
+      "flags": [
+        {"name": "json", "type": "bool", "description": "Structured I/O."},
+        {"name": "expect", "type": "string", "description": "Fingerprint of the ask, as ask list shows it."}
+      ],
+      "approves": true,
+      "implemented": true,
+      "doors": ["cli", "daemon"]
+    },
+    {
       "path": ["melete", "status"],
       "verb": "show",
       "summary": "Show the melete store.",

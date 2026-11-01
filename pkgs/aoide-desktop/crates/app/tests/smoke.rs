@@ -38,6 +38,18 @@ struct Scenario {
     rows: usize,
     #[serde(default)]
     shows: Vec<String>,
+    /// A file, relative to this crate, whose lines the fake aoide serves as its
+    /// ask watch; `asks` ask cards and `buttons` answer buttons must be drawn.
+    asks_from: Option<String>,
+    #[serde(default)]
+    asks: usize,
+    #[serde(default)]
+    buttons: usize,
+    /// The answer button the probe clicks once the shot is taken, and the
+    /// arguments the fake aoide must then have been run with.
+    click: Option<String>,
+    #[serde(default)]
+    answered: Vec<String>,
 }
 
 /// Every scenario file under `smoke/`, by name, read and parsed. A file that
@@ -50,8 +62,8 @@ fn scenarios() -> Result<Vec<(String, String)>, String> {
         let path = entry.map_err(|e| e.to_string())?.path();
         let text = fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
         let scenario: Scenario = serde_json::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))?;
-        if let Some(follow) = &scenario.follow {
-            let source = Path::new(env!("CARGO_MANIFEST_DIR")).join(follow);
+        for named in scenario.follow.iter().chain(&scenario.asks_from) {
+            let source = Path::new(env!("CARGO_MANIFEST_DIR")).join(named);
             fs::metadata(&source).map_err(|e| format!("{}: {e}", source.display()))?;
         }
         let name = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
@@ -223,6 +235,14 @@ fn run_scenario(name: &str, text: &str, shots: &Path) -> Result<(), String> {
         env.push(var("FAKE_AOIDE_FOLLOW_FILE", smoke.join("follow.txt")));
         env.push(var("FAKE_AOIDE_SESSIONS", smoke.join("sessions.json")));
     }
+    if let Some(asks) = &scenario.asks_from {
+        let source = Path::new(env!("CARGO_MANIFEST_DIR")).join(asks);
+        fs::copy(&source, smoke.join("asks.txt")).map_err(|e| format!("{}: {e}", source.display()))?;
+        fs::write(smoke.join("sessions.json"), LISTING).map_err(|e| e.to_string())?;
+        env.push(var("FAKE_AOIDE_ASKS_FILE", smoke.join("asks.txt")));
+        env.push(var("FAKE_AOIDE_SESSIONS", smoke.join("sessions.json")));
+        env.push(var("FAKE_AOIDE_RECORD", smoke.join("argv.jsonl")));
+    }
     let cage_bin = on_path("cage")?;
     let grim_bin = on_path("grim")?;
     let app = PathBuf::from(env!("CARGO_BIN_EXE_aoide-desktop"));
@@ -288,13 +308,47 @@ fn screenshot(
         return Err("the screenshot is one flat colour".to_owned());
     }
     println!("scenario {name}: ready, screenshot {}", png.display());
+    if scenario.click.is_some() {
+        answered(smoke, name, scenario)?;
+    }
     Ok(())
+}
+
+/// Waits for the fake aoide's record to hold the `ask answer` the probe's click
+/// made, and holds its arguments to the scenario's.
+fn answered(smoke: &Path, name: &str, scenario: &Scenario) -> Result<(), String> {
+    let started = Instant::now();
+    loop {
+        let record = fs::read_to_string(smoke.join("argv.jsonl")).unwrap_or_default();
+        let calls: Vec<Vec<String>> = record
+            .lines()
+            .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+            .filter_map(|call| call["args"].as_array().map(|a| a.iter().filter_map(|x| x.as_str().map(str::to_owned)).collect()))
+            .filter(|args: &Vec<String>| args.starts_with(&["ask".to_owned(), "answer".to_owned()]))
+            .collect();
+        if let [call] = calls.as_slice() {
+            if *call != scenario.answered {
+                return Err(format!("the click ran {call:?}, the scenario wants {:?}", scenario.answered));
+            }
+            println!("scenario {name}: the click reached the fake aoide as {call:?}");
+            return Ok(());
+        }
+        if calls.len() > 1 {
+            return Err(format!("one click ran {} answers: {calls:?}", calls.len()));
+        }
+        if started.elapsed() > Duration::from_secs(10) {
+            return Err("the click did not reach the fake aoide within 10 s".to_owned());
+        }
+        std::thread::sleep(POLL);
+    }
 }
 
 /// What the page noted about its own DOM once it had drawn the scenario.
 #[derive(Deserialize)]
 struct Dom {
     rows: usize,
+    asks: usize,
+    buttons: usize,
     img: usize,
     text: String,
 }
@@ -339,6 +393,12 @@ fn dom_note(cage: &mut Child, smoke: &Path, root: &Path, scenario: &Scenario) ->
     }
     if dom.rows != scenario.rows {
         return Err(format!("the page drew {} rows, the scenario wants {}: {}", dom.rows, scenario.rows, dom.text));
+    }
+    if (dom.asks, dom.buttons) != (scenario.asks, scenario.buttons) {
+        return Err(format!(
+            "the page drew {} ask cards and {} answer buttons, the scenario wants {} and {}: {}",
+            dom.asks, dom.buttons, scenario.asks, scenario.buttons, dom.text
+        ));
     }
     for shown in &scenario.shows {
         if !dom.text.contains(shown.as_str()) {

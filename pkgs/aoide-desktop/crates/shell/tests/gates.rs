@@ -344,7 +344,7 @@ fn the_door_client_spawns_no_process() {
 
 /// The one build script, the app's: tauri-build's manifest of the window's
 /// commands. Its golden text is compared without blank and comment lines.
-const BUILD_SCRIPT: &str = r##"const COMMANDS: &[&str] = &["palette", "run", "sessions", "chat_open", "chat_say", "chat_close", "smoke_note"];
+const BUILD_SCRIPT: &str = r##"const COMMANDS: &[&str] = &["palette", "run", "sessions", "chat_open", "chat_say", "chat_close", "asks_open", "asks_close", "ask_answer", "smoke_note"];
 
 fn main() {
     // A smoke build reads the smoke capability too. No other build does.

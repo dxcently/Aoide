@@ -1,6 +1,6 @@
 # aoide-desktop-shell
 
-The app's own doors (`doors.rs`), and the asks a door raises and the answers to
+The app's own doors (`doors.rs`), and the asks core reports and the answers to
 them (`asks.rs`). It reaches a process or a signal only through the exec crate,
 which it re-exports as `exec`. It is the layer the window calls; the window is a
 later crate.
@@ -17,7 +17,9 @@ sha2 (a dialog's digest), the door crate, and the exec crate.
   re-attaches the records at start, watches each door's stream, and closes a
   door. Its watch threads send on a bounded channel of `EVENTS_BOUND` (64)
   events; `Doors::open` takes the sending half.
-- `asks.rs`: `prepare_answer`, `send_answer`, and the `Dialog` a yes shows.
+- `asks.rs`: `watch` follows core's `ask watch --json` and `change` reads one
+  of its lines into a `Held` ask; `answer` runs `aoide ask answer`; and the
+  `Dialog` a yes shows.
 - `palette.rs`: `palette` lists the commands the main window offers, from
   `schema --json`, and `check` decides one call. `call` runs a checked call
   through `Exec::call`. `main_grants` is the main window's grant set: every
@@ -186,54 +188,48 @@ doors.rs    Doors::open(exec, root, runtime, out)
 ## How an ask is answered
 
 ```
-asks.rs     Doors::prepare_answer(launch, ask, label)
-              |  refused unless this door's stream carries the ask,
-              |  and the ask offers the label
+window      Window::ask_answer(session, ask_id, label, pane)
+              |  the record of the pushed ask (Held), never the page
+              |  refused unless the ask is open and offers the label
               v
-            Prepared, with the dialog a yes shows (none for a no)
+            asks::dialog(held.ask, label)      none for a no or a question
+              |
+              +-- no dialog        Shown::None
+              +-- capped           Shown::Pane(pane digest), or refused
+              +-- under the cap    the native confirm shows the whole call:
+              |                    yes -> Shown::Confirm(digest), else refused
+              v
+            asks::permits(dialog, shown)       the digest must be the one built now
               |
               v
-            Doors::send_answer(prepared, shown: Shown)
-              +-- verify                the door's checks; a failure sends
-              |                         nothing
-              +-- dialog again          from the stored ask, not the screen
-              +-- asks::permits         what was shown must match: a yes
-              |                         under its digest, a capped yes only
-              |                         as Shown::Pane
-              +-- POST /api/answer      204 Answered, 409 NotPending,
-                                        422 Rejected with the reason,
-                                        401 or other: an error
+            asks::answer(exec, held, label)
+              aoide ask answer --json --expect=<held.fingerprint> -- <session> <id> <label>
+                core: ask open? fingerprint its? label offered? door the same?
+                      then POST to the door that held it, and audit
 ```
 
-- The asks a stream carries are kept per door, by id. Each `ask` adds one, each
-  `ask-settled` removes it, and a new stream clears them before its replay.
 - A yes on an approval shows the call as `visible_json` text: one object holding
   `callId`, `tool`, `prompt`, `reason` (only when it is set) and `input`,
   pretty, keys sorted at every depth, and every hidden character spelled as a
   JSON escape. That text is the dialog, and its SHA-256 is its digest. Above 4
-  KiB or 60 lines the dialog is capped. A same-id ask that the door sends again
-  replaces the stored one; a change to any of those fields gives it a new
-  digest, so a yes confirmed on the earlier text is refused.
-- A yes binds the call that was shown. The residual: a door
-  that changes its pending ask after the check in `send_answer` and before the
-  answer lands applies the yes to the change. The shell cannot see that change,
-  so only Eidolon can close it.
+  KiB or 60 lines the dialog is capped.
 - What the app showed decides a yes (`Shown`). `None` is for a no and for a
   question's answer. `Confirm(digest)` is the native confirm, which offers no
   yes above the cap. `Pane(digest)` is the app's own pane, which shows the whole
-  input and takes a capped yes too. A yes is sent only under the digest of the
-  dialog built now from the stored ask. Every refusal comes before any request.
-- The curl line answers a no or a question's answer from a terminal. It is
-  never built for an approval's yes. Its body is the answer as
-  `visible_json_line`, and it reads the token from the token file, so it names
-  no token.
+  input and takes a capped yes: the page sends back the digest it was pushed,
+  and the window compares it with the dialog built from its record now. A
+  digest the page sends for a call under the cap is not used: the confirm
+  decides.
+- The fingerprint is core's, from the row the window kept. The fingerprint a
+  chat line carries on an ask is a Claude permission prompt's permit record, a
+  different thing; `ask answer` never takes it.
 - A question's answer, and a no, skip the confirm. Only an approval's `yes`
   approves, since eidolon gives its consent on that label alone.
-- A 204 leaves the ask listed until the door's `ask-settled` arrives. A 409
-  means nothing is pending under that id, a 422 refuses with the door's reason,
-  and a 401 or any other status is a `DoorError`. None of them removes the ask.
-- Between streams the last stream's asks stay listed, so an answer to one the
-  door settled in the gap comes back 409.
+- Core's refusal (the ask changed, left, or is not offered) exits non-zero and
+  is an error to the page; the card stays until the watch reports the ask gone.
+- The asks a door's stream carries are kept per door, by id, for `pending_asks`:
+  each `ask` adds one, each `ask-settled` removes it, and a new stream clears
+  them before its replay.
 
 ## How the palette decides a call
 
@@ -301,6 +297,41 @@ Chat::close()     -> SIGINT through the held child; the events after it
   `status`. A chat line names neither.
 - A watch's first line is a JSON frame, and its other lines are text.
 
+## How the asks are watched
+
+```
+asks::watch(exec)                         exec.follow(ask watch --json)
+  next(500 ms)
+    a line, or silence -> Watch            the watch runs
+    Eof (stdout closed) -> end(); its stderr is the reason, spelled: an Err
+
+Watch::next(wait) -> change(text)
+                       {"type":"added", ...}    Change::Added(Held)
+                       {"type":"removed", ...}  Change::Removed
+                       {"type":"end"} or core's closing envelope
+                                                Change::End
+                       any other line, or a row that is not core's view
+                                                Change::Other, spelled
+                     Dropped(n) for a line past the exec crate's cap
+                     after End, None
+Watch::close()    -> SIGINT through the held child; the changes after it
+```
+
+- A row names `sessionId`, `port`, `askId`, `fingerprint` and `ask`: core's
+  visible form of the door's ask (CONTRACTS.md, `state/stage/asks.json`),
+  serialized from `aoide_door::Ask`. The fingerprint is core's, derived from the
+  session, the port, the ask id and that form.
+- A row is an ask only when its ask parses as an `aoide_door::Ask`, the ask id
+  inside it is the row's, the fingerprint is plain, and no string or key in it
+  holds a character a terminal must not be handed. Core spells each such
+  character, so a raw one means the row is not core's view; it comes out as
+  `Other`, never as a card.
+- `Held::view` is what the page draws: the ask, an approval's whole call as the
+  dialog text with its digest in hex and whether it is capped, and the
+  fingerprint. The page is shown the fingerprint and sends nothing back.
+- `ask watch` declares the terminal's door only, and the app's child is that
+  door. The fixture schema's `doors` for it is `["cli"]`.
+
 ## The fakes
 
 `src/bin/fake-eidolon.rs` takes `web --bind 127.0.0.1:0 --cwd DIR` and nothing
@@ -332,4 +363,6 @@ no chat, so only `session watch` answers. A watch's first line is a JSON frame.
 Each then prints the lines of the file `FAKE_AOIDE_FOLLOW_FILE` names, one every
 30 ms, and waits. SIGINT ends it: it prints an outcome envelope
 (`{"command":"session.<verb>","gated":false,"message":"closed","status":"ok"}`)
-and exits zero.
+and exits zero. `ask watch` is a held follow with no id and no frame: it prints
+the lines of the file `FAKE_AOIDE_ASKS_FILE` names, or exits 1 with the text of
+`FAKE_AOIDE_ASKS_REFUSE` when that is set, and its envelope names `ask.watch`.

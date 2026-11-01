@@ -6,7 +6,7 @@ use std::sync::Arc;
 use aoide_desktop_shell::palette::Row;
 use tauri::ipc::Channel;
 
-use crate::wire::{Push, Sink};
+use crate::wire::{AskPush, AskSink, Push, Sink};
 use crate::window::{FlagIn, Reply, Window};
 
 type Shared<'a> = tauri::State<'a, Arc<Window>>;
@@ -69,6 +69,33 @@ pub async fn chat_say(window: Shared<'_>, id: String, text: String) -> Result<Re
 pub async fn chat_close(window: Shared<'_>, id: String) -> Result<(), String> {
     let w = window.inner().clone();
     off_thread("chat_close", move || w.chat_close(&id)).await?
+}
+
+#[tauri::command]
+pub async fn asks_open(window: Shared<'_>, channel: Channel<AskPush>) -> Result<(), String> {
+    let w = window.inner().clone();
+    let sink: AskSink = Arc::new(move |push| {
+        let _ = channel.send(push);
+    });
+    off_thread("asks_open", move || w.asks_open(sink)).await?
+}
+
+#[tauri::command]
+pub async fn asks_close(window: Shared<'_>) -> Result<(), String> {
+    let w = window.inner().clone();
+    off_thread("asks_close", move || w.asks_close()).await?
+}
+
+#[tauri::command]
+pub async fn ask_answer(
+    window: Shared<'_>,
+    session: String,
+    ask_id: u64,
+    label: String,
+    shown: Option<String>,
+) -> Result<Reply, String> {
+    let w = window.inner().clone();
+    off_thread("ask_answer", move || w.ask_answer(&session, ask_id, &label, shown.as_deref())).await?
 }
 
 /// The smoke run's note: its text is appended to the record as data. Only a
