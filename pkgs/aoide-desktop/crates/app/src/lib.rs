@@ -38,6 +38,16 @@ pub fn navigation_allowed(url: &tauri::Url) -> bool {
     url.scheme() == "tauri" && url.host_str() == Some("localhost")
 }
 
+/// The main window, as the app opens it: on `index.html`, in no profile that
+/// outlives it, with no devtools, held to its own origin.
+pub fn main_window<'a, R: tauri::Runtime, M: Manager<R>>(manager: &'a M) -> tauri::WebviewWindowBuilder<'a, R, M> {
+    tauri::WebviewWindowBuilder::new(manager, "main", tauri::WebviewUrl::App("index.html".into()))
+        .title("Aoide")
+        .incognito(true)
+        .devtools(false)
+        .on_navigation(navigation_allowed)
+}
+
 /// The smoke directory the arguments name. A build without the smoke feature
 /// takes no argument, and refuses the one it is given by name.
 fn arguments(args: &[OsString]) -> Result<Option<PathBuf>, String> {
@@ -92,10 +102,7 @@ pub fn run() {
             #[cfg(not(feature = "smoke"))]
             let confirm: Box<dyn Confirm> = Box::new(Gtk::new(app.handle().clone()));
             app.manage(Arc::new(Window::new(exec, confirm)));
-            let builder = tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::App("index.html".into()))
-                .incognito(true)
-                .devtools(false)
-                .on_navigation(navigation_allowed);
+            let builder = main_window(app);
             #[cfg(feature = "smoke")]
             let builder = builder.on_page_load(|_, payload| {
                 let finished = payload.event() == tauri::webview::PageLoadEvent::Finished;

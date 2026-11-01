@@ -28,6 +28,13 @@ in `../../AGENTS.md`.
 - One confirm at a time: `Window::ask` takes `busy` and refuses a second ask.
 - `chat_close` joins the reader before it returns. A reader ends by stop flag,
   then interrupts and reaps its child through `Chat::close`.
+- The page draws every string with `textContent` or a text node. A construct
+  that parses markup from a string, runs a string, or sets an event handler
+  property is a gate failure (`the_page_parses_no_markup_from_a_string_and_runs_no_string`),
+  and a new one the scan should bar goes into `tests/page.rs` with a planted
+  case (`the_scan_flags_each_construct_it_bars`). The page is titled `Aoide` and
+  so is the window; `main_window` is the one place the window is built (the
+  mock runtime keeps no title, so no unit test reads it).
 - `chat_say` names the harness the session was listed with and sends nothing to
   a session it cannot list (`a_send_names_the_harness_the_session_was_listed_with_and_a_shell_names_none`,
   `a_send_to_an_unlisted_session_is_refused_and_starts_no_send`). A send that

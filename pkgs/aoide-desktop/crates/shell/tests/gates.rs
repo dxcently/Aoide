@@ -190,7 +190,7 @@ fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
 }
 
 /// Each `.rs` under the desktop workspace root and under the door, and each
-/// file under `ui/` once that exists, as its path relative to the root (the
+/// file under `ui/` (the page), as its path relative to the root (the
 /// door's as `DOOR/...`) and its text.
 fn sources() -> Vec<(String, String)> {
     let root = root();

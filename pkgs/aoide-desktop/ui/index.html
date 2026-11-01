@@ -2,9 +2,30 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>aoide-desktop</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aoide</title>
+<link rel="stylesheet" href="chat.css">
 </head>
 <body>
-<p>aoide-desktop</p>
+<main class="app">
+  <nav class="sessions" aria-label="Sessions">
+    <header class="bar">
+      <span>Sessions</span>
+      <button id="refresh" type="button">Refresh</button>
+    </header>
+    <ul id="session-list" class="session-list"></ul>
+  </nav>
+  <section class="chat" aria-label="Chat">
+    <header id="chat-title" class="bar">No session open</header>
+    <div id="status" class="status" role="status"></div>
+    <div id="log" class="log"></div>
+    <div id="error" class="error" role="alert"></div>
+    <form id="composer" class="composer">
+      <textarea id="input" rows="2" placeholder="Message" aria-label="Message"></textarea>
+      <button id="send" type="submit">Send</button>
+    </form>
+  </section>
+</main>
+<script src="chat.js"></script>
 </body>
 </html>

@@ -88,7 +88,7 @@ and its invariants are in that crate's AGENTS.md.
   --workspace --all-targets --all-features -- -D warnings`.
 - The text scan is a tripwire, not the guard. `crates/shell/tests/gates.rs`
   reads every `.rs` file under this directory and under the door
-  (`../aoide/crates/door`), and every file under `ui/` once that exists,
+  (`../aoide/crates/door`), and every file under `ui/` (the page),
   skipping the root's `target` and `vendor`. It bars six words in each one:
   `aoided.sock`, `"dispatch"`, `"subscribe"`, `/api/launch`, `sh -c` and
   `SIGKILL`. A second scan bars `extern` and `#[link` in every file under door's

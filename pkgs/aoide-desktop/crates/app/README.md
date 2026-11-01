@@ -7,8 +7,10 @@ child goes through the shell's palette and exec.
 
 ## Layout
 
-- `src/lib.rs`: `handler()` (the `generate_handler!` list) and `run()`, which
-  checks the arguments, loads the pinned aoide once, and opens the window.
+- `src/lib.rs`: `handler()` (the `generate_handler!` list), `main_window()` (the
+  window's builder: its title, its origin guard, no devtools, no profile on
+  disk) and `run()`, which checks the arguments, loads the pinned aoide once,
+  and opens the window.
 - `src/smoke.rs` (smoke builds only): the smoke directory, the record, the
   ready file and the scenario confirm.
 - `src/window.rs`: `Window`. `palette`, `run`, `sessions`, `chat_open`,
@@ -31,8 +33,10 @@ child goes through the shell's palette and exec.
   gate's `perms` step fails when it differs from a fresh build; the nix check
   does not run that compare.
 - `tauri.conf.json`: the window's config. The CSP is `connect-src ipc:` only.
-- `ui/` (the sibling `../../ui`): the page the window loads. One paragraph, no
-  script.
+- `ui/` (the sibling `../../ui`): the page the window loads, `index.html`,
+  `chat.js` and `chat.css`. See "The page".
+- `tests/page.rs`: the scan of `ui/` for markup built from a string, and the
+  page's title.
 
 ## Seams
 
@@ -48,6 +52,36 @@ child goes through the shell's palette and exec.
   the window has not listed is listed once, and refused if it is still absent.
   A send that core refuses exits non-zero, and `chat_say` returns that as an
   error with core's message, never as a reply.
+
+## The page
+
+The page is the chat view. The left pane lists the sessions `sessions` returns;
+the right pane is the open chat. The first listed session opens when the page
+loads, and a click on another closes the open chat and opens that one.
+
+```
+push (type)  ->  drawn as
+line         user: a bubble on the right    agent: a bubble on the left
+             thinking: a collapsed fold     tool: one collapsed row
+             system: small and centred      `from`: a label in the bubble
+             state: the status line, no bubble
+             ask: a card with its prompt and answers or options, read-only,
+                  with the text `answer with: aoide ask answer ...`
+record/other/dropped -> a small centred note
+end          -> the status line says closed
+```
+
+The composer sends through `chat_say`: Enter sends, Shift+Enter is a newline. A
+send core refuses is shown on the error line under the log, never as a bubble;
+the person's own message comes back as a `user` line on the stream.
+
+Every string reaches the DOM through `textContent`. The page builds no markup
+from a string and runs no string as code; `tests/page.rs` fails for
+`innerHTML`, `outerHTML`, `insertAdjacentHTML`, `document.write`, `eval`,
+`Function`, a DOM event handler property or `setAttribute("on...")` in a
+script, and for an on-attribute, an inline script or style in the markup. The
+CSP (`tauri.conf.json`) allows only the page's own files, so the stylesheet is
+a file and no element carries a `style` attribute.
 
 ## The smoke run
 
