@@ -313,6 +313,22 @@ fn streaming_is_true_while_a_client_holds_the_stream_and_false_within_five_secon
     drop(events);
 }
 
+#[test]
+fn a_stream_whose_write_fails_after_the_client_closed_is_not_streaming() {
+    let (_rt, fake, door) = fixture("streaming-write-fails");
+    let unread = "x".repeat(32 << 20);
+    fake.set_head(&[HELLO, unread.as_str()]);
+    let events = door.events().unwrap();
+    let closer = events.closer().unwrap();
+    assert!(fake.streaming(), "the stream is open while the client holds it");
+    closer.close().unwrap();
+    assert!(
+        wait_until(Duration::from_secs(5), || !fake.streaming()),
+        "a write that fails on the closed socket still ends the stream"
+    );
+    drop(events);
+}
+
 /// `n` header lines, each a distinct name with `value`.
 fn many_headers(n: usize, value: &str) -> String {
     (0..n).map(|i| format!("X-Filler-{i}: {value}\r\n")).collect()

@@ -18,7 +18,7 @@ use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream};
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::mpsc::{channel, RecvTimeoutError, Sender};
+use std::sync::mpsc::{channel, Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -380,11 +380,23 @@ const POLL: Duration = Duration::from_millis(20);
 
 /// Opens the stream (registering the live channel first, so a test that has
 /// read the head can push), sends the head frames and `caught-up`, then the
-/// pushed frames until an end, or until the client closes its end.
+/// pushed frames until an end, until the client closes its end, or until a
+/// write fails; the stream is closed in each case.
 fn stream_events(stream: &TcpStream, shared: &Shared) -> io::Result<()> {
     let (tx, rx) = channel();
     let id = shared.streams.fetch_add(1, Ordering::Relaxed);
     *shared.live.lock().unwrap() = Some((id, tx));
+    let result = pump(stream, shared, &rx);
+    let mut live = shared.live.lock().unwrap();
+    if live.as_ref().is_some_and(|(open, _)| *open == id) {
+        *live = None;
+    }
+    result
+}
+
+/// The stream's writes, ended by an end frame, a closed client or a failed
+/// write. However it ends, [`stream_events`] marks the stream closed.
+fn pump(stream: &TcpStream, shared: &Shared, rx: &Receiver<Live>) -> io::Result<()> {
     stream.set_read_timeout(Some(POLL))?;
     let mut w = stream;
     let head: Vec<String> = shared.head.lock().unwrap().clone();
@@ -404,17 +416,12 @@ fn stream_events(stream: &TcpStream, shared: &Shared) -> io::Result<()> {
             Ok(Live::End) | Err(RecvTimeoutError::Disconnected) => {
                 w.write_all(b"0\r\n\r\n")?;
                 w.flush()?;
-                break;
+                return Ok(());
             }
-            Err(RecvTimeoutError::Timeout) if client_gone(stream) => break,
+            Err(RecvTimeoutError::Timeout) if client_gone(stream) => return Ok(()),
             Err(RecvTimeoutError::Timeout) => {}
         }
     }
-    let mut live = shared.live.lock().unwrap();
-    if live.as_ref().is_some_and(|(open, _)| *open == id) {
-        *live = None;
-    }
-    Ok(())
 }
 
 /// Whether the client has closed its end: a peek reads end of file. A peek

@@ -103,7 +103,11 @@ are in README.md.
 ## The fake door
 
 - The fake door ends a stream its client has closed, as hyper does, so a test
-  of a close sees the same drain the real door has.
+  of a close sees the same drain the real door has. A write that fails on the
+  closed socket ends the stream the same way: `streaming()` goes false however
+  the stream ended, because a client that shuts its socket down while the fake
+  is still writing makes the fake's next write fail, not its next peek read
+  end of file.
 - `try_push` is `push` that returns false, rather than panic, once no stream is
   open or its reader has gone. A flood can outlive its stream, so it uses
   `try_push`.

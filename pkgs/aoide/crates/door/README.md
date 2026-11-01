@@ -63,4 +63,4 @@ http.rs     read_head under the deadline the send began, then the body reader:
   out a `Closer` that shuts the stream's socket down from another thread.
 - `frame.rs` decodes one `data:` payload into a typed `Frame`.
 - `fake.rs` is a std-thread door on 127.0.0.1. A client that closes an open
-  stream ends it, and `streaming()` says whether one is open.
+  stream, or a write that fails on it, ends it, and `streaming()` says whether one is open.
