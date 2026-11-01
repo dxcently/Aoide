@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
-use aoide_desktop_shell::asks::{self, Change, Held};
+use aoide_desktop_shell::asks::{self, Change, Held, Shown};
 use aoide_desktop_shell::chat::record::spell;
 use aoide_desktop_shell::chat;
 use aoide_desktop_shell::exec::untrusted::visible;
@@ -163,7 +163,7 @@ impl Window {
         let sent = reply(chat::say(&self.exec, id, harness.as_deref(), text).map_err(|e| visible(&e.to_string()))?);
         match sent.code {
             Some(0) => Ok(sent),
-            code => Err(refusal_of_send(&sent, code)),
+            code => Err(refusal_of(&sent, code, "send")),
         }
     }
 
@@ -232,6 +232,54 @@ impl Window {
             reader.thread.join().map_err(|_| "the asks reader panicked".to_owned())?;
         }
         Ok(())
+    }
+
+    /// Answers the open ask `ask_id` of session `session` with `label`, through
+    /// `aoide ask answer --expect <fingerprint>`, so core's gate and audit take
+    /// it. Everything the answer names comes from the window's record of the ask
+    /// it pushed: the fingerprint is the record's, and the page supplies only the
+    /// label (and, for a yes above the native confirm's cap, the digest of the
+    /// whole call it showed). A yes on an approval is confirmed on a dialog of
+    /// the whole visible call; above the cap the app's pane takes it under that
+    /// digest. A no, and a question's answer, skip the confirm. A refusal from
+    /// core is an error and leaves the ask as it was; the ask leaves when core's
+    /// watch reports it gone.
+    pub fn ask_answer(&self, session: &str, ask_id: u64, label: &str, pane: Option<&str>) -> Result<Reply, String> {
+        let held = self.held_ask(session, ask_id)?;
+        if !asks::offers(&held.ask, label) {
+            return Err(format!("refused: ask {ask_id} does not offer `{}`; nothing was sent", visible(label)));
+        }
+        let dialog = asks::dialog(&held.ask, label);
+        let shown = match &dialog {
+            None => Shown::None,
+            Some(d) if d.capped() => match pane.and_then(asks::unhex) {
+                Some(digest) => Shown::Pane(digest),
+                None => {
+                    return Err("refused: this call is over the confirm's cap, so the app's pane takes the yes, \
+                                and it sent no digest of what it showed; nothing was sent"
+                        .to_owned())
+                }
+            },
+            Some(d) => match self.ask("Approve", d.text()) {
+                Ask::Yes => Shown::Confirm(d.digest()),
+                Ask::No => return Err("cancelled: the confirm was not answered yes".to_owned()),
+                Ask::Busy => return Err("refused: another confirm is open".to_owned()),
+            },
+        };
+        asks::permits(dialog.as_ref(), shown).map_err(|why| format!("refused: {why}"))?;
+        let out = asks::answer(&self.exec, &held, label).map_err(|e| visible(&e.to_string()))?;
+        let answered = reply(out);
+        match answered.code {
+            Some(0) => Ok(answered),
+            code => Err(refusal_of(&answered, code, "answer")),
+        }
+    }
+
+    /// The record of ask `ask_id` of `session`, as the window pushed it.
+    fn held_ask(&self, session: &str, ask_id: u64) -> Result<Held, String> {
+        let record = self.held.lock().expect("the asks record is not poisoned");
+        let found = record.iter().find(|h| h.session == session && h.ask_id == ask_id);
+        found.cloned().ok_or_else(|| format!("refused: ask {ask_id} of `{}` is not open here; nothing was sent", visible(session)))
     }
 
     /// One confirm at a time: a confirm asked while another is open is refused.
@@ -307,12 +355,12 @@ fn harnesses_in(listing: &Value) -> HashMap<String, Option<String>> {
     .collect()
 }
 
-/// Why a send that did not exit zero failed: core's message, else its stderr.
-fn refusal_of_send(sent: &Reply, code: Option<i32>) -> String {
+/// Why a call of `what` that did not exit zero failed: core's message, else its stderr.
+fn refusal_of(sent: &Reply, code: Option<i32>, what: &str) -> String {
     let message = sent.stdout["message"].as_str().filter(|m| !m.is_empty());
     let why = message.map(str::to_owned).unwrap_or_else(|| sent.stderr.trim().to_owned());
     match why.as_str() {
-        "" => format!("the send exited with {code:?}"),
+        "" => format!("the {what} exited with {code:?}"),
         _ => why,
     }
 }

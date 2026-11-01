@@ -86,6 +86,18 @@ pub async fn asks_close(window: Shared<'_>) -> Result<(), String> {
     off_thread("asks_close", move || w.asks_close()).await?
 }
 
+#[tauri::command]
+pub async fn ask_answer(
+    window: Shared<'_>,
+    session: String,
+    ask_id: u64,
+    label: String,
+    shown: Option<String>,
+) -> Result<Reply, String> {
+    let w = window.inner().clone();
+    off_thread("ask_answer", move || w.ask_answer(&session, ask_id, &label, shown.as_deref())).await?
+}
+
 /// The smoke run's note: its text is appended to the record as data. Only a
 /// smoke build has it, and only the smoke capability grants it.
 #[cfg(feature = "smoke")]

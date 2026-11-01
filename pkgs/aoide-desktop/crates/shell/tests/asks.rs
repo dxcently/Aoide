@@ -5,7 +5,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use aoide_desktop_shell::asks::{change, watch, Change, Held};
+use aoide_desktop_shell::asks::{answer, change, hex, unhex, watch, Change, Held};
 use aoide_desktop_shell::exec::untrusted::is_unsafe;
 use aoide_desktop_shell::exec::Exec;
 use serde_json::Value;
@@ -163,4 +163,40 @@ fn the_ask_watch_is_declared_for_the_terminal_door() {
     let (exec, _) = load("declared", &fixture_path(), &[]);
     let spec = exec.schema().command(&["ask", "watch"]).expect("the schema declares ask watch");
     assert!(spec.doors.iter().any(|d| d == "cli"), "the app's child is the terminal's door: {:?}", spec.doors);
+}
+
+#[test]
+fn the_ask_answer_is_declared_for_the_terminal_door_and_approves() {
+    let (exec, _) = load("declared-answer", &fixture_path(), &[]);
+    let spec = exec.schema().command(&["ask", "answer"]).expect("the schema declares ask answer");
+    assert!(spec.doors.iter().any(|d| d == "cli"), "the app's child is the terminal's door: {:?}", spec.doors);
+    assert!(spec.approves, "an answer approves, which the palette's floor holds back");
+}
+
+#[test]
+fn an_answer_is_ask_answer_with_the_fingerprint_of_the_held_ask() {
+    let (exec, record) = load("answer", &fixture_path(), &[]);
+    let approval = held(fixture_rows()[0]);
+    let out = answer(&exec, &approval, "yes").expect("the answer runs");
+    assert!(out.status.success());
+    assert_eq!(
+        argv_of(&record).last().expect("the answer is recorded"),
+        &["ask", "answer", "--json", "--expect=3f9a2c4be1d07a55", "--", "s-1", "1", "yes"]
+    );
+    answer(&exec, &approval, "--yes\nrm").expect("the answer runs");
+    assert_eq!(
+        argv_of(&record).last().expect("the answer is recorded"),
+        &["ask", "answer", "--json", "--expect=3f9a2c4be1d07a55", "--", "s-1", "1", "--yes\nrm"],
+        "a label that looks like a flag stays one positional"
+    );
+}
+
+#[test]
+fn a_digest_round_trips_through_hex_and_nothing_else_parses() {
+    let digest: [u8; 32] = std::array::from_fn(|i| (i * 7 + 3) as u8);
+    assert_eq!(unhex(&hex(&digest)), Some(digest));
+    let good = hex(&digest);
+    for bad in [String::new(), good[..62].to_owned(), format!("{good}00"), good.to_uppercase(), good.replace('0', "g"), format!("{} ", &good[..63])] {
+        assert_eq!(unhex(&bad), None, "{bad:?}");
+    }
 }

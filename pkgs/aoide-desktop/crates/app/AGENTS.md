@@ -50,6 +50,19 @@ in `../../AGENTS.md`.
   its child through `Watch::close` (`the_asks_watch_pushes_each_ask_and_close_ends_it_by_interrupt`,
   `a_second_asks_open_leaves_one_child`). The window's record of the asks is
   built from core's rows only.
+- `ask_answer` takes its fingerprint, its session and its ask from that record
+  and nothing from the page but the label and a digest: no argument carries a
+  fingerprint, and one a page sends is not read
+  (`a_fingerprint_the_page_sends_is_never_used`). The confirm rules are
+  `asks.rs`'s: a yes asks the confirm on the whole visible call
+  (`a_no_skips_the_confirm_and_a_yes_is_confirmed_once_on_the_whole_visible_call`);
+  a cancel starts no child (`a_confirm_that_is_cancelled_starts_no_answer`);
+  above the cap only the pane's digest of the dialog built now takes the yes,
+  and a digest never replaces the confirm below the cap
+  (`a_yes_above_the_cap_is_taken_only_in_the_apps_pane_under_the_digest_of_what_it_showed`,
+  `a_digest_from_the_page_never_replaces_the_confirm_below_the_cap`). Core's
+  refusal is an `Err` with core's message and the ask stays held
+  (`a_refusal_from_core_reaches_the_page_as_an_error_and_the_card_stays`).
 - `run()` takes no argument unless the `smoke` feature is on. A build without
   it refuses any argument by name, with exit 2, before GTK starts. Under
   `smoke` the one argument is `--smoke <dir>`.

@@ -11,8 +11,8 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use aoide_door::{token_path, Ask, Door, DoorError, Frame};
-use aoide_desktop_shell::asks::{ask_id, Sent, Shown};
+use aoide_door::{token_path, Door, Frame};
+use aoide_desktop_shell::asks::ask_id;
 use aoide_desktop_shell::doors::{launch_plan, Close, Doors, DoorsError, Event, LaunchPlan, TurnState, ASKS_BOUND, EVENTS_BOUND};
 use aoide_desktop_shell::exec::{check_pin, test_doors, Exec, ExecError, Pinned};
 use serde_json::{json, Value};
@@ -101,14 +101,6 @@ impl World {
     /// Launches a door through `Doors`, and keeps its pid for the drop.
     fn launch(&self, doors: &mut Doors) -> String {
         let id = doors.launch(&self.plan()).expect("the door launches");
-        self.adopt(self.pid(&id));
-        id
-    }
-
-    /// Launches a door in `cwd`, which keeps its own control and log files.
-    fn launch_in(&self, doors: &mut Doors, cwd: &Path) -> String {
-        let plan = launch_plan(Path::new(FAKE_EIDOLON), &self.home(), cwd).expect("the plan is made");
-        let id = doors.launch(&plan).expect("the door launches");
         self.adopt(self.pid(&id));
         id
     }
@@ -981,45 +973,8 @@ fn ask_ids(doors: &Doors, id: &str) -> Vec<u64> {
     doors.pending_asks(id).unwrap().iter().map(ask_id).collect()
 }
 
-/// The input of the first ask a door carries, when that ask is an approval.
-fn input_of(doors: &Doors, id: &str) -> Option<Value> {
-    match doors.pending_asks(id).ok()?.first()? {
-        Ask::Approval { input, .. } => Some(input.clone()),
-        Ask::Question { .. } => None,
-    }
-}
-
-/// The answer lines a door's fake served, each with the body the door sent.
-fn answers_at(world: &World, cwd: &Path) -> Vec<String> {
-    world.log_at(cwd).into_iter().filter(|l| l.starts_with("POST /api/answer")).collect()
-}
-
-/// The answer line for `ask` and `label`, with the body the door sends.
-fn answer_line(ask: u64, label: &str) -> String {
-    format!("POST /api/answer {}", json!({"ask_id": ask, "answer": label}))
-}
-
-/// Waits until the fake has logged `count` answers under `cwd`, then returns them.
-fn answers_once(world: &World, cwd: &Path, count: usize) -> Vec<String> {
-    until(Duration::from_secs(5), || answers_at(world, cwd).len() == count);
-    answers_at(world, cwd)
-}
-
 /// The id of the sentinel answer a negative check sends. No ask carries it.
 const SENTINEL: u64 = 4_000_000_000;
-
-/// The answers the fake logged under `cwd` before a sentinel answer the test
-/// sends to `door`. The fake serves requests in the order they arrive, so a
-/// request the app sent before this call is logged before the sentinel. A
-/// negative check passes only when that list is empty.
-fn answers_before_sentinel(world: &World, cwd: &Path, door: &Door) -> Vec<String> {
-    let _ = door.answer(SENTINEL, "yes", None);
-    let sentinel = |line: &String| line.starts_with("POST /api/answer") && line.contains(&SENTINEL.to_string());
-    until(Duration::from_secs(5), || answers_at(world, cwd).iter().any(sentinel));
-    let logged = answers_at(world, cwd);
-    let at = logged.iter().position(sentinel).expect("the sentinel is logged");
-    logged[..at].to_vec()
-}
 
 /// Sends a sentinel answer to `door` and waits until the fake has served it, then
 /// 200 ms more, so a SIGTERM the fake took just before the sentinel is logged by
@@ -1039,171 +994,11 @@ fn door_at(world: &World, addr: &str, token: &Path) -> Door {
     Door::new(addr.parse().unwrap(), &world.runtime(), token).unwrap()
 }
 
-/// The answers logged under `cwd` other than the sentinel, once there are `count` of them.
-fn answers_after_sentinel(world: &World, cwd: &Path, count: usize) -> Vec<String> {
-    let sentinel = SENTINEL.to_string();
-    let real = || answers_at(world, cwd).into_iter().filter(|line| !line.contains(&sentinel)).collect::<Vec<String>>();
-    until(Duration::from_secs(5), || real().len() == count);
-    real()
-}
-
 /// A `Door` for the record `id` names, built the way the app builds one.
 fn door_of(world: &World, id: &str) -> Door {
     let entry = world.entry(id);
     let addr = entry["addr"].as_str().unwrap().parse().unwrap();
     Door::new(addr, &world.runtime(), Path::new(entry["tokenFile"].as_str().unwrap())).unwrap()
-}
-
-#[test]
-fn an_answer_goes_only_to_the_door_whose_stream_carried_its_ask() {
-    let world = World::new("asks-route");
-    let (tx, _rx) = mpsc::sync_channel(EVENTS_BOUND);
-    let mut doors = world.open(tx);
-    let first = world.launch(&mut doors);
-    fs::create_dir_all(world.dir.join("other")).unwrap();
-    let other = fs::canonicalize(world.dir.join("other")).unwrap();
-    let second = world.launch_in(&mut doors, &other);
-    world.apply(&format!("ask-approval 1 {APPROVAL}"));
-    assert!(until(Duration::from_secs(5), || ask_ids(&doors, &first) == vec![1]), "the first door carries ask 1");
-    assert!(ask_ids(&doors, &second).is_empty(), "the second door carries no ask");
-    let refused = doors.prepare_answer(&second, 1, "no").expect_err("the second door prepares no answer");
-    assert!(matches!(refused, DoorsError::Ask(_)), "{refused}");
-    let prepared = doors.prepare_answer(&first, 1, "no").expect("the first door prepares its answer");
-    assert_eq!(doors.send_answer(&prepared, Shown::None).unwrap(), Sent::Answered);
-    assert_eq!(answers_once(&world, &world.cwd(), 1), vec![answer_line(1, "no")], "the answer carries the ask and the label");
-    assert!(answers_before_sentinel(&world, &other, &door_of(&world, &second)).is_empty(), "no request reached the door that carries no such ask");
-}
-
-#[test]
-fn a_204_keeps_the_card_until_the_door_settles_the_ask() {
-    let world = World::new("asks-204");
-    let (tx, _rx) = mpsc::sync_channel(EVENTS_BOUND);
-    let mut doors = world.open(tx);
-    let id = world.launch(&mut doors);
-    world.apply(&format!("ask-approval 1 {APPROVAL}"));
-    assert!(until(Duration::from_secs(5), || ask_ids(&doors, &id) == vec![1]), "the door carries ask 1");
-    let prepared = doors.prepare_answer(&id, 1, "no").unwrap();
-    assert_eq!(doors.send_answer(&prepared, Shown::None).unwrap(), Sent::Answered);
-    assert_eq!(ask_ids(&doors, &id), vec![1], "a 204 leaves the card until the door settles the ask");
-    world.apply("settle 1 no");
-    assert!(until(Duration::from_secs(5), || ask_ids(&doors, &id).is_empty()), "the settled ask leaves the card");
-}
-
-#[test]
-fn a_409_is_not_pending_and_keeps_the_card_until_the_settle() {
-    let world = World::new("asks-409");
-    let (tx, _rx) = mpsc::sync_channel(EVENTS_BOUND);
-    let mut doors = world.open(tx);
-    let id = world.launch(&mut doors);
-    world.apply(&format!("ask-approval 1 {APPROVAL}"));
-    assert!(until(Duration::from_secs(5), || ask_ids(&doors, &id) == vec![1]), "the door carries ask 1");
-    world.apply("answer-409");
-    let prepared = doors.prepare_answer(&id, 1, "no").unwrap();
-    assert_eq!(doors.send_answer(&prepared, Shown::None).unwrap(), Sent::NotPending);
-    assert_eq!(answers_once(&world, &world.cwd(), 1), vec![answer_line(1, "no")], "the request was served");
-    assert_eq!(ask_ids(&doors, &id), vec![1], "the card stays until the door settles the ask");
-}
-
-#[test]
-fn a_422_is_rejected_with_the_doors_reason_and_keeps_the_card() {
-    let world = World::new("asks-422");
-    let (tx, _rx) = mpsc::sync_channel(EVENTS_BOUND);
-    let mut doors = world.open(tx);
-    let id = world.launch(&mut doors);
-    world.apply(&format!("ask-approval 1 {APPROVAL}"));
-    assert!(until(Duration::from_secs(5), || ask_ids(&doors, &id) == vec![1]), "the door carries ask 1");
-    world.apply("answer-422");
-    let prepared = doors.prepare_answer(&id, 1, "no").unwrap();
-    let outcome = doors.send_answer(&prepared, Shown::None).unwrap();
-    assert_eq!(outcome, Sent::Rejected { reason: "the ask is not taken".into() });
-    assert_eq!(ask_ids(&doors, &id), vec![1], "a rejected answer keeps the card");
-}
-
-#[test]
-fn a_401_is_an_error_and_keeps_the_card() {
-    let world = World::new("asks-401");
-    let (tx, _rx) = mpsc::sync_channel(EVENTS_BOUND);
-    let mut doors = world.open(tx);
-    let id = world.launch(&mut doors);
-    world.apply(&format!("ask-approval 1 {APPROVAL}"));
-    assert!(until(Duration::from_secs(5), || ask_ids(&doors, &id) == vec![1]), "the door carries ask 1");
-    world.apply("answer-401");
-    let prepared = doors.prepare_answer(&id, 1, "no").unwrap();
-    let refused = doors.send_answer(&prepared, Shown::None).expect_err("a 401 is an error");
-    assert!(matches!(refused, DoorsError::Door(DoorError::Unauthorized)), "{refused}");
-    assert_eq!(ask_ids(&doors, &id), vec![1], "an error keeps the card");
-}
-
-#[test]
-fn a_yes_above_the_cap_is_taken_only_in_the_apps_pane_under_its_digest() {
-    let world = World::new("asks-cap");
-    let (tx, _rx) = mpsc::sync_channel(EVENTS_BOUND);
-    let mut doors = world.open(tx);
-    let id = world.launch(&mut doors);
-    let big = json!({"blob": "x".repeat(5 * 1024)});
-    world.apply(&format!("ask-approval 1 {big}"));
-    assert!(until(Duration::from_secs(5), || ask_ids(&doors, &id) == vec![1]), "the door carries ask 1");
-    let prepared = doors.prepare_answer(&id, 1, "yes").unwrap();
-    let dialog = prepared.dialog().expect("a yes on an approval has a dialog");
-    assert!(dialog.capped(), "a 5 KiB input is over the cap");
-    let refused = doors.send_answer(&prepared, Shown::Confirm(dialog.digest())).expect_err("the native confirm takes no capped yes");
-    assert!(matches!(refused, DoorsError::Ask(_)), "{refused}");
-    let refused = doors.send_answer(&prepared, Shown::Pane([0u8; 32])).expect_err("a pane digest of other text is refused");
-    assert!(matches!(refused, DoorsError::Ask(_)), "{refused}");
-    assert!(answers_before_sentinel(&world, &world.cwd(), &door_of(&world, &id)).is_empty(), "no answer was sent");
-    assert_eq!(doors.send_answer(&prepared, Shown::Pane(dialog.digest())).unwrap(), Sent::Answered);
-    assert_eq!(answers_after_sentinel(&world, &world.cwd(), 1), vec![answer_line(1, "yes")]);
-}
-
-#[test]
-fn a_changed_ask_is_refused_and_a_yes_is_sent_only_with_the_digest_on_screen() {
-    let world = World::new("asks-digest");
-    let (tx, _rx) = mpsc::sync_channel(EVENTS_BOUND);
-    let mut doors = world.open(tx);
-    let id = world.launch(&mut doors);
-    world.apply(&format!("ask-approval 1 {APPROVAL}"));
-    assert!(until(Duration::from_secs(5), || ask_ids(&doors, &id) == vec![1]), "the door carries ask 1");
-    let stale = doors.prepare_answer(&id, 1, "yes").unwrap();
-    let stale_digest = stale.dialog().expect("a yes has a dialog").digest();
-    world.apply(r#"ask-approval 1 {"path":"b.txt"}"#);
-    assert!(
-        until(Duration::from_secs(5), || input_of(&doors, &id) == Some(json!({"path": "b.txt"}))),
-        "the door carries the changed ask"
-    );
-    let refused = doors.send_answer(&stale, Shown::Confirm(stale_digest)).expect_err("the changed ask is refused");
-    assert!(matches!(refused, DoorsError::Ask(_)), "{refused}");
-    let fresh = doors.prepare_answer(&id, 1, "yes").unwrap();
-    let refused = doors.send_answer(&fresh, Shown::None).expect_err("a yes shown with no digest is refused");
-    assert!(matches!(refused, DoorsError::Ask(_)), "{refused}");
-    assert!(answers_before_sentinel(&world, &world.cwd(), &door_of(&world, &id)).is_empty(), "no answer was sent so far");
-    let digest = fresh.dialog().expect("a yes has a dialog").digest();
-    assert_eq!(doors.send_answer(&fresh, Shown::Confirm(digest)).unwrap(), Sent::Answered);
-    assert_eq!(answers_after_sentinel(&world, &world.cwd(), 1), vec![answer_line(1, "yes")]);
-}
-
-#[test]
-fn a_same_id_ask_sent_again_with_another_tool_is_refused_at_the_first_confirm() {
-    let world = World::new("asks-tool");
-    let (tx, _rx) = mpsc::sync_channel(EVENTS_BOUND);
-    let mut doors = world.open(tx);
-    let id = world.launch(&mut doors);
-    world.apply(&format!("ask-approval 1 {APPROVAL}"));
-    assert!(until(Duration::from_secs(5), || ask_ids(&doors, &id) == vec![1]), "the door carries ask 1");
-    let stale = doors.prepare_answer(&id, 1, "yes").unwrap();
-    let stale_digest = stale.dialog().expect("a yes has a dialog").digest();
-    world.apply(&format!("ask-tool 1 read {APPROVAL}"));
-    assert!(
-        until(Duration::from_secs(5), || matches!(
-            doors.pending_asks(&id).unwrap().first(),
-            Some(Ask::Approval { tool, .. }) if tool.as_str() == "read"
-        )),
-        "the door carries the ask under its new tool"
-    );
-    let fresh = doors.prepare_answer(&id, 1, "yes").unwrap();
-    assert_ne!(fresh.dialog().expect("a yes has a dialog").digest(), stale_digest, "the new tool is a new digest");
-    let refused = doors.send_answer(&stale, Shown::Confirm(stale_digest)).expect_err("the first text's confirm is refused");
-    assert!(matches!(refused, DoorsError::Ask(_)), "{refused}");
-    assert!(answers_before_sentinel(&world, &world.cwd(), &door_of(&world, &id)).is_empty(), "the fake records no answer");
 }
 
 #[test]
@@ -1222,30 +1017,6 @@ fn an_ask_settled_while_the_stream_is_down_is_not_replayed_on_reopen() {
         until(Duration::from_secs(5), || ask_ids(&doors, &id) == vec![2]),
         "the reopened stream replays only ask 2"
     );
-}
-
-#[test]
-fn an_answer_to_a_door_that_fails_its_checks_sends_no_request() {
-    let world = World::new("asks-checks");
-    set_mode(&world, "loopback-2");
-    let (tx, _rx) = mpsc::sync_channel(EVENTS_BOUND);
-    let mut doors = world.open(tx);
-    let id = world.launch(&mut doors);
-    world.apply(&format!("ask-approval 1 {APPROVAL}"));
-    assert!(until(Duration::from_secs(5), || ask_ids(&doors, &id) == vec![1]), "the door carries ask 1");
-    let prepared = doors.prepare_answer(&id, 1, "no").unwrap();
-    let addr: SocketAddr = world.entry(&id)["addr"].as_str().unwrap().parse().unwrap();
-    let pid = world.pid(&id);
-    world.apply("end");
-    test_doors::terminate(pid).expect("the door takes SIGTERM");
-    assert!(until(Duration::from_secs(25), || !alive(pid)), "the door exits");
-    assert_eq!(addr.ip(), Ipv4Addr::new(127, 0, 0, 2), "the door serves on its own address");
-    // A listener on the door's own address: an answer must not reach it.
-    let listener = std::net::TcpListener::bind(addr).expect("the port is free");
-    listener.set_nonblocking(true).unwrap();
-    let refused = doors.send_answer(&prepared, Shown::None).expect_err("a door that is gone is refused");
-    assert!(matches!(refused, DoorsError::Ask(_)), "{refused}");
-    assert!(listener.accept().is_err(), "no connection reached the port");
 }
 
 

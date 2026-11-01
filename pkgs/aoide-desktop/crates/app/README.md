@@ -14,11 +14,11 @@ child goes through the shell's palette and exec.
 - `src/smoke.rs` (smoke builds only): the smoke directory, the record, the
   ready file and the scenario confirm.
 - `src/window.rs`: `Window`. `palette`, `run`, `sessions`, `chat_open`,
-  `chat_say`, `chat_close`, `asks_open`, `asks_close`. It holds the exec, the
+  `chat_say`, `chat_close`, `asks_open`, `asks_close`, `ask_answer`. It holds the exec, the
   confirm, a busy flag, one reader thread per open chat, the asks reader, and
   the record of the asks it has pushed.
-- `src/commands.rs`: the eight `#[tauri::command]` async functions, and under
-  `smoke` the ninth, `smoke_note`. Each runs its body on a blocking thread.
+- `src/commands.rs`: the nine `#[tauri::command]` async functions, and under
+  `smoke` the tenth, `smoke_note`. Each runs its body on a blocking thread.
 - `src/confirm.rs`: the `Confirm` trait and the GTK dialog, shown on the main
   thread with plain text and Cancel as the default.
 - `src/wire.rs`: the push shape a chat sends down its channel, tagged by
@@ -27,8 +27,8 @@ child goes through the shell's palette and exec.
   printed), `other` (text), `dropped` (a line past the cap) and `end`. The asks
   channel has its own tagged push, `AskPush`: `open` (an ask, as the shell's
   `View`), `gone` (`session`, `ask_id`), `other`, `dropped` and `end`.
-- `build.rs`: tauri-build's manifest, `COMMANDS` (the nine names).
-- `capabilities/main.json`: the eight `allow-*` permissions, granted to `main`.
+- `build.rs`: tauri-build's manifest, `COMMANDS` (the ten names).
+- `capabilities/main.json`: the nine `allow-*` permissions, granted to `main`.
 - `capabilities/smoke.json`: `allow-smoke-note`, read by a smoke build only.
 - `smoke/`: one JSON file per smoke scenario: `empty`, `chat` and `hostile`.
 - `tests/smoke.rs`: the headless harness, `required-features = ["smoke"]`.
@@ -61,6 +61,16 @@ child goes through the shell's palette and exec.
   session and ask id; an ask added again replaces its record, and a removal
   drops it only from the door that reported it. `asks_close` interrupts the child
   and reaps it before it returns, and the record is cleared when the reader ends.
+- `ask_answer(session, ask_id, label, shown)` answers an ask the window pushed,
+  through `aoide ask answer --expect <fingerprint>`, so core's gate and audit
+  take it. The fingerprint and everything else the answer names come from the
+  window's record of the ask; the page supplies the label, and for a yes above
+  the native confirm's cap the digest of the call it showed. An approval's yes
+  asks the confirm (button `Approve`) with the whole visible call; above the cap
+  the confirm offers no yes, and the pane's digest must equal the digest of the
+  dialog built from the record now. A no and a question's answer skip the
+  confirm. Core's refusal is an error with core's message and the ask stays.
+  One answer at a time can hold the confirm: a second is refused as busy.
 
 ## The page
 
@@ -74,8 +84,7 @@ line         user: a bubble on the right    agent: a bubble on the left
              thinking: a collapsed fold     tool: one collapsed row
              system: small and centred      `from`: a label in the bubble
              state: the status line, no bubble
-             ask: a card with its prompt and answers or options, read-only,
-                  with the text `answer with: aoide ask answer ...`
+             ask: a read-only card with its prompt and answers or options
 record/other/dropped -> a small centred note
 end          -> the status line says closed
 ```

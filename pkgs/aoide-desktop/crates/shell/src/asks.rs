@@ -1,27 +1,26 @@
-//! The asks a door's stream carries, and the answer the app sends for one (plan
-//! 3.6; A1 and A2). An ask is answered only at the door whose stream carried it.
+//! The asks core reports and the answer the app sends for one (plan 3.6; A1 and
+//! A2). Core's `aoide ask watch --json` prints a row for each open ask of an
+//! Eidolon door, with the ask in its visible form and the fingerprint core
+//! derived from it. `Watch` follows that stream and `change` reads one row into
+//! a `Held` (the window's record of an ask) or a removal. An answer is
+//! `aoide ask answer`, run with the fingerprint of the `Held` the page was
+//! shown; the app never dials a door.
+//!
 //! A yes on an approval is confirmed on a dialog that shows the whole call, so
 //! a yes is never given on a view that is cut short. Above the cap the native
-//! confirm offers no yes; the app's own pane shows the whole input and takes the
-//! yes there, under the digest of exactly what it showed.
-//!
-//! Core reports the asks too: `aoide ask watch --json` prints a row for each
-//! open ask of an Eidolon door, with the ask in its visible form and the
-//! fingerprint core derived from it. `Watch` follows that stream and `change`
-//! reads one row into a `Held` (the window's record of an ask) or a removal.
+//! confirm offers no yes; the app's own pane shows the whole input and takes
+//! the yes there, under the digest of exactly what it showed.
 //!
 //! The rules are Eidolon's, from `crates/web/src/user.rs`. An approval offers
 //! `yes` and `no`, and a question offers its option labels. Only an approval's
 //! `yes` approves: `eidolon_core::user::Consent` is given when the label is
 //! `yes`. A question answer, and any `no`, skips the confirm.
 
-use std::net::SocketAddr;
-use std::path::Path;
 use std::time::Duration;
 
 use aoide_door::Ask;
-use crate::exec::untrusted::{is_unsafe, visible, visible_json, visible_json_line};
-use crate::exec::{Event, Exec, Follow};
+use crate::exec::untrusted::{is_unsafe, visible, visible_json};
+use crate::exec::{Event, Exec, ExecError, Flag, Follow, Output};
 use serde::Serialize;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -51,7 +50,7 @@ pub fn offers(ask: &Ask, label: &str) -> bool {
 /// The dialog a yes on this ask shows, or None when the answer skips the confirm.
 /// The dialog is the call the approval asks about: its id, tool, prompt, reason
 /// when one is set, and input.
-pub(crate) fn dialog(ask: &Ask, label: &str) -> Option<Dialog> {
+pub fn dialog(ask: &Ask, label: &str) -> Option<Dialog> {
     let Ask::Approval { call_id, tool, prompt, reason, input, .. } = ask else {
         return None;
     };
@@ -94,48 +93,6 @@ impl Dialog {
     }
 }
 
-/// An answer prepared from a stored ask: ids and a label, and the dialog a yes
-/// shows. It is built from the stored ask only, never from a webview's text.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Prepared {
-    pub(crate) launch_id: String,
-    pub(crate) ask_id: u64,
-    pub(crate) label: String,
-    pub(crate) dialog: Option<Dialog>,
-}
-
-impl Prepared {
-    pub fn launch_id(&self) -> &str {
-        &self.launch_id
-    }
-
-    pub fn ask_id(&self) -> u64 {
-        self.ask_id
-    }
-
-    pub fn label(&self) -> &str {
-        &self.label
-    }
-
-    /// The dialog to show before the answer is sent: Some only for a yes on an approval.
-    pub fn dialog(&self) -> Option<&Dialog> {
-        self.dialog.as_ref()
-    }
-}
-
-/// What the door answered to a sent answer. A refusal the app makes before any
-/// request is a `DoorsError::Ask`, and a 401 or any other error is a
-/// `DoorsError::Door`. Neither removes the card.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Sent {
-    /// 204. The card stays until the door's `ask-settled` arrives.
-    Answered,
-    /// 409. Nothing is pending under that id, so it was answered elsewhere.
-    NotPending,
-    /// 422. The door did not take the answer, and the card stays.
-    Rejected { reason: String },
-}
-
 /// What the app showed before its answer: nothing (a no, or a question's
 /// answer), the native confirm, or the app's own pane. Each shown dialog
 /// carries the digest of the text it showed.
@@ -160,33 +117,6 @@ pub fn permits(dialog: Option<&Dialog>, shown: Shown) -> Result<(), String> {
         (Some(d), Shown::Confirm(digest) | Shown::Pane(digest)) if digest == d.digest => Ok(()),
         (Some(_), _) => Err("the ask on screen is not the one stored; nothing was sent".into()),
     }
-}
-
-/// The curl line that sends `label` for this ask to this door, for a no or a
-/// question's answer typed in a terminal. None for an approval's yes: that
-/// answer is taken in the app's pane and never on a line. The line reads the
-/// token from its file, so it names the file and never the token. Every value
-/// is one POSIX shell word, with `'` written `'\''`. The body is the
-/// `visible_json_line` of the answer, so it holds no raw character `visible`
-/// would spell.
-pub fn curl_line(addr: SocketAddr, token_file: &Path, ask: &Ask, label: &str) -> Option<String> {
-    if matches!(ask, Ask::Approval { .. }) && label == YES {
-        return None;
-    }
-    let body = visible_json_line(&json!({"ask_id": ask_id(ask), "answer": label}));
-    Some(format!(
-        "curl -sS -X POST -H {host} -H \"Authorization: Bearer $(cat {file})\" -H {kind} --data-binary {body} {url}",
-        host = sq(&format!("Host: {addr}")),
-        file = sq(&token_file.to_string_lossy()),
-        kind = sq("Content-Type: application/json"),
-        body = sq(&body),
-        url = sq(&format!("http://{addr}/api/answer")),
-    ))
-}
-
-/// One POSIX shell word: single quotes, each `'` written `'\''`.
-fn sq(text: &str) -> String {
-    format!("'{}'", text.replace('\'', r"'\''"))
 }
 
 /// One open ask as core's `ask watch` reported it: the window's record of what
@@ -260,6 +190,28 @@ impl Held {
 /// A digest as lowercase hex.
 pub fn hex(digest: &[u8; 32]) -> String {
     digest.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// A digest from lowercase hex: exactly 64 hex digits, or none.
+pub fn unhex(text: &str) -> Option<[u8; 32]> {
+    if text.len() != 64 || !text.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) {
+        return None;
+    }
+    let mut digest = [0u8; 32];
+    for (byte, pair) in digest.iter_mut().zip(text.as_bytes().chunks(2)) {
+        *byte = u8::from_str_radix(std::str::from_utf8(pair).ok()?, 16).ok()?;
+    }
+    Some(digest)
+}
+
+/// Runs `aoide ask answer` for `held`: `--expect` is the fingerprint core
+/// derived for the ask the page was shown, so core refuses, with nothing sent,
+/// when the ask has changed or left. Core posts the answer to the door that held
+/// the ask, and audits it. The child is the terminal's door, the one `ask
+/// answer` is declared for.
+pub fn answer(exec: &Exec, held: &Held, label: &str) -> Result<Output, ExecError> {
+    let ask_id = held.ask_id.to_string();
+    exec.call(&["ask", "answer"], &[Flag { name: "expect", value: Some(&held.fingerprint) }], &[&held.session, &ask_id, label], None)
 }
 
 /// What one line of `ask watch --json` says.
@@ -404,15 +356,6 @@ mod tests {
     use super::*;
     use crate::exec::untrusted::is_unsafe;
     use serde_json::Value;
-    use std::net::Ipv4Addr;
-
-    fn addr() -> SocketAddr {
-        SocketAddr::from((Ipv4Addr::LOCALHOST, 4477))
-    }
-
-    fn token() -> &'static Path {
-        Path::new("/run/user/1000/eidolon/web-4477.token")
-    }
 
     fn approval(input: Value) -> Ask {
         Ask::Approval {
@@ -530,40 +473,5 @@ mod tests {
         assert!(permits(Some(&big), Shown::Confirm(big.digest())).is_err(), "a capped yes is not taken on the native confirm");
         assert!(permits(Some(&big), Shown::Pane(big.digest())).is_ok(), "a capped yes is taken in the app's pane");
         assert!(permits(Some(&big), Shown::Pane(other)).is_err(), "a digest of other text is refused in the pane");
-    }
-
-    #[test]
-    fn an_approval_yes_has_no_curl_line_and_a_no_has_one() {
-        let ask = approval(json!({}));
-        assert!(curl_line(addr(), token(), &ask, "yes").is_none());
-        assert!(curl_line(addr(), token(), &ask, "no").is_some());
-    }
-
-    #[test]
-    fn a_curl_line_body_parses_back_and_holds_no_hidden_character() {
-        let label = "it's \u{202e}\u{9b}\n$(id)";
-        let line = curl_line(addr(), token(), &approval(json!({})), label).expect("a line for this answer");
-        let quoted = line
-            .split(" --data-binary ")
-            .nth(1)
-            .and_then(|rest| rest.split(" 'http").next())
-            .expect("the body is quoted");
-        let body = quoted
-            .strip_prefix('\'')
-            .and_then(|b| b.strip_suffix('\''))
-            .expect("the body is one shell word")
-            .replace(r"'\''", "'");
-        let parsed: Value = serde_json::from_str(&body).expect("the body is JSON");
-        assert_eq!(parsed, json!({"ask_id": 1, "answer": label}));
-        assert!(!body.chars().any(is_unsafe), "{body}");
-    }
-
-    #[test]
-    fn the_curl_line_names_the_token_file_and_never_the_token() {
-        let line = curl_line(addr(), Path::new("/run/t/web-4477.token"), &approval(json!({})), "no")
-            .expect("a line for this answer");
-        assert!(line.contains("$(cat '/run/t/web-4477.token')"), "{line}");
-        assert!(line.contains("'http://127.0.0.1:4477/api/answer'"), "{line}");
-        assert!(line.contains(r#"--data-binary '{"answer":"no","ask_id":1}'"#), "{line}");
     }
 }

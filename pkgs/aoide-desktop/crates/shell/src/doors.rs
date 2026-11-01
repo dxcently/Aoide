@@ -16,7 +16,7 @@
 //! holds
 //! its stream's end for that close. The asks a stream carries are held per
 //! door,
-//! and answered only at that door (asks.rs).
+//! and are read through `pending_asks`.
 //!
 //! Nothing here reads an environment variable. The runtime dir arrives as the
 //! value of `XDG_RUNTIME_DIR`, and `$AOIDE_ROOT` as a path.
@@ -39,13 +39,13 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use aoide_door::{
-    check_runtime, runtime_from_env, token_path, AnswerOutcome, Ask, CancelOutcome, Closer, Door, DoorError, Events,
+    check_runtime, runtime_from_env, token_path, Ask, CancelOutcome, Closer, Door, DoorError, Events,
     Frame,
 };
 use crate::exec::untrusted::{is_unsafe, visible};
 use serde::{Deserialize, Serialize};
 
-use crate::asks::{self, Prepared, Sent, Shown};
+use crate::asks;
 use crate::exec::{check_pin, euid, open_pidfd, pidfd_exited, stat_of, terminate_pidfd, Arrived, Exec, ExecError, Pinned};
 
 /// The bound on the events channel. The caller creates the channel with this
@@ -160,9 +160,6 @@ pub enum DoorsError {
     Refused { pid: u32, log: PathBuf, why: String },
     /// A close the door's turn state does not allow yet.
     Turn(String),
-    /// An answer refused before any request: its door fails its checks, the
-    /// ask is not pending there, or the answer is not offered.
-    Ask(String),
     /// No watched door has this launch id.
     Unknown(String),
     /// A close whose checks fail for a reason other than identity. The record
@@ -183,7 +180,6 @@ impl fmt::Display for DoorsError {
             DoorsError::Plan(why)
             | DoorsError::Store(why)
             | DoorsError::Turn(why)
-            | DoorsError::Ask(why)
             | DoorsError::Unknown(why) => f.write_str(why),
             DoorsError::Refused { pid, log, why } => {
                 write!(f, "the door (pid {pid}) did not pass its checks: {why}; its log is {}", log.display())
@@ -612,43 +608,6 @@ impl Doors {
     /// The asks this door's stream carries, oldest first.
     pub fn pending_asks(&self, id: &str) -> Result<Vec<Ask>, DoorsError> {
         Ok(self.watch(id)?.link.state.lock().unwrap().asks.values().cloned().collect())
-    }
-
-    /// Prepares an answer to an ask this door's stream carries. Nothing is
-    /// sent.
-    /// It refuses when no watched door carries the ask, or the ask does not
-    /// offer the label, so an answer aimed at another door never gets a
-    /// request.
-    pub fn prepare_answer(&self, id: &str, ask_id: u64, label: &str) -> Result<Prepared, DoorsError> {
-        let watch = self.watch(id)?;
-        let ask = watch.link.state.lock().unwrap().asks.get(&ask_id).cloned();
-        let Some(ask) = ask else {
-            return Err(DoorsError::Ask(format!("ask {ask_id} is not pending at this door, so nothing was sent")));
-        };
-        if !asks::offers(&ask, label) {
-            return Err(DoorsError::Ask(format!("ask {ask_id} does not offer that answer, so nothing was sent")));
-        }
-        let dialog = asks::dialog(&ask, label);
-        Ok(Prepared { launch_id: id.to_owned(), ask_id, label: label.to_owned(), dialog })
-    }
-
-    /// Sends a prepared answer to the door that carried its ask, once the door
-    /// passes its checks. The dialog is built again from the stored ask, and
-    /// `shown` must permit it (`asks::permits`): a yes goes only under the
-    /// digest
-    /// of the dialog on screen, and a capped yes only from the app's own pane.
-    pub fn send_answer(&self, prepared: &Prepared, shown: Shown) -> Result<Sent, DoorsError> {
-        let entry = self.watch(&prepared.launch_id)?.entry.clone();
-        verify(&self.pins, &entry).map_err(|check| {
-            DoorsError::Ask(format!("the door failed its checks, so nothing was sent: {}", check.why()))
-        })?;
-        let fresh = self.prepare_answer(&prepared.launch_id, prepared.ask_id, &prepared.label)?;
-        asks::permits(fresh.dialog(), shown).map_err(DoorsError::Ask)?;
-        match self.door(&prepared.launch_id)?.answer(prepared.ask_id, &prepared.label, None)? {
-            AnswerOutcome::Answered => Ok(Sent::Answered),
-            AnswerOutcome::NotPending => Ok(Sent::NotPending),
-            AnswerOutcome::Rejected { reason } => Ok(Sent::Rejected { reason }),
-        }
     }
 
     fn watch(&self, id: &str) -> Result<&Watch, DoorsError> {

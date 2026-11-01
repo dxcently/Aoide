@@ -24,11 +24,13 @@ fn fake_aoide() -> PathBuf {
 struct Answer {
     answer: bool,
     asked: Mutex<Vec<String>>,
+    shown: Mutex<Vec<String>>,
 }
 
 impl Confirm for Answer {
-    fn confirm(&self, verb: &str, _text: &str) -> bool {
+    fn confirm(&self, verb: &str, text: &str) -> bool {
         self.asked.lock().unwrap().push(verb.to_owned());
+        self.shown.lock().unwrap().push(text.to_owned());
         self.answer
     }
 }
@@ -371,4 +373,148 @@ fn every_pushed_ask_string_is_spelled_and_a_raw_one_is_no_card() {
     }
     assert!(wire.iter().any(|p| p.starts_with(r#"{"type":"other","text":"#)), "the raw row comes as a spelled note: {wire:?}");
     assert!(wire.iter().any(|p| p.contains(r#""fingerprint":"0badc0de0badc0de""#) && p.starts_with(r#"{"type":"open""#)), "{wire:?}");
+}
+
+/// The calls of `ask answer` the fake recorded, each as its argv.
+fn answer_argvs(record: &Path) -> Vec<Vec<String>> {
+    fs::read_to_string(record)
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|line| {
+            let call: serde_json::Value = serde_json::from_str(line).expect("a record line is JSON");
+            let args: Vec<String> = call["args"].as_array()?.iter().map(|a| a.as_str().unwrap().to_owned()).collect();
+            (args.starts_with(&["ask".to_owned(), "answer".to_owned()])).then_some(args)
+        })
+        .collect()
+}
+
+/// A window whose asks are open over the fixture, and the pushes it has made.
+fn with_asks(tag: &str, confirm: Box<dyn Confirm>, extra: &[(&str, String)]) -> (Fixture, Arc<Mutex<Vec<AskPush>>>) {
+    let mut env = vec![asks_file(tag, ASKS)];
+    env.extend(extra.iter().cloned());
+    let fx = fixture_with(tag, &[], confirm, &env);
+    let (sink, seen) = ask_collector();
+    fx.window.asks_open(sink).expect("the asks open");
+    wait_for_asks(&seen, |pushes| opened(pushes).len() == 3);
+    (fx, seen)
+}
+
+#[test]
+fn a_question_answer_runs_ask_answer_with_the_fingerprint_the_window_pushed_and_asks_no_confirm() {
+    let confirm = Arc::new(Answer::default());
+    let (fx, _seen) = with_asks("answer-question", Box::new(ArcConfirm(confirm.clone())), &[]);
+    let reply = fx.window.ask_answer("s-1", 2, "sunrise", None).expect("the answer runs");
+    assert_eq!(reply.code, Some(0));
+    assert_eq!(
+        answer_argvs(&fx.record),
+        [["ask", "answer", "--json", "--expect=c01d5eed7ab1e002", "--", "s-1", "2", "sunrise"]],
+        "the fingerprint is the one the push carried"
+    );
+    assert!(confirm.asked.lock().unwrap().is_empty(), "a question's answer skips the confirm");
+    fx.window.asks_close().expect("the asks close");
+}
+
+#[test]
+fn a_no_skips_the_confirm_and_a_yes_is_confirmed_once_on_the_whole_visible_call() {
+    let confirm = Arc::new(Answer { answer: true, ..Default::default() });
+    let (fx, _seen) = with_asks("answer-approval", Box::new(ArcConfirm(confirm.clone())), &[]);
+    fx.window.ask_answer("s-1", 1, "no", None).expect("a no runs");
+    assert!(confirm.asked.lock().unwrap().is_empty(), "a no skips the confirm");
+    fx.window.ask_answer("s-1", 1, "yes", None).expect("a yes runs once confirmed");
+    assert_eq!(*confirm.asked.lock().unwrap(), ["Approve"], "a yes asks once");
+    let shown = confirm.shown.lock().unwrap()[0].clone();
+    for part in ["\"callId\": \"tu1\"", "\"tool\": \"write\"", "\"path\": \"notes.md\"", "\"prompt\": \"write?\""] {
+        assert!(shown.contains(part), "the confirm shows the whole call, {part}: {shown}");
+    }
+    let argvs = answer_argvs(&fx.record);
+    assert_eq!(argvs.len(), 2);
+    assert_eq!(argvs[1][3], "--expect=3f9a2c4be1d07a55");
+    fx.window.asks_close().expect("the asks close");
+}
+
+#[test]
+fn a_confirm_that_is_cancelled_starts_no_answer() {
+    let confirm = Arc::new(Answer { answer: false, ..Default::default() });
+    let (fx, _seen) = with_asks("answer-cancel", Box::new(ArcConfirm(confirm.clone())), &[]);
+    let why = fx.window.ask_answer("s-1", 1, "yes", None).expect_err("a cancelled yes is an error");
+    assert!(why.contains("cancelled"), "{why}");
+    assert_eq!(confirm.asked.lock().unwrap().len(), 1, "the confirm was asked");
+    assert!(answer_argvs(&fx.record).is_empty(), "no child started");
+    fx.window.asks_close().expect("the asks close");
+}
+
+#[test]
+fn a_refusal_from_core_reaches_the_page_as_an_error_and_the_card_stays() {
+    let why = "ask 2 is not the one named by --expect c01d5eed7ab1e002; nothing was sent";
+    let extra = [("FAKE_AOIDE_EXIT", "1".to_owned()), ("FAKE_AOIDE_STDERR", why.to_owned())];
+    let (fx, seen) = with_asks("answer-refused", Box::new(Answer::default()), &extra);
+    let error = fx.window.ask_answer("s-1", 2, "dusk", None).expect_err("a refusal is an error");
+    assert!(error.contains("is not the one named by --expect"), "{error}");
+    let again = fx.window.ask_answer("s-1", 2, "dusk", None).expect_err("the ask is still held, so core is asked again");
+    assert!(again.contains("is not the one named"), "{again}");
+    assert_eq!(answer_argvs(&fx.record).len(), 2, "the record kept the ask");
+    assert!(!seen.lock().unwrap().iter().any(|p| matches!(p, AskPush::Gone { .. })), "the card is not pushed gone");
+    fx.window.asks_close().expect("the asks close");
+}
+
+#[test]
+fn an_answer_the_ask_does_not_offer_or_an_ask_not_open_starts_no_child() {
+    let (fx, _seen) = with_asks("answer-unoffered", Box::new(Answer { answer: true, ..Default::default() }), &[]);
+    let unoffered = fx.window.ask_answer("s-1", 2, "yes", None).expect_err("a question offers its labels only");
+    assert!(unoffered.contains("does not offer"), "{unoffered}");
+    let unknown = fx.window.ask_answer("s-1", 9, "no", None).expect_err("an ask that is not open");
+    assert!(unknown.contains("not open"), "{unknown}");
+    let other = fx.window.ask_answer("s-2", 1, "no", None).expect_err("an ask of another session");
+    assert!(other.contains("not open"), "{other}");
+    assert!(answer_argvs(&fx.record).is_empty(), "no child started");
+    fx.window.asks_close().expect("the asks close");
+}
+
+/// An ask file whose one approval holds a call past the confirm's cap.
+fn capped_asks() -> String {
+    let row = ASKS.lines().next().unwrap().replace("\"hello\"", &format!("\"{}\"", "x".repeat(5 * 1024)));
+    format!("{row}\n")
+}
+
+#[test]
+fn a_yes_above_the_cap_is_taken_only_in_the_apps_pane_under_the_digest_of_what_it_showed() {
+    let confirm = Arc::new(Answer { answer: true, ..Default::default() });
+    let env = [asks_file("capped", &capped_asks())];
+    let fx = fixture_with("answer-capped", &[], Box::new(ArcConfirm(confirm.clone())), &env);
+    let (sink, seen) = ask_collector();
+    fx.window.asks_open(sink).expect("the asks open");
+    wait_for_asks(&seen, |pushes| opened(pushes).len() == 1);
+    let digest = match &seen.lock().unwrap()[0] {
+        AskPush::Open { ask } => {
+            assert!(ask.capped, "the view says the confirm offers no yes");
+            ask.digest.clone().expect("an approval carries its digest")
+        }
+        other => panic!("an ask is expected, not {other:?}"),
+    };
+    let no_digest = fx.window.ask_answer("s-1", 1, "yes", None).expect_err("the confirm offers no yes above the cap");
+    assert!(no_digest.contains("over the confirm's cap"), "{no_digest}");
+    let wrong = fx.window.ask_answer("s-1", 1, "yes", Some(&"0".repeat(64))).expect_err("a digest of other text is refused");
+    assert!(wrong.contains("not the one stored"), "{wrong}");
+    let garbled = fx.window.ask_answer("s-1", 1, "yes", Some("not a digest")).expect_err("a digest that is not one is refused");
+    assert!(garbled.contains("over the confirm's cap"), "{garbled}");
+    assert!(confirm.asked.lock().unwrap().is_empty(), "the native confirm is never offered a capped yes");
+    assert!(answer_argvs(&fx.record).is_empty(), "nothing was sent so far");
+    fx.window.ask_answer("s-1", 1, "yes", Some(&digest)).expect("the pane's yes under the digest runs");
+    assert_eq!(answer_argvs(&fx.record).len(), 1);
+    fx.window.asks_close().expect("the asks close");
+}
+
+#[test]
+fn a_digest_from_the_page_never_replaces_the_confirm_below_the_cap() {
+    let confirm = Arc::new(Answer { answer: false, ..Default::default() });
+    let (fx, seen) = with_asks("answer-pane-small", Box::new(ArcConfirm(confirm.clone())), &[]);
+    let digest = match &seen.lock().unwrap()[0] {
+        AskPush::Open { ask } => ask.digest.clone().expect("an approval carries its digest"),
+        other => panic!("an ask is expected, not {other:?}"),
+    };
+    let why = fx.window.ask_answer("s-1", 1, "yes", Some(&digest)).expect_err("the confirm still decides");
+    assert!(why.contains("cancelled"), "{why}");
+    assert_eq!(confirm.asked.lock().unwrap().len(), 1, "the confirm was asked despite the digest");
+    assert!(answer_argvs(&fx.record).is_empty());
+    fx.window.asks_close().expect("the asks close");
 }

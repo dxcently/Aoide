@@ -149,39 +149,30 @@ are in README.md.
 
 ## The asks (asks.rs)
 
-- An answer goes only to the door whose stream carried its ask. `prepare_answer`
-  refuses, with no request, when no watched door carries the ask, or the ask
-  does not offer the label.
-- `send_answer` runs `verify` before its request, builds the dialog again from
-  the stored ask, and sends only when `asks::permits` accepts what was shown: no
-  dialog for an answer that has none, and for a yes the digest of the dialog
-  built now. A capped yes is taken only as `Shown::Pane`; under `Shown::Confirm`
-  it is refused. Every refusal comes before any request.
+- An answer is `aoide ask answer`, run by `asks::answer` with the fingerprint of
+  the `Held` the page was shown. The app dials no door to answer: core checks
+  that the ask is open and the fingerprint is its, posts the answer to the door
+  that held it, and audits the call. `Doors` has no answer path.
+- The decision to run it is the window's, from `offers`, `dialog` and
+  `permits`: the label must be one the ask offers; an approval's yes needs a
+  dialog shown now, and its digest must be the digest of the dialog built from
+  the record now. A capped yes is taken only as `Shown::Pane`; under
+  `Shown::Confirm` it is refused. A no and a question's answer show nothing.
+  Every refusal comes before any child.
 - The dialog is the call as `visible_json`: one object of `callId`, `tool`,
   `prompt`, `reason` (only when set) and `input`, pretty, keys sorted at every
   depth, and every character `visible` would spell written as a JSON `\u`
-  escape. The cap is 4 KiB or 60 lines of that text. The dialog is never a curl
-  line.
-- A same-id ask the door sends again replaces the stored one, and a change to
-  any of its call's fields gives it a new digest. A yes confirmed on the earlier
-  text is refused, since `send_answer` builds the dialog again from the stored
-  ask. Residual: a door that changes its pending ask after that check and before
-  the answer lands applies the yes to the change; only Eidolon can close that.
-- The stream's JSON is Eidolon's own serialization of its value, so the dialog
-  shows the input the door sent. That value holds no duplicate key and no
-  number outside what serde_json keeps, so the stream is read without a
-  duplicate-key check and no code does one. The sorting and the spelling are
-  `aoide-protocol`'s, which `asks.rs` calls.
-- `curl_line` returns None for an approval's yes. Its body is
-  `visible_json_line` of the answer, so it holds no raw character `visible`
-  would spell. Every value in the line, the token path included, is one
-  single-quoted POSIX shell word (`sq`). The launch refuses a token path that is
-  not graphic ASCII.
-- The curl line never holds the token. It reads the token file with
-  `$(cat ...)`.
-- An ask leaves `pending_asks` only when the door's `ask-settled` arrives. A
-  204, 409, 422 or 401 leaves it listed.
-- A stream's asks are cleared when it opens, and rebuilt from its replay.
+  escape. The cap is 4 KiB or 60 lines of that text. The ask it is built from is
+  core's visible form of the door's ask, the one the fingerprint covers.
+- A same-id ask the door sends again reaches the app as a changed row with a
+  new fingerprint. A yes confirmed on the earlier text names the earlier
+  fingerprint, so core refuses it: nothing is sent for an ask that changed
+  after the person read it. A label the ask offers is matched on core's visible
+  form of it, so a label core had to spell cannot be answered from the window.
+- An ask leaves `pending_asks` of a door only when the door's `ask-settled`
+  arrives. A stream's asks are cleared when it opens, and rebuilt from its
+  replay. `pending_asks` is a read of the door's own stream; nothing answers
+  through it.
 
 ## The ask watch (asks.rs)
 
@@ -214,7 +205,7 @@ are in README.md.
   that test's exec of the program fails with ETXTBSY.
 - A negative check ends with a sentinel request the fake records, and passes
   only if nothing came before the sentinel. For a request, the test lists what
-  came first with `answers_before_sentinel`. For a SIGTERM,
+  came first with the fake's log. For a SIGTERM,
   `no_sigterm_in_whole_log_once_sentinel_served` sends the sentinel, waits until
   the fake has served it and 200 ms more, then asserts that the fake's whole log
   holds no SIGTERM. A door that was signalled and exited serves no sentinel, so
@@ -222,8 +213,7 @@ are in README.md.
 - The door's port comes from the ephemeral pool that other tests' clients also
   draw from, so a bind on that 127.0.0.1 port can fail with `AddrInUse` after
   the door dies. `loopback-2` serves the door on 127.0.0.2, which no client
-  binds. The two tests that bind a dead door's address, the stop-now test and
-  `an_answer_to_a_door_that_fails_its_checks_sends_no_request`, both use it.
+  binds. The test that binds a dead door's address, the stop-now test, uses it.
 - The fake eidolon's start-up modes are listed in README.md's fakes section.
 
 ## The chat (chat/)

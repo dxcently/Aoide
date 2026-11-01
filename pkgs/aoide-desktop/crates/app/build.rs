@@ -1,4 +1,4 @@
-const COMMANDS: &[&str] = &["palette", "run", "sessions", "chat_open", "chat_say", "chat_close", "asks_open", "asks_close", "smoke_note"];
+const COMMANDS: &[&str] = &["palette", "run", "sessions", "chat_open", "chat_say", "chat_close", "asks_open", "asks_close", "ask_answer", "smoke_note"];
 
 fn main() {
     // A smoke build reads the smoke capability too. No other build does.

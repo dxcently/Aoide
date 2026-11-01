@@ -146,3 +146,58 @@ fn smoke_note_passes_as_main_in_a_smoke_build() {
     let text = format!("{reached:?}");
     assert!(text.contains("not a smoke run"), "smoke_note reaches its handler as main: {text}");
 }
+
+/// The asks core's `ask watch` prints, three of them.
+const ASKS: &str = include_str!("../../shell/tests/fixtures/ask-watch.jsonl");
+
+#[test]
+fn a_fingerprint_the_page_sends_is_never_used() {
+    let dir = std::env::temp_dir().join(format!("aoide-app-acl-asks-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).expect("a scratch dir is made");
+    let (record, asks) = (dir.join("record.jsonl"), dir.join("asks.jsonl"));
+    fs::write(&asks, ASKS).expect("the asks file is written");
+    let env = vec![
+        ("PATH".into(), "/usr/bin:/bin".into()),
+        ("FAKE_AOIDE_RECORD".into(), record.clone().into_os_string()),
+        ("FAKE_AOIDE_ASKS_FILE".into(), asks.into_os_string()),
+    ];
+    let exec = Exec::load(&fake_aoide(), &dir.join("home"), env).expect("the fake loads");
+    let window = Window::new(exec, Box::new(Refuse));
+    let seen = Arc::new(std::sync::Mutex::new(0usize));
+    let counted = seen.clone();
+    window.asks_open(Arc::new(move |push| {
+        if matches!(push, aoide_desktop_app::AskPush::Open { .. }) {
+            *counted.lock().unwrap() += 1;
+        }
+    })).expect("the asks open");
+    let until = std::time::Instant::now() + Duration::from_secs(5);
+    while *seen.lock().unwrap() < 3 {
+        assert!(std::time::Instant::now() < until, "the asks did not arrive");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let window = Arc::new(window);
+    let app = mock_builder()
+        .manage(window.clone())
+        .invoke_handler(handler())
+        .build(tauri::generate_context!())
+        .expect("the mock app builds");
+    let key = app.invoke_key().to_owned();
+    let main = WebviewWindowBuilder::new(&app, "main", WebviewUrl::App("index.html".into()))
+        .data_directory(scratch("asks-main"))
+        .build()
+        .expect("the main window builds");
+    let mut call = request("ask_answer", &key);
+    call.body = InvokeBody::Json(serde_json::json!({
+        "session": "s-1", "askId": 2, "label": "sunrise", "shown": null,
+        "fingerprint": "deadbeefdeadbeef", "expect": "deadbeefdeadbeef"
+    }));
+    let reached = get_ipc_response(&main, call);
+    assert!(reached.is_ok(), "the answer passes as main: {reached:?}");
+    let text = fs::read_to_string(&record).expect("the record is read");
+    let answered: Vec<&str> = text.lines().filter(|l| l.contains("\"answer\"")).collect();
+    assert_eq!(answered.len(), 1, "one answer ran: {text}");
+    assert!(answered[0].contains("--expect=c01d5eed7ab1e002"), "the record's fingerprint is used: {}", answered[0]);
+    assert!(!text.contains("deadbeef"), "the page's fingerprint reached no child: {text}");
+    window.asks_close().expect("the asks close");
+}

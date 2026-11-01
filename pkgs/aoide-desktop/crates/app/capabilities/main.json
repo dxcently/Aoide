@@ -10,6 +10,7 @@
     "allow-chat-say",
     "allow-chat-close",
     "allow-asks-open",
-    "allow-asks-close"
+    "allow-asks-close",
+    "allow-ask-answer"
   ]
 }

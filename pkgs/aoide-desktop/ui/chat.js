@@ -83,21 +83,29 @@ function askCard(line) {
     choices.appendChild(item);
   }
   card.appendChild(choices);
-  const session = open ? open.id : "<session>";
-  card.appendChild(node("div", "ask-how", "answer with: aoide ask answer " + session + " " + ask.id + " <label> --expect <fingerprint>"));
   return card;
 }
 
-function choicesList(view) {
-  const choices = node("ul", "ask-choices");
-  for (const answer of view.answers) choices.appendChild(node("li", "", answer));
-  for (const option of view.options) {
-    const item = node("li", "");
-    item.appendChild(node("span", "ask-label", option.label));
-    if (option.description) item.appendChild(node("span", "ask-description", option.description));
-    choices.appendChild(item);
+function answerButton(view, label, description, card) {
+  const button = node("button", "ask-answer");
+  button.type = "button";
+  button.appendChild(node("span", "ask-label", label));
+  if (description) button.appendChild(node("span", "ask-description", description));
+  button.addEventListener("click", () => answerAsk(view, label, card));
+  return button;
+}
+
+async function answerAsk(view, label, card) {
+  const buttons = card.querySelectorAll("button");
+  const failure = card.querySelector(".ask-error");
+  failure.textContent = "";
+  for (const button of buttons) button.disabled = true;
+  try {
+    await invoke("ask_answer", { session: view.session, askId: view.ask_id, label, shown: view.digest || null });
+  } catch (error) {
+    failure.textContent = String(error);
+    for (const button of buttons) button.disabled = false;
   }
-  return choices;
 }
 
 function openAskCard(view) {
@@ -105,7 +113,11 @@ function openAskCard(view) {
   card.appendChild(node("div", "ask-kind", view.kind));
   card.appendChild(node("div", "ask-prompt", view.prompt));
   if (view.call !== undefined) card.appendChild(node("pre", "ask-call", view.call));
-  card.appendChild(choicesList(view));
+  const choices = node("div", "ask-buttons");
+  for (const answer of view.answers) choices.appendChild(answerButton(view, answer, "", card));
+  for (const option of view.options) choices.appendChild(answerButton(view, option.label, option.description, card));
+  card.appendChild(choices);
+  card.appendChild(node("div", "ask-error"));
   card.appendChild(node("div", "ask-how", "fingerprint " + view.fingerprint));
   return card;
 }

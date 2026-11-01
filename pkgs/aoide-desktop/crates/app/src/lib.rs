@@ -28,6 +28,7 @@ pub fn handler<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + 
         commands::chat_close,
         commands::asks_open,
         commands::asks_close,
+        commands::ask_answer,
         #[cfg(feature = "smoke")]
         commands::smoke_note,
     ]
