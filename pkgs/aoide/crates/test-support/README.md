@@ -16,6 +16,9 @@ of those exists as a copy per crate.
   per test BINARY. Each domain crate's own `env_lock()` delegates here (or
   mirrors it, where it is not a dev-dependency), so two spellings in one
   process are still one lock.
+- `GuardedEnvLock` — `env_lock` whose guard panics on drop if the test left an
+  `AOIDE_*` variable, `XDG_RUNTIME_DIR` or `HOME` changed (not while already
+  panicking).
 - `EnvSaver` — capture-and-restore on drop, so a panicking assertion never
   leaks env into the next test.
 - `short_tmp`/`unique_tmp` — scratch dirs; `short_tmp` is HASHED to stay inside

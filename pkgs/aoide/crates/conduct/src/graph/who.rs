@@ -2178,7 +2178,7 @@ mod tests {
     // ── session_roster_with: the full pipeline, injected pull, real local stage I/O ──
 
     struct Env {
-        _guard: std::sync::MutexGuard<'static, ()>,
+        _guard: crate::EnvGuard,
         stage: std::path::PathBuf,
         state: std::path::PathBuf,
         saved_stage: Option<String>,

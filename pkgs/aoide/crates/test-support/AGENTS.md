@@ -11,6 +11,12 @@
   cross-module race this crate exists to close. Acquisition stays
   poison-tolerant (`.lock().unwrap_or_else(|e| e.into_inner())`) — a bare
   `.unwrap()` turns one failing test into a suite-wide poison cascade.
+- **The guarded lock fails a test that leaves the env changed.**
+  `GuardedEnvLock` is `env_lock` with a guard that snapshots every `AOIDE_*`
+  variable, `XDG_RUNTIME_DIR` and `HOME` when taken and panics on drop naming
+  the variable and the test thread if one differs, never while the thread is
+  already panicking. A consumer whose tests restore their env returns it from
+  its own `env_lock()`; a variable outside that set is added to `guarded_env`.
 - **A fixture that EXPECTS a delivery waits through the delivery rig**
   (`expect_delivery`/`accept_one`/`read_delivery`), never a hand-rolled
   `accept`/`read_to_end` thread. Such a fixture binds a listener at the

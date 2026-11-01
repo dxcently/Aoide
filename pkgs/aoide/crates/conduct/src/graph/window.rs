@@ -1801,7 +1801,7 @@ mod tests {
         _env: EnvVars,
         _xdg: EnvVars,
         stage: std::path::PathBuf,
-        _guard: std::sync::MutexGuard<'static, ()>,
+        _guard: crate::EnvGuard,
     }
 
     impl Drop for WindowWorld {

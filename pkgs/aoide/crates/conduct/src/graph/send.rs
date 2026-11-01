@@ -4834,6 +4834,7 @@ mod tests {
     #[test]
     fn an_admission_refusal_names_its_session_stripped() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["AOIDE_AUDIT_LOG"]);
         let root = unique_stage("admit-strip");
         std::env::set_var("AOIDE_AUDIT_LOG", root.join("log"));
         let profile = agent_profile("claude").unwrap();

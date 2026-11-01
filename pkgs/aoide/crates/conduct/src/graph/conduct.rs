@@ -5415,7 +5415,7 @@ mod tests {
         root: PathBuf,
         child: std::process::Child,
         _env: EnvVars,
-        _lock: std::sync::MutexGuard<'static, ()>,
+        _lock: crate::EnvGuard,
     }
 
     #[cfg(unix)]

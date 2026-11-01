@@ -90,8 +90,17 @@ pub mod shellbridge;
 /// case. A test that wants to prove real `~/.codex` reads (`codex_app.rs`'s
 /// own suite) still installs its own `CODEX_HOME`/`HOME` override afterward,
 /// same as any other env var here.
+///
+/// **The guard fails a test that leaves the environment changed.** It
+/// snapshots every `AOIDE_*` variable, `XDG_RUNTIME_DIR` and `HOME` when taken
+/// and, when dropped, panics naming the variable and the test thread if one
+/// differs — unless the thread is already panicking, so a failing test keeps
+/// its own message. A test restores what it sets (`EnvVars::save`, declared
+/// after the lock, drops before it). The guard is `aoide_test_support`'s, and
+/// the lock keeps the poison-tolerant shape
+/// `.lock().unwrap_or_else(|e| e.into_inner())`.
 #[cfg(test)]
-pub(crate) fn env_lock() -> &'static std::sync::Mutex<()> {
+pub(crate) fn env_lock() -> aoide_test_support::GuardedEnvLock {
     static ISOLATE_DAEMON_SOCKET: std::sync::Once = std::sync::Once::new();
     ISOLATE_DAEMON_SOCKET.call_once(|| {
         if std::env::var("AOIDE_DAEMON_SOCKET").is_err() {
@@ -113,5 +122,8 @@ pub(crate) fn env_lock() -> &'static std::sync::Mutex<()> {
             );
         }
     });
-    aoide_test_support::env_lock()
+    aoide_test_support::GuardedEnvLock
 }
+
+#[cfg(test)]
+pub(crate) use aoide_test_support::EnvGuard;

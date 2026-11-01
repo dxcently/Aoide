@@ -3067,7 +3067,7 @@ mod tests {
     #[test]
     fn an_attested_mcp_spawn_of_a_registered_harness_still_launches() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _env = EnvVars::save(&["PATH", "AOIDE_CONDUCT_SPAWN_EXE", "AOIDE_STAGE_DIR", "AOIDE_STATE_DIR", "XDG_RUNTIME_DIR", "AOIDE_AUDIT_LOG"]);
+        let _env = EnvVars::save(&["PATH", "AOIDE_CONDUCT_SPAWN_EXE", "AOIDE_STAGE_DIR", "AOIDE_STATE_DIR", "XDG_RUNTIME_DIR", "AOIDE_AUDIT_LOG", "AOIDE_DAEMON_SOCKET"]);
         let root = spawn_stage("spawn-harness-launches");
         let bin = root.join("bin");
         std::fs::create_dir_all(&bin).unwrap();
@@ -3087,7 +3087,7 @@ mod tests {
     #[test]
     fn an_mcp_harness_named_by_path_is_held_and_bare_claude_launches() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _env = EnvVars::save(&["PATH", "AOIDE_CONDUCT_SPAWN_EXE", "AOIDE_STAGE_DIR", "AOIDE_STATE_DIR", "XDG_RUNTIME_DIR", "AOIDE_AUDIT_LOG"]);
+        let _env = EnvVars::save(&["PATH", "AOIDE_CONDUCT_SPAWN_EXE", "AOIDE_STAGE_DIR", "AOIDE_STATE_DIR", "XDG_RUNTIME_DIR", "AOIDE_AUDIT_LOG", "AOIDE_DAEMON_SOCKET"]);
         let root = spawn_stage("spawn-harness-by-path");
         let bin = root.join("bin");
         std::fs::create_dir_all(&bin).unwrap();

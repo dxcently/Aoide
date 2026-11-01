@@ -1814,7 +1814,13 @@ in the message.
   only the state dir (`build_graph` reads the remote-children ledger from the
   stage) reads and writes the last leaker's directory, and rows another test
   filed there ride into its document. The `doc.rs` tests that build a graph
-  set both variables to directories of their own.
+  set both variables to directories of their own. The guard `env_lock().lock()`
+  returns enforces the restore: it snapshots every `$AOIDE_*` variable,
+  `$XDG_RUNTIME_DIR` and `$HOME` when taken and, when dropped, panics naming
+  the variable and the test thread if one differs (never while the thread is
+  already panicking, so a failing test keeps its own message). A new setter
+  the guard does not cover is added to `guarded_env` in
+  `aoide-test-support`.
 - **A nested headless session is windowless BY CONSTRUCTION — never
   pid-ancestry-walk it to a window (task #89).**
   It is NOT enough to gate the backfill call sites alone — a

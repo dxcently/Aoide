@@ -1946,7 +1946,7 @@ mod tests {
         assert_eq!(crate::graph::who::session_presence(&merged[0].state), "done");
     }
     #[cfg(unix)]
-    fn e2e_stage(tag: &str) -> (std::path::PathBuf, EnvVars, std::sync::MutexGuard<'static, ()>) {
+    fn e2e_stage(tag: &str) -> (std::path::PathBuf, crate::EnvGuard, EnvVars) {
         let guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let env = EnvVars::save(&["AOIDE_STAGE_DIR", "AOIDE_STATE_DIR", "XDG_RUNTIME_DIR", "AOIDE_AUDIT_LOG", "AOIDE_SESSION_ID"]);
         let root = unique_stage(tag);
@@ -1955,7 +1955,7 @@ mod tests {
         std::env::set_var("AOIDE_AUDIT_LOG", root.join("log"));
         std::env::set_var("XDG_RUNTIME_DIR", &root);
         std::env::remove_var("AOIDE_SESSION_ID");
-        (root, env, guard)
+        (root, guard, env)
     }
 
     #[cfg(unix)]
@@ -2102,7 +2102,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_live_child_is_heard_silent_then_awaiting_then_settled_once_each() {
-        let (root, _env, _guard) = e2e_stage("dmt-live");
+        let (root, _guard, _env) = e2e_stage("dmt-live");
         let phase = |p: &str| format!("\"$AOIDE\" session phase --id {HOOK} --phase {p}");
         let gate = |n: u8| format!("while [ ! -f \"$GO.{n}\" ]; do sleep 0.05; done");
         let after = [phase("awaiting"), gate(2), phase("stopped"), gate(3)].join("\n");
@@ -2134,7 +2134,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_wrap_whose_child_dies_mid_turn_records_the_death_and_its_spawner_hears_it_once() {
-        let (root, _env, _guard) = e2e_stage("dmt-death");
+        let (root, _guard, _env) = e2e_stage("dmt-death");
         let before = format!("\"$AOIDE\" session phase --id {HOOK} --phase working");
         let (mut wrap, _) = start_wrap(&root, &fake_harness(&before, "kill -9 $$"));
         let mut cursor = CursorFile::new();
@@ -2173,7 +2173,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_harness_that_ends_its_session_mid_turn_and_dies_is_said_ended_mid_turn_once() {
-        let (root, _env, _guard) = e2e_stage("dmt-ended");
+        let (root, _guard, _env) = e2e_stage("dmt-ended");
         let before = format!("\"$AOIDE\" session phase --id {HOOK} --phase working");
         let after = format!("\"$AOIDE\" session end --id {HOOK}\nkill -9 $$");
         let (mut wrap, _) = start_wrap(&root, &fake_harness(&before, &after));
@@ -2204,7 +2204,7 @@ mod tests {
     /// and what the spawner hears.
     #[cfg(unix)]
     fn session_end_hook_then_death(tag: &str, reason: &str) -> (Option<HookDeath>, Vec<ChildClaim>) {
-        let (root, _env, _guard) = e2e_stage(tag);
+        let (root, _guard, _env) = e2e_stage(tag);
         let before = format!("\"$AOIDE\" session phase --id {HOOK} --phase working");
         let payload = format!(r#"{{"session_id":"{HOOK}","hook_event_name":"SessionEnd","reason":"{reason}"}}"#);
         let after = format!("printf '%s' '{payload}' | \"$AOIDE\" session hook\nkill -9 $$");
@@ -2250,7 +2250,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_session_end_by_an_unrelated_process_is_refused_and_hides_no_death() {
-        let (root, _env, _guard) = e2e_stage("dmt-forged-end");
+        let (root, _guard, _env) = e2e_stage("dmt-forged-end");
         let before = format!("\"$AOIDE\" session phase --id {HOOK} --phase working");
         let (mut wrap, _) = start_wrap(&root, &fake_harness(&before, "kill -9 $$"));
         let mut cursor = CursorFile::new();
@@ -2286,7 +2286,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_wrap_whose_child_exits_after_a_closed_phase_writes_nothing_and_says_nothing() {
-        let (root, _env, _guard) = e2e_stage("dmt-closed");
+        let (root, _guard, _env) = e2e_stage("dmt-closed");
         let before = format!("\"$AOIDE\" session phase --id {HOOK} --phase stopped");
         let (mut wrap, _) = start_wrap(&root, &fake_harness(&before, "kill -9 $$"));
         let mut cursor = CursorFile::new();
@@ -2304,7 +2304,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_wrap_killed_without_writing_is_still_said_of_by_the_tick() {
-        let (root, _env, _guard) = e2e_stage("dmt-sigkill");
+        let (root, _guard, _env) = e2e_stage("dmt-sigkill");
         let before = format!("\"$AOIDE\" session phase --id {HOOK} --phase working");
         let (mut wrap, harness) = start_wrap(&root, &fake_harness(&before, ""));
         let mut cursor = CursorFile::new();
@@ -2349,7 +2349,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_reap_pass_leaves_a_wrap_recorded_death_to_be_said_once_with_its_signal() {
-        let (root, _env, _guard) = e2e_stage("dmt-reap");
+        let (root, _guard, _env) = e2e_stage("dmt-reap");
         let before = format!("\"$AOIDE\" session phase --id {HOOK} --phase working");
         let (mut wrap, _) = start_wrap(&root, &fake_harness(&before, "kill -9 $$"));
         let mut cursor = CursorFile::new();
@@ -2384,7 +2384,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_pruned_clean_end_whose_harness_later_exits_is_not_said_of() {
-        let (root, _env, _guard) = e2e_stage("dmt-pruned");
+        let (root, _guard, _env) = e2e_stage("dmt-pruned");
         let before = format!("\"$AOIDE\" session phase --id {HOOK} --phase working");
         let (mut wrap, harness) = start_wrap(&root, &fake_harness(&before, ""));
         let mut cursor = CursorFile::new();
@@ -2414,7 +2414,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_dead_harness_whose_record_left_is_not_inferred_while_its_host_runs() {
-        let (root, _env, _guard) = e2e_stage("dmt-live-host");
+        let (root, _guard, _env) = e2e_stage("dmt-live-host");
         let before = format!("\"$AOIDE\" session phase --id {HOOK} --phase working");
         let (mut wrap, harness) = start_wrap(&root, &shell_host(&before));
         let mut cursor = CursorFile::new();
@@ -2446,7 +2446,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_death_whose_wrap_ends_before_any_tick_saw_the_child_is_said_once() {
-        let (root, _env, _guard) = e2e_stage("dmt-unseen");
+        let (root, _guard, _env) = e2e_stage("dmt-unseen");
         let before = format!("\"$AOIDE\" session phase --id {HOOK} --phase working");
         let (mut wrap, _) = start_wrap(&root, &fake_harness(&before, "kill -9 $$"));
         std::fs::write(root.join("go"), "").unwrap();
@@ -2472,7 +2472,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_reap_while_the_wrap_runs_leaves_the_death_to_the_wrap_and_it_is_said_once() {
-        let (root, _env, _guard) = e2e_stage("dmt-reap-live");
+        let (root, _guard, _env) = e2e_stage("dmt-reap-live");
         let before = format!("\"$AOIDE\" session phase --id {HOOK} --phase working");
         let (mut wrap, harness) = start_wrap(&root, &shell_host(&before));
         let mut cursor = CursorFile::new();
@@ -2509,7 +2509,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_sigterm_to_the_wrap_is_forwarded_and_recorded_as_a_signal_death() {
-        let (root, _env, _guard) = e2e_stage("dmt-term");
+        let (root, _guard, _env) = e2e_stage("dmt-term");
         let before = format!("\"$AOIDE\" session phase --id {HOOK} --phase working");
         let (mut wrap, _) = start_wrap(&root, &fake_harness(&before, ""));
         let mut cursor = CursorFile::new();

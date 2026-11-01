@@ -1341,7 +1341,7 @@ exit 0
             aoide_storage::seal::hex_encode(&aoide_storage::seal::sha256(text.as_bytes()))
         }
 
-        fn lock() -> std::sync::MutexGuard<'static, ()> {
+        fn lock() -> crate::EnvGuard {
             crate::env_lock().lock().unwrap_or_else(|e| e.into_inner())
         }
 

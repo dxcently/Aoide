@@ -509,6 +509,117 @@ pub fn env_lock() -> &'static std::sync::Mutex<()> {
     &LOCK
 }
 
+/// [`env_lock`] as a lock whose guard fails a test that leaves the
+/// environment changed. A crate's own `env_lock()` returns this where it wants
+/// the check; `.lock().unwrap_or_else(|e| e.into_inner())` is unchanged.
+///
+/// The guard snapshots every `AOIDE_*` variable, `XDG_RUNTIME_DIR` and `HOME`
+/// when taken and, when dropped, panics naming the variable and the test
+/// thread if one differs, unless the thread is already panicking, so a failing
+/// test keeps its own message. A test restores what it sets ([`EnvSaver`]
+/// declared after the lock drops before it).
+pub struct GuardedEnvLock;
+
+impl GuardedEnvLock {
+    pub fn lock(&self) -> std::sync::LockResult<EnvGuard> {
+        match env_lock().lock() {
+            Ok(held) => Ok(EnvGuard::new(held)),
+            Err(poisoned) => Err(std::sync::PoisonError::new(EnvGuard::new(poisoned.into_inner()))),
+        }
+    }
+}
+
+type GuardedEnv = std::collections::BTreeMap<std::ffi::OsString, std::ffi::OsString>;
+
+/// What [`GuardedEnvLock::lock`] returns: the env mutex's guard plus the
+/// snapshot it checks on drop.
+pub struct EnvGuard {
+    before: GuardedEnv,
+    _held: std::sync::MutexGuard<'static, ()>,
+}
+
+fn guarded_env() -> GuardedEnv {
+    std::env::vars_os()
+        .filter(|(k, _)| {
+            let k = k.to_string_lossy();
+            k.starts_with("AOIDE_") || k == "XDG_RUNTIME_DIR" || k == "HOME"
+        })
+        .collect()
+}
+
+impl EnvGuard {
+    fn new(held: std::sync::MutexGuard<'static, ()>) -> Self {
+        EnvGuard { before: guarded_env(), _held: held }
+    }
+}
+
+impl Drop for EnvGuard {
+    fn drop(&mut self) {
+        if std::thread::panicking() {
+            return;
+        }
+        let after = guarded_env();
+        let changed = self
+            .before
+            .keys()
+            .chain(after.keys())
+            .find(|k| self.before.get(*k) != after.get(*k));
+        if let Some(k) = changed {
+            panic!(
+                "test {:?} left {:?} changed: was {:?}, now {:?}; restore it (EnvSaver) before the env lock drops",
+                std::thread::current().name().unwrap_or("<unnamed>"),
+                k,
+                self.before.get(k),
+                after.get(k),
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod env_guard_tests {
+    use super::*;
+
+    const VAR: &str = "AOIDE_TEST_SUPPORT_GUARD_PROBE";
+
+    fn panic_text(r: Result<(), Box<dyn std::any::Any + Send>>) -> String {
+        let e = r.expect_err("the closure panicked");
+        e.downcast_ref::<String>().cloned().or_else(|| e.downcast_ref::<&str>().map(|s| s.to_string())).unwrap_or_default()
+    }
+
+    #[test]
+    fn a_test_that_leaves_an_aoide_variable_set_fails_naming_it() {
+        let text = panic_text(std::panic::catch_unwind(|| {
+            let _g = GuardedEnvLock.lock().unwrap_or_else(|e| e.into_inner());
+            std::env::set_var(VAR, "leaked");
+        }));
+        std::env::remove_var(VAR);
+        assert!(text.contains(VAR) && text.contains("changed"), "{text}");
+    }
+
+    #[test]
+    fn a_test_that_restores_what_it_set_passes() {
+        let _g = GuardedEnvLock.lock().unwrap_or_else(|e| e.into_inner());
+        let before = std::env::var(VAR).ok();
+        std::env::set_var(VAR, "set");
+        match before {
+            Some(v) => std::env::set_var(VAR, v),
+            None => std::env::remove_var(VAR),
+        }
+    }
+
+    #[test]
+    fn a_test_that_is_already_failing_keeps_its_own_message() {
+        let text = panic_text(std::panic::catch_unwind(|| {
+            let _g = GuardedEnvLock.lock().unwrap_or_else(|e| e.into_inner());
+            std::env::set_var(VAR, "leaked");
+            panic!("own failure");
+        }));
+        std::env::remove_var(VAR);
+        assert_eq!(text, "own failure");
+    }
+}
+
 /// Install a FAKE `hyprctl` on `PATH` (the established shim technique — this
 /// crate's own `crates/AGENTS.md` note on replacing a real binary) so the
 /// compositor-facing half can be driven end-to-end with no compositor at all.

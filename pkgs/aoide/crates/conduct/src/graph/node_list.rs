@@ -714,7 +714,7 @@ mod tests {
         stage: std::path::PathBuf,
         state: std::path::PathBuf,
         _saved: EnvVars,
-        _guard: std::sync::MutexGuard<'static, ()>,
+        _guard: crate::EnvGuard,
     }
     impl Env {
         fn set_up(tag: &str) -> Self {
