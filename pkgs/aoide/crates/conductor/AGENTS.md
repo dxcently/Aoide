@@ -302,6 +302,13 @@ operator's ambient mail cursors, ledger, registry or terminal during unit
 checks. Add meaningful state-transition and narrow-layout tests for changed
 input/view seams; run this crate's tests, not an unrelated workspace sweep.
 
+A test that sets an env variable, or reads one another test sets, takes
+`crate::env_lock()` (`lib.rs`) and restores what it set before the lock drops.
+The lock's guard fails a test that leaves an `AOIDE_*` variable, `XDG_RUNTIME_DIR`
+or `HOME` changed. The display-grammar host name follows `AOIDE_A2A_NODE_NAME`,
+so a test that asserts a label built from it holds the lock, and one that needs a
+name that fits the chip pins its own.
+
 ## Documentation updates
 
 Update README.md for user-visible behavior and named seams, and DESIGN.md

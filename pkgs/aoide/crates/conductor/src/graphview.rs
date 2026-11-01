@@ -1988,6 +1988,7 @@ mod tests {
 
     #[test]
     fn session_label_renders_the_display_grammar_while_session_id_stays_bare() {
+        let _lock = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         // Petnames plan P3: `Node.label` is the grammar string —
         // `<host>/<role>/<petname> (…<tail4>)`, legacy degrading to
         // `<host>/<role>/<sessionId>` — but `Node::session_id` stays the bare

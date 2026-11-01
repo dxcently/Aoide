@@ -5747,13 +5747,6 @@ mod tests {
         }
     }
 
-    /// Serialises the tests below that touch `AOIDE_STAGE_DIR`/
-    /// `AOIDE_AUDIT_LOG` — process-global env, so parallel `cargo test`
-    /// threads within this crate must not race on it. `aoide_storage` has an
-    /// equivalent lock but it's `pub(crate)` there, unreachable from this
-    /// crate — this is this crate's own copy of the same guard.
-    static ENV_LOCK: Mutex<()> = Mutex::new(());
-
     /// Point `AOIDE_STAGE_DIR`/`AOIDE_AUDIT_LOG` at a fresh empty tempdir for
     /// the duration of `f`, restoring whatever was set before. Any test that
     /// calls `App::dispatch` or `App::poll_refresh` needs this — both read
@@ -5767,11 +5760,11 @@ mod tests {
         dir: PathBuf,
         saved_stage: Option<String>,
         saved_audit: Option<String>,
-        _guard: std::sync::MutexGuard<'static, ()>,
+        _guard: aoide_test_support::EnvGuard,
     }
     impl IsolatedStage {
         fn new() -> Self {
-            let guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+            let guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
             let dir = tmp_dir("stage-isolated");
             let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
             let saved_audit = std::env::var("AOIDE_AUDIT_LOG").ok();
@@ -5799,7 +5792,8 @@ mod tests {
         }
     }
 
-    fn with_isolated_stage<R>(f: impl FnOnce() -> R) -> R {        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    fn with_isolated_stage<R>(f: impl FnOnce() -> R) -> R {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let dir = tmp_dir("stage-isolated");
         let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
         let saved_audit = std::env::var("AOIDE_AUDIT_LOG").ok();
@@ -6089,7 +6083,7 @@ mod tests {
     /// Serialises the roster throttle tests against the shared
     /// `ROSTER_CALLS` counter (parallel `cargo test` threads within this
     /// crate would otherwise race on it) — a dedicated lock, since
-    /// `ENV_LOCK` above guards a different piece of shared state.
+    /// the env lock guards a different piece of shared state.
     static ROSTER_TEST_LOCK: Mutex<()> = Mutex::new(());
 
     fn counting_roster_dispatch(_: &Invocation) -> Outcome {
@@ -8159,11 +8153,11 @@ mod tests {
         socket: PathBuf,
         dir: PathBuf,
         saved: [(&'static str, Option<std::ffi::OsString>); 2],
-        _guard: std::sync::MutexGuard<'static, ()>,
+        _guard: aoide_test_support::EnvGuard,
     }
     impl SecretsEnv {
         fn new() -> Self {
-            let guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+            let guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
             let dir = tmp_dir("approve");
             let socket = dir.join("broker.sock");
             let saved = [
@@ -8735,6 +8729,7 @@ mod tests {
 
     #[test]
     fn mail_draft_local_route_and_partial_submission_cannot_repeat() {
+        let _lock = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         fn partial(inv: &Invocation) -> Outcome {
             if !inv.flags.contains_key("to") {
                 return Outcome::usage("test", "read ignored");
@@ -8769,6 +8764,7 @@ mod tests {
 
     #[test]
     fn reply_all_and_forward_keep_original_and_explicit_destinations() {
+        let _lock = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         use aoide_storage::mail::Address;
         let local = aoide_storage::display::local_host_name();
         let content = aoide_storage::letter::LetterContent {

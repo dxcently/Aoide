@@ -1124,6 +1124,14 @@ fn open_tree_mail_menu(app: &mut App, index: usize, x: u16, y: u16) {
     }
 }
 
+/// The one lock serialising every test that sets or reads an env variable a
+/// test sets (`AOIDE_STAGE_DIR`, `AOIDE_AUDIT_LOG`, `AOIDE_A2A_NODE_NAME`, …);
+/// its guard fails a test that leaves an `AOIDE_*` variable changed.
+#[cfg(test)]
+pub(crate) fn env_lock() -> aoide_test_support::GuardedEnvLock {
+    aoide_test_support::GuardedEnvLock
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

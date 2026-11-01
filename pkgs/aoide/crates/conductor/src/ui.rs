@@ -1561,6 +1561,9 @@ mod tests {
 
     #[test]
     fn graph_panel_draws_nodes_edges_and_tags() {
+        let _lock = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _name = aoide_test_support::EnvSaver::capture(&["AOIDE_A2A_NODE_NAME"]);
+        std::env::set_var("AOIDE_A2A_NODE_NAME", "box");
         // Short ids/state/tag: the display-grammar label (petnames plan
         // P3 — `<host>/<role>/<sessionId>` on a legacy/petname-less
         // fixture) now shares the chip's CHIP_MAX budget with the state
