@@ -22,7 +22,9 @@
 #     the `$AOIDE_ROOT`-relative path a face loads its icons from in the
 #     session too — its `wallpaper/` folder at `rices/<owner>/wallpaper`,
 #     with `stage/wallpaper.json` naming the logon picture
-#     (`<owner>-logon.<ext>`) as the face's background when it ships one,
+#     (`<owner>-logon.<ext>`) as the face's background when it ships one, else
+#     the declared desktop picture (`strillix.theme.wallpaper`), copied in when
+#     the face's folder lacks it; neither, no file.
 #     the dress as `stage/theme.json`, and
 #     `session.json`: the display manager's
 #     session wrapper (`services.displayManager.sessionData.wrapper`, the
@@ -80,6 +82,7 @@ let
 
   face = config.strillix.rices.greeter;
   output = config.strillix.greeter.output;
+  desktopPicture = config.strillix.theme.wallpaper;
   cageMode = if output == null then "last" else "extend";
 
   quickshellPkg = aoideInputs.quickshell.packages.${pkgs.stdenv.hostPlatform.system}.default;
@@ -133,21 +136,31 @@ let
       cp -r "$rice/icons" "$out/rices/${face.owner}/icons"
     fi
     # The face's wallpaper folder, whole, at the same `rices/<owner>/` path
-    # the session reads it from. Its logon picture (`<owner>-logon.<ext>`), when
-    # it ships one, is the background the logon face draws: `stage/wallpaper.json`
-    # names it in the one shape every surface reads a wallpaper by, stamped with the
-    # declared rice the way the seed stamps its default.
+    # the session reads it from. The login screen's background is the face's
+    # logon picture (`<owner>-logon.<ext>`) when it ships one, else the declared
+    # desktop picture; `stage/wallpaper.json` names it in the one shape every
+    # surface reads a wallpaper by, stamped with the declared rice the way the
+    # seed stamps its default. Neither present: no file, no picture.
+    logon=""
     if [ -d "$rice/wallpaper" ]; then
       mkdir -p "$out/rices/${face.owner}"
       cp -r "$rice/wallpaper" "$out/rices/${face.owner}/wallpaper"
       for ext in webp png jpg jpeg; do
-        logon="$out/rices/${face.owner}/wallpaper/${face.owner}-logon.$ext"
-        if [ -f "$logon" ]; then
-          jq -n --arg p "$logon" --arg s ${lib.escapeShellArg config.strillix.rice} '{path: $p, rice: $s}' \
-            > "$out/stage/wallpaper.json"
-          break
-        fi
+        f="$out/rices/${face.owner}/wallpaper/${face.owner}-logon.$ext"
+        if [ -f "$f" ]; then logon=$f; break; fi
       done
+    fi
+    if [ -n "$logon" ]; then
+      jq -n --arg p "$logon" --arg s ${lib.escapeShellArg config.strillix.rice} '{path: $p, rice: $s}' \
+        > "$out/stage/wallpaper.json"
+    ${lib.optionalString (desktopPicture != null) ''
+    else
+      dest="$out/rices/${face.owner}/wallpaper/${baseNameOf desktopPicture}"
+      mkdir -p "$(dirname "$dest")"
+      [ -f "$dest" ] || cp ${desktopPicture} "$dest"
+      jq -n --arg p "$dest" --arg s ${lib.escapeShellArg config.strillix.rice} '{path: $p, rice: $s}' \
+        > "$out/stage/wallpaper.json"
+    ''}
     fi
     cp ${manifest} "$q/rices/manifest.json"
     echo '{}' > "$q/rices/registry.json"

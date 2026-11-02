@@ -95,7 +95,10 @@ what those checks actually test.
   `ricesRoot` export, the built-in rice with a Quickshell greeter face: cage
   runs `-m last` with the output unset, and `-m extend` with
   `strillix.greeter.output = "DP-1"`, whose script is then read for its
-  wlr-randr off-loop.
+  wlr-randr off-loop. The tree behind the script is read for the login
+  screen's picture: barcarolle ships no logon picture, so its
+  `stage/wallpaper.json` names the desktop picture, which the tree holds, and
+  no logon picture is in the tree.
   The value-slot proof: the consumer's own `bar`, `dock` and `lock` slots each
   name a provider of its own beside Aoide's `parts`. The `stubbed` host mixes
   its `bar` (a stub that brings no runtime) with Aoide's `dock`, and must give

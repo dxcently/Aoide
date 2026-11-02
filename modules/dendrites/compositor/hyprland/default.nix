@@ -174,6 +174,7 @@ let
     # blur_popups extends the glass to the bar's PopupWindow children (the
     # gadget popouts) — same 0.5x snake_case rework spelling as ignore_alpha.
     layerrule = blur_popups on, match:namespace aoide-bar
+    layerrule = ignore_alpha 0.05, match:namespace aoide-bar
     # aoide-calendar: the calendar popout rides its OWN layer surface
     # (SteleLayerPopout — not an xdg_popup of aoide-bar) precisely so
     # blur_popups above cannot reach it: its papyrus sheet keeps an opaque

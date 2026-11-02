@@ -45,8 +45,12 @@ Glass is a frame, content is a plate, light comes from above.
 
 - **Superbar**, 40px, bottom. Orb (0–54) · workspace strip from 58 · groove ·
   special drawers · always-visible `+` · notification area: RICE cell,
-  chevron overflow, agents, Action Center flag, network, volume · two-line
-  clock · 15px show-desktop sliver.
+  chevron overflow, agents, Action Center flag, battery (laptops only),
+  network, volume · two-line clock · 15px show-desktop sliver. The battery
+  cell draws the charge: a white outline with its nub, a white fill that
+  turns urgent orange below 15%, and a green bolt while charging. It is
+  absent on a machine with no battery. It is not a button: no hover box, and
+  a click does nothing.
 - **Workspace button**, 62×40: 28px front icon (focused or most-windowed
   class), up to two 14px minis beside it, number chip bottom-left, agent
   badge, stack edges for 2+/3+ windows. Empty workspaces are 40px ghosts.
@@ -63,18 +67,20 @@ Glass is a frame, content is a plate, light comes from above.
 - **Start**: the ♪ orb opens the Win7 two-column Start menu as `mock.html`
   draws it: pinned apps, All Programs ▸, "Search programs", the person
   tile, places, Terminal, Settings, and the Lock ▸ power split (Log off,
-  Sleep, Hibernate, Restart, `Shut down…`). Power goes only through
-  aoided's `power` command. Lock, Sleep and Hibernate act at once; Log off,
-  Restart and `Shut down…` open the Shut Down dialog with that action
-  preselected, so nothing that ends the session takes one click.
+  Sleep, Hibernate, Restart, Shut down). Power goes only through the desktop
+  bridge's `power` command (`strillix shellbridge`), and every row sends its
+  action at once: there is no second confirmation step and no separate
+  shutdown menu.
 - **Launcher**: SUPER+Space opens the iMac G3 in the middle of the focused
   monitor; its screen is a Mac OS 9 Finder of apps, clipboard and emoji
   (see Launcher: iMac G3 below).
-- **Shut Down dialog** (the powermenu): Win7's Alt+F4 dialog in the rice's
-  glass, a ♪ barcarolle banner, "What do you want the computer to do?" with
-  Log off / Lock / Restart / Sleep / Hibernate / Shut down and a line
-  describing the choice, OK / Cancel / Help, centred over a near-clear
-  scrim. Escape cancels.
+- **Shut Down dialog** (the powermenu slot, `widgets/powermenu.qml`): Win7's
+  Alt+F4 dialog in the rice's glass, a ♪ barcarolle banner, "What do you want
+  the computer to do?" with Log off / Lock / Restart / Sleep / Hibernate /
+  Shut down and a line describing the choice, OK / Cancel / Help, centred
+  over a near-clear scrim. Escape cancels. Nothing in this rice's Start menu or bar opens it: the
+  Start menu's power rows act directly. `strillix component powermenu show`
+  still opens it.
 - **Agents dock** (the `dock` slot, `widgets/dock.qml` and
   `widgets/Buddy.js`; board `dock.png`, direction A): a Mac OS 8/9 Platinum
   buddy list, 384×713, anchored above the agents tray button `⧉` (whose
@@ -113,8 +119,10 @@ Glass is a frame, content is a plate, light comes from above.
   `hostConfig`).
 - **Tray flyouts**: the Win7 narrow volume flyout (device, slider, percent,
   mute, `Mixer` footer), the network flyout from its tray icon, and the
-  calendar flyout from the clock (month grid, today ringed, an analogue
-  clock beside it). The `^` chevron, shown while the tray holds an icon,
+  calendar from the clock (month grid, today ringed, an analogue clock beside
+  it). The calendar is a surface of its own, not a flyout: opened from the
+  clock, it sits above it, its right edge on the clock's right edge and its bottom flush on the
+  bar. The `^` chevron, shown while the tray holds an icon,
   opens the notification-area overflow: a 4-wide grid of the tray's icons
   on translucent deep glass, where the white symbolic icons most apps ship
   stay readable, and the hovered icon's title in white beneath. A click
@@ -137,8 +145,8 @@ Glass is a frame, content is a plate, light comes from above.
   `live usage unavailable` without data) and a power gadget (an inverted
   70px dial with state and time chips) that collapses to nothing on a
   machine with no battery.
-- **Lock** (panel in the board, 0.45 scale): the logon picture with its baked
-  person tile, the `$USER` label at −21% and the 400×60 hyprlock field at
+- **Lock** (panel in the board, 0.45 scale): the desktop picture as the
+  background, the `$USER` label at −21% and the 400×60 hyprlock field at
   −26% below centre. Nothing else; the rice supplies only the picture and
   colours (hyprlock dress contract).
 
@@ -348,7 +356,7 @@ Consolas → Noto Sans Mono.
   volume flyout are shifted left of it; the balloon is lifted above the open
   agent flyout with a dashed leader down to the agents button.
 - Not shown: the HDMI-A-1 compact bar, jump lists, chevron overflow grid,
-  network and calendar flyouts, Action Center, power screen, window frames
+  network flyout, the calendar, Action Center, power screen, window frames
   and terminals.
 
 ## Open questions
