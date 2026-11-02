@@ -23,7 +23,7 @@ By default the two collapse into one act: the human typing their sudo password i
 Until `aoide.rebuild` is enabled, rebuilds follow the house rule (*you propose; the user admits; git records* — `AGENTS.md`):
 
 - The agent builds and rehearses freely — `nixos-rebuild build` and `nixos-rebuild dry-activate` need no privilege, and `nixos-rebuild test` activates without touching the boot default (a reboot reverts it), so the agent can validate its own work end to end.
-- To make it stick, the agent stops and prompts the human, who runs the `switch` under their own `sudo` and types their password. The agent never holds the password.
+- To make it stick, the agent commits and stops, and the human admits it: by pushing the deploy branch, which every host that follows it through comin rebuilds from, or by running the `switch` under their own `sudo`. The agent never holds the password, and pushes a deploy branch only when the human explicitly asks for that push.
 
 This is the only mode until the capability is deliberately turned on.
 
@@ -38,7 +38,7 @@ The design grants the agent a passwordless but narrowly-scoped path to the gated
 - A polkit rule letting that user `systemctl start` those units and nothing else, no password — the same polkit pipeline [[Governance]] records as sakaki's agent-sudo design.
 - Every invocation streaming through journald into the single [[aoided]] audit log (`$AOIDE_ROOT/log`, default `~/.aoide/log`).
 
-The capability changes only authentication; it does not create background rebuilds. The approval gate persists as policy: the design auto-admits `test` (reboot-recoverable); `switch` still routes through the admit door, keeping the *no background rebuilds, no self-updaters* house rule intact ([[Governance]]). Until built, all rebuilds use the default behaviour above.
+The capability changes only authentication; it does not create background rebuilds. The approval gate persists as policy: the design auto-admits `test` (reboot-recoverable); `switch` still routes through the admit door, keeping the house rule intact: nothing switches without the user's admission ([[Governance]]). Until built, all rebuilds use the default behaviour above.
 
 ## Why passwordless-narrow beats a sudo password
 

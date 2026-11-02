@@ -123,7 +123,13 @@ ShellBridge.qml  (one table: cmd -> socket)
    only on a lane the User ordered, with that lane's scope named. A new
    `modules/dendrites/` lane is additive: one file plus its one catalogue line.
 2. **The rebuild is user-gated.** You *propose*; the user *admits*; git
-   *records*. No background rebuilds, no self-updaters — house policy.
+   *records*. An agent commits locally or to a branch. The user pushes a
+   deploy branch when the work is ready, and each host that deploys from it
+   rebuilds from that push: dxflake's `main` is one, deployed by comin to
+   every host. An agent pushes a deploy branch, or runs a command ending in
+   that push (`dxbump`), only when the user explicitly asks for that push.
+   No agent rebuilds a host any other way, and nothing updates itself, as
+   house policy.
 3. **Read before you write.** Read `rices/` and the relevant rice's
    `design/` first, always, before iterating; append learnings after every
    declare or reject. The write-back is the "self" in self-ricing.

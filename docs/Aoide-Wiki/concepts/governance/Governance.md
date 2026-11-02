@@ -10,7 +10,7 @@ updated: 2026-08-27
 
 ## Rebuild gate
 
-Every NixOS rebuild is **user-gated**. The pattern follows sakaki's agent-sudo design (polkit pipeline): the agent proposes, the user admits, git records the result. No rebuild happens in the background or without explicit user approval. By default the agent builds and `test`-rebuilds freely, then prompts the human to `switch` under their own `sudo`. **Status:** a specified, opt-in `aoide.rebuild` capability grants a passwordless, narrowly-scoped path without loosening the approval gate; it is not yet declared in the option contract. See [[Rebuild-Gate]] for the full mechanism.
+Every NixOS rebuild is **user-gated**: the agent proposes, the user admits, git records the result. The agent commits locally or to a branch. The user's push of a deploy branch is the admission, and every host that deploys from that branch through comin rebuilds from the push; dxflake's `main` is one. The agent pushes a deploy branch only when the user explicitly asks for that push, and any other `switch` is the user's own, under their own `sudo`. **Status:** a specified, opt-in `aoide.rebuild` capability grants a passwordless, narrowly-scoped path without loosening the approval gate; it is not yet declared in the option contract. See [[Rebuild-Gate]] for the full mechanism.
 
 ## Single policy surface
 
@@ -60,7 +60,7 @@ Provenance governs ownership. Merge-base divergence lint inside `aoide update` d
 
 ## No background self-updaters
 
-Neither Aoide nor Melete run background self-update processes. All updates — framework merges, flake.lock bumps, theme-schema migrations — are proposed by the agent and applied only through the gated rebuild. This is house policy, not a configuration option.
+Neither Aoide nor Melete updates itself. All updates — framework merges, flake.lock bumps, theme-schema migrations — are proposed by the agent as commits and applied only through the gated rebuild: the user's push of a deploy branch, or the user's own `switch`. A host's comin deploys only what the user pushed. This is house policy, not a configuration option.
 
 ## Related
 
