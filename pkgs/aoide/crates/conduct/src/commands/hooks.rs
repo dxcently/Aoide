@@ -1308,10 +1308,6 @@ mod tests {
         let skills = root.join(".claude/skills");
         std::fs::create_dir_all(&skills).unwrap();
         let repo_skills_list = repo_skills(&skill_source().unwrap());
-        assert!(
-            repo_skills_list.len() >= 2,
-            "fixture assumes the repo ships at least two skills (aoide, memory-handoff)"
-        );
         for (name, source) in &repo_skills_list {
             link_dir(source, &skills.join(name)).unwrap();
         }
@@ -1460,10 +1456,6 @@ mod tests {
         let path = root.join(".claude/settings.json");
 
         let repo_skills_list = repo_skills(&skill_source().unwrap());
-        assert!(
-            repo_skills_list.len() >= 2,
-            "fixture assumes the repo ships at least two skills (aoide, memory-handoff)"
-        );
 
         // Fresh install: 9 graph events + the pointer, and every repo skill
         // linked.
@@ -1541,17 +1533,12 @@ mod tests {
         // The hooks themselves DID merge before the refusal — reported.
         assert_eq!(data["added"].as_array().unwrap().len(), 10);
         assert_eq!(std::fs::read_to_string(&link).unwrap(), "someone else's skill");
-        // aoide's conflict never blocked the other repo skill(s) from linking.
+        // The skill's own entry says why. That one conflict never blocks
+        // another skill from linking is
+        // `link_skills_from_one_conflict_never_blocks_another_skill_from_linking`'s.
         let skills_data = data["skills"].as_array().unwrap();
         let aoide_entry = skills_data.iter().find(|s| s["name"] == "aoide").unwrap();
         assert_eq!(aoide_entry["status"], "conflict");
-        let others: Vec<_> = skills_data.iter().filter(|s| s["name"] != "aoide").collect();
-        assert!(!others.is_empty(), "fixture assumes a second repo skill exists");
-        assert!(others.iter().all(|s| s["status"] == "linked"), "{skills_data:?}");
-        for other in &others {
-            let name = other["name"].as_str().unwrap();
-            assert!(root.join(".claude/skills").join(name).join("SKILL.md").is_file(), "{name}");
-        }
 
         // A symlink to somewhere else: same refusal, naming both targets.
         std::fs::remove_file(&link).unwrap();
