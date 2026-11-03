@@ -346,9 +346,9 @@ mod tests {
 
     /// The length handed to `connect(2)` is `offsetof(sun_path)` + the path
     /// + its terminating NUL, and the bytes in the buffer are the caller's
-    /// path followed by zeros — checked both directly and by round-tripping
-    /// the same path through `std`, which reads the buffer back the way the
-    /// kernel does.
+    ///   path followed by zeros — checked both directly and by
+    ///   round-tripping the same path through `std`, which reads the buffer
+    ///   back the way the kernel does.
     #[test]
     // `cfg(unix)`: this reads the UNIX arm's own body
     // (`unix_sockaddr` builds a `libc::sockaddr_un`; the backlog tests

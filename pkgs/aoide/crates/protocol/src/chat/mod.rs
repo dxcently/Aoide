@@ -352,7 +352,7 @@ mod tests {
             .tool("re\u{1b}ad", Some("in\u{202e}put"), Some("out\u{7f}put"), false)
             .ask(Ask::new("c\u{1b}1", AskKind::Approval, "Ov\u{202e}erwrite?").answers(&["y\u{1b}es"]));
         let wire = line.json_line();
-        assert!(!wire.chars().any(|c| crate::untrusted::is_unsafe(c)), "{wire}");
+        assert!(!wire.chars().any(crate::untrusted::is_unsafe), "{wire}");
         assert!(wire.contains("<script>x</script>"), "markup stays literal text: {wire}");
     }
 

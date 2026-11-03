@@ -143,7 +143,7 @@ pub fn table(rows: &[Row], t: &Term) -> String {
 /// Leaves in listing order: implemented before stubs, and the members of a
 /// deeper subgroup (`mail outbox …`) kept together at the place their first
 /// member was registered. Registration order otherwise.
-fn ordered<'a>(cmds: Vec<&'a Command>) -> Vec<&'a Command> {
+fn ordered(cmds: Vec<&Command>) -> Vec<&Command> {
     let mut keyed: Vec<(bool, usize, &Command)> = cmds
         .iter()
         .enumerate()
@@ -160,7 +160,7 @@ fn ordered<'a>(cmds: Vec<&'a Command>) -> Vec<&'a Command> {
     keyed.into_iter().map(|(_, _, c)| c).collect()
 }
 
-fn visible<'a>(registry: &'a Registry) -> impl Iterator<Item = &'a Command> {
+fn visible(registry: &Registry) -> impl Iterator<Item = &Command> {
     registry.commands().filter(|c| !c.internal)
 }
 
@@ -239,9 +239,11 @@ fn sections<'a>(registry: &'a Registry) -> Vec<(&'static str, Vec<Head<'a>>)> {
     out
 }
 
+type HeadCount = (&'static str, usize, usize);
+
 /// The listing's inventory for a prose consumer (`guide`): each section with
 /// its heads as `(name, listed commands, of them stubs)`, in listing order.
-pub fn inventory(registry: &Registry) -> Vec<(&'static str, Vec<(&'static str, usize, usize)>)> {
+pub fn inventory(registry: &Registry) -> Vec<(&'static str, Vec<HeadCount>)> {
     sections(registry)
         .into_iter()
         .map(|(section, heads)| {
