@@ -957,7 +957,7 @@ mod tests {
     #[test]
     fn scan_usage_lines_sums_today_and_week_separately() {
         let now = epoch("2026-07-31T12:00:00Z");
-        let lines = vec![
+        let lines = [
             // Within today (today starts at 2026-07-31T00:00:00Z).
             assistant_line("2026-07-31T09:00:00Z", "claude-sonnet-5", 1000, 0, 0, 500),
             // Within week but NOT today (yesterday).
@@ -988,7 +988,7 @@ mod tests {
         // One second before the week boundary — excluded entirely.
         let just_before_week = assistant_line("2026-07-24T11:59:59Z", "claude-sonnet-5", 400, 0, 0, 0);
 
-        let lines = vec![at_today_start, just_before_today, at_week_start, just_before_week];
+        let lines = [at_today_start, just_before_today, at_week_start, just_before_week];
         let out = scan_usage_lines(lines.iter().map(String::as_str), now);
 
         assert_eq!(out.today.tokens, 100, "only the at-boundary line lands in today");
@@ -998,7 +998,7 @@ mod tests {
     #[test]
     fn scan_usage_lines_skips_malformed_and_non_assistant_lines() {
         let now = epoch("2026-07-31T12:00:00Z");
-        let lines = vec![
+        let lines = [
             "not json at all".to_string(),
             json!({"type": "user", "timestamp": "2026-07-31T09:00:00Z"}).to_string(),
             json!({"type": "assistant", "timestamp": "not-a-date", "message": {"usage": {}}}).to_string(),

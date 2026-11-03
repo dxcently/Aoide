@@ -95,14 +95,14 @@ pub struct Node {
     /// last-resort remote target when a query matches nothing else (P-D5,
     /// `docs/architecture/AOIDED.md`'s "The hub option"). `#[serde(default)]`
     /// + `skip_serializing_if` on `false` is the SAME additive/v0-safe
-    /// discipline `SessionRecord.headless` set the precedent for
-    /// (`records.rs`): an old `nodes.json` predating this field
-    /// deserializes every node's `hub` as `false`, and a node that has
-    /// never held the hub omits the key entirely rather than writing an
-    /// explicit `"hub":false` into every entry. Set/moved/cleared only via
-    /// [`set_hub`]/[`clear_hub`] below, which hold the "at most one" and
-    /// idempotence invariants — nothing else in this tree writes the field
-    /// directly.
+    ///   discipline `SessionRecord.headless` set the precedent for
+    ///   (`records.rs`): an old `nodes.json` predating this field
+    ///   deserializes every node's `hub` as `false`, and a node that has
+    ///   never held the hub omits the key entirely rather than writing an
+    ///   explicit `"hub":false` into every entry. Set/moved/cleared only via
+    ///   [`set_hub`]/[`clear_hub`] below, which hold the "at most one" and
+    ///   idempotence invariants — nothing else in this tree writes the field
+    ///   directly.
     #[serde(default, skip_serializing_if = "is_false")]
     pub hub: bool,
     /// This node's ed25519 public key, hex, no separator — set ONLY by the
@@ -1521,7 +1521,7 @@ mod tests {
         let fresh = NodeCacheEntry {
             schema_version: "0".to_string(),
             name: "yomi-strix".to_string(),
-            instance: Some(Value::from(serde_json::json!({ "name": "yomi-strix" }))),
+            instance: Some(serde_json::json!({ "name": "yomi-strix" })),
             graph: Some(serde_json::json!({ "schemaVersion": "0", "nodes": [], "edges": [] })),
             fetched_at: Some("2026-08-14T00:00:00Z".to_string()),
             stale: false,

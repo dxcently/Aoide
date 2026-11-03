@@ -1,12 +1,12 @@
 //! The discovery advertisement wire format and the advertise switch (P-P6
 //! + task #120, `docs/architecture/PAIRING.md`'s "Discovery
-//! (advertise-but-locked)" section): the one JSON line an `a2a serve`
-//! process may emit by UDP broadcast when discovery advertising is turned
-//! on (`aoide node advertise on`), and the validation an `aoide node
-//! discover`/`node invite` sweep applies to every line it hears before
-//! trusting a single field of it (root `AGENTS.md` house rule 4 — an
-//! advertisement heard off the network is untrusted data, no different
-//! from a forwarded notification's text).
+//!   (advertise-but-locked)" section): the one JSON line an `a2a serve`
+//!   process may emit by UDP broadcast when discovery advertising is
+//!   turned on (`aoide node advertise on`), and the validation an `aoide
+//!   node discover`/`node invite` sweep applies to every line it hears
+//!   before trusting a single field of it (root `AGENTS.md` house rule 4 —
+//!   an advertisement heard off the network is untrusted data, no
+//!   different from a forwarded notification's text).
 //!
 //! **Discovery grants NOTHING** (PAIRING.md, verbatim): an advertisement
 //! only ever feeds `node discover`'s printed table and `pair`'s
@@ -247,7 +247,7 @@ pub fn set_enabled(on: bool) -> std::io::Result<bool> {
     let path = switch_path();
     let file = SwitchFile { schema_version: SWITCH_SCHEMA_VERSION.to_string(), enabled: on };
     let line = serde_json::to_string(&file)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        .map_err(std::io::Error::other)?;
     crate::fs::atomic_write(&path, &line)?;
     Ok(previous)
 }

@@ -336,7 +336,7 @@ mod tests {
 
         // The rewrite under test is a real one: the cursor advance re-reads
         // the whole file and writes it back through `save`.
-        assert_eq!(advance_lines_after("aa", "c1", 5).unwrap(), true);
+        assert!(advance_lines_after("aa", "c1", 5).unwrap());
         let raw = std::fs::read_to_string(remote_children_path()).unwrap();
         let v: serde_json::Value = serde_json::from_str(&raw).unwrap();
         assert_eq!(v["futureTop"], "kept", "an unknown TOP-LEVEL key survives the rewrite: {raw}");
@@ -358,19 +358,19 @@ mod tests {
         let _env = StageEnv::new("append");
         let c = child("par1", "nodeb", "aa", "a2a-1");
 
-        assert_eq!(append_remote_child(&c).unwrap(), true, "first append lands");
-        assert_eq!(append_remote_child(&c).unwrap(), false, "the same child is a no-op");
+        assert!(append_remote_child(&c).unwrap(), "first append lands");
+        assert!(!append_remote_child(&c).unwrap(), "the same child is a no-op");
         assert_eq!(load_remote_children().len(), 1);
 
         // The identity is (key, sessionId) — a second child under the SAME
         // key, or the same session id under a DIFFERENT key, both append.
-        assert_eq!(append_remote_child(&child("par1", "nodeb", "aa", "a2a-2")).unwrap(), true);
-        assert_eq!(append_remote_child(&child("par2", "nodec", "bb", "a2a-1")).unwrap(), true);
+        assert!(append_remote_child(&child("par1", "nodeb", "aa", "a2a-2")).unwrap());
+        assert!(append_remote_child(&child("par2", "nodec", "bb", "a2a-1")).unwrap());
         assert_eq!(load_remote_children().len(), 3);
 
         // The label or the spawning parent differing does not make a new
         // child: `node` is display-only, and one child has one parent.
-        assert_eq!(append_remote_child(&child("par9", "nodeb-relabelled", "aa", "a2a-1")).unwrap(), false);
+        assert!(!append_remote_child(&child("par9", "nodeb-relabelled", "aa", "a2a-1")).unwrap());
         assert_eq!(load_remote_children().len(), 3);
 
         let raw = std::fs::read_to_string(remote_children_path()).unwrap();
@@ -394,7 +394,7 @@ mod tests {
 
         // And a corrupt file does not block the next append: the read in the
         // locked section degrades the same way, so a spawn still records.
-        assert_eq!(append_remote_child(&child("p", "n", "k", "s")).unwrap(), true);
+        assert!(append_remote_child(&child("p", "n", "k", "s")).unwrap());
         assert_eq!(load_remote_children().len(), 1);
     }
 
@@ -423,13 +423,13 @@ mod tests {
         let _env = StageEnv::new("advance");
         append_remote_child(&child("par1", "nodeb", "aa", "c1")).unwrap();
 
-        assert_eq!(advance_lines_after("aa", "c1", 7).unwrap(), true);
+        assert!(advance_lines_after("aa", "c1", 7).unwrap());
         assert_eq!(load_remote_children()[0].lines_after, 7);
-        assert_eq!(advance_lines_after("aa", "c1", 3).unwrap(), false, "a replayed pull never rewinds");
-        assert_eq!(advance_lines_after("aa", "c1", 7).unwrap(), false, "the same seq is not a write");
+        assert!(!advance_lines_after("aa", "c1", 3).unwrap(), "a replayed pull never rewinds");
+        assert!(!advance_lines_after("aa", "c1", 7).unwrap(), "the same seq is not a write");
         assert_eq!(load_remote_children()[0].lines_after, 7);
-        assert_eq!(advance_lines_after("aa", "nope", 9).unwrap(), false);
-        assert_eq!(advance_lines_after("bb", "c1", 9).unwrap(), false, "the key is half the identity");
+        assert!(!advance_lines_after("aa", "nope", 9).unwrap());
+        assert!(!advance_lines_after("bb", "c1", 9).unwrap(), "the key is half the identity");
         assert_eq!(load_remote_children()[0].lines_after, 7);
     }
 
@@ -467,15 +467,15 @@ mod tests {
         let raw = std::fs::read_to_string(remote_children_path()).unwrap();
         assert!(!raw.contains("drained"), "a false latch is never written: {raw}");
 
-        assert_eq!(mark_drained("aa", "c1").unwrap(), true);
+        assert!(mark_drained("aa", "c1").unwrap());
         assert!(load_remote_children()[0].drained);
-        assert_eq!(mark_drained("aa", "c1").unwrap(), false, "the latch is one-way");
+        assert!(!mark_drained("aa", "c1").unwrap(), "the latch is one-way");
         assert!(load_remote_children()[0].drained, "and nothing clears it");
 
         // The cursor is a separate field: latching moved nothing.
         assert_eq!(load_remote_children()[0].lines_after, 0);
-        assert_eq!(mark_drained("aa", "nope").unwrap(), false);
-        assert_eq!(mark_drained("bb", "c1").unwrap(), false, "the key is half the identity");
+        assert!(!mark_drained("aa", "nope").unwrap());
+        assert!(!mark_drained("bb", "c1").unwrap(), "the key is half the identity");
     }
 
     #[test]

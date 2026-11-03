@@ -465,9 +465,8 @@ pub fn atomic_symlink(target: &std::path::Path, link: &std::path::Path) -> std::
         let tmp = dir.join(format!(".{name}.tmp-{}", std::process::id()));
         let _ = std::fs::remove_file(&tmp);
         std::os::unix::fs::symlink(target, &tmp)?;
-        std::fs::rename(&tmp, link).map_err(|e| {
+        std::fs::rename(&tmp, link).inspect_err(|_e| {
             let _ = std::fs::remove_file(&tmp);
-            e
         })
     }
     #[cfg(not(unix))]
@@ -1523,7 +1522,7 @@ pub fn pid_is_alive(pid: u32) -> bool {
         if rc == 0 {
             return true;
         }
-        return probe_verdict(std::io::Error::last_os_error().raw_os_error());
+        probe_verdict(std::io::Error::last_os_error().raw_os_error())
     }
     #[cfg(windows)]
     {
@@ -2642,7 +2641,7 @@ mod tests {
         std::fs::set_permissions(&home, std::fs::Permissions::from_mode(0o755)).unwrap();
 
         let err =
-            owner_only_state(&home, &[home.clone()]).expect_err("the home directory must be refused by identity");
+            owner_only_state(&home, std::slice::from_ref(&home)).expect_err("the home directory must be refused by identity");
         assert!(err.to_string().contains("home directory"), "the refusal must say why: {err}");
         assert_eq!(unix_mode(&home), 0o755, "the home directory was chmodded past the path checks");
         let _ = std::fs::remove_dir_all(&base);
@@ -3200,12 +3199,12 @@ mod tests {
             ("create_new_private", |s| create_new_private(&s.join("a.json")).map(drop)),
             ("edits::append", |_| {
                 crate::edits::append(&crate::edits::EditLine::default())
-                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+                    .map_err(std::io::Error::other)
             }),
             ("outbox::try_take_poll_lock", |_| {
                 crate::outbox::try_take_poll_lock("node-a")
                     .map(drop)
-                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+                    .map_err(std::io::Error::other)
             }),
             ("migrate_dir", |s| {
                 let old = s.parent().unwrap().join("legacy");
@@ -3230,12 +3229,12 @@ mod tests {
             }),
             ("lock_path", |s| {
                 lock_path(s.join("stage").join(".stage.lock"), || ())
-                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+                    .map_err(std::io::Error::other)
             }),
             ("seed_if_absent", |s| {
                 match seed_if_absent(&s.join("sessions.json"), "{\"sessions\":[]}", "sessions") {
                     Some(_) => Ok(()),
-                    None => Err(std::io::Error::new(std::io::ErrorKind::Other, "not seeded")),
+                    None => Err(std::io::Error::other("not seeded")),
                 }
             }),
             ("with_stage_lock", |s| {
@@ -3693,7 +3692,7 @@ mod tests {
         let home = std::env::temp_dir().join(format!("aoide-eintr-lock-{}", std::process::id()));
         std::fs::create_dir_all(&home).unwrap();
         let path = home.join("lock");
-        let holder = std::fs::OpenOptions::new().create(true).write(true).open(&path).unwrap();
+        let holder = std::fs::OpenOptions::new().create(true).write(true).truncate(false).open(&path).unwrap();
         let waiter = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
         assert_eq!(unsafe { libc::flock(holder.as_raw_fd(), libc::LOCK_EX) }, 0);
 
