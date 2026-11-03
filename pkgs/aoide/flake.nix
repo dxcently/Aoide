@@ -164,7 +164,7 @@
               jq
               # Core runtime shell-outs (crates/client, storage, secrets):
               curl # client node pulls / A2A dials
-              git # storage::git derivation capture
+              git # storage::git repo probes
               qrencode # secrets enroll — otpauth QR render
               age # secrets age backend — without it the crate's age-gated tests self-skip
               zenity # secrets watch --popup — the code-entry dialog

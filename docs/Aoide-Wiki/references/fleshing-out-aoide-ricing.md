@@ -3,7 +3,7 @@
 Status: a design handout captured from a chat session (2026-08-18), not
 LOCKED — the User has steered every section at least once, but the final
 "lock" word hasn't been said. Part of it is now code: the entry tree and its
-commands (§5.2, phase A in §10) and the project-revert groundwork (R0–R2,
+commands (§5.2, phase A in §10) and the project-revert groundwork (R0–R1,
 §7.2) are landed in the repo; everything else is design. Nothing here is
 asserted as existing unless marked EXISTS or LANDED. Execution ordering
 today: frontend/rice execution is parked behind backend work (the standing
@@ -575,11 +575,10 @@ PostToolUse, same tools
 at a blob (no tree, no commit), and that blob survives `git gc --prune=now`
 — probed 2026-08-18. The anchoring rail this section depends on is not a
 hope; it is a fact checked against this machine's git before the design was
-finalized. The groundwork is LANDED code: the edit journal
-(`crates/storage/src/edits.rs`, R1) and the five-operation git seam
-(`crates/storage/src/git.rs`, R2, with `git` in the package's
-`nativeCheckInputs`). The capture edges and the commands themselves are not
-built (R3–R7 — phasing, below).
+finalized. The groundwork in code is the edit journal
+(`crates/storage/src/edits.rs`, R1). The git operations that store and
+anchor a pre-image (R2), the capture edges and the commands themselves are
+not built (R2–R7 — phasing, below).
 
 Only **five** git operations exist anywhere in this design: `rev-parse
 --show-toplevel` (is this a repo, and where), `hash-object -w` (store a
@@ -872,7 +871,7 @@ Rules that keep it honest:
 ## 10. Phasing
 
 Each phase is reviewed before the next lands, house style. Status at HEAD:
-**A (all ten steps) and R0–R2 are LANDED**; every other phase is unbuilt,
+**A (all ten steps) and R0–R1 are LANDED**; every other phase is unbuilt,
 and execution is parked behind backend work (the standing backend-first
 rule). The open R steps carry tracker rows: R3 is #6 (gated), R4 is #4, R6
 is #5. Observation (O0–O3) still lands before the rehearsal machinery (B–F)
@@ -920,9 +919,9 @@ is #5. Observation (O0–O3) still lands before the rehearsal machinery (B–F)
 
   Widget-commit lane of the §7 picker is scoped out of A0–A9 — it is
   orthogonal to branching and lands as its own later step. §7.2's R2
-  (LANDED, `crates/storage/src/git.rs`) carries the tree's first `git`
-  shell-out, for a different reason (project revert); the widget-commit
-  lane builds on that same seam when it lands.
+  (pending) is the git seam's pre-image operations, for a different reason
+  (project revert); the widget-commit lane builds on that same seam when it
+  lands.
 - **B — the rehearsal state machine**: `rehearse begin/end`, `rice score`
   + step table + `advance`, draft-mode requirement.
 - **C — hook correlation**: auto-entry on `PostToolUse` drift, the
@@ -948,7 +947,7 @@ before any engagement exists:
 
 **R — project edits and per-session revert** (§7.2): its own serialized
 run, R0–R7, one cargo-running executor at a time same as A0–A9, each step
-reviewed before the next. R0–R2 are LANDED; R3–R7 are open (tracker: R3 #6,
+reviewed before the next. R0–R1 are LANDED; R2–R7 are open (tracker: R3 #6,
 R4 #4, R6 #5):
 
 - **R0** (LANDED) — this handout amended with §7.2 (this section). Prose
@@ -956,7 +955,7 @@ R4 #4, R6 #5):
 - **R1** (LANDED) — the edit journal (`aoide-storage`): `EditLine` (with
   `tuid`), append/read, the pure folds a revert plan and the provenance
   query both consume.
-- **R2** (LANDED) — the git seam: the five subprocess operations,
+- **R2** — the git seam: the five subprocess operations,
   doc-commented never-stages/never-commits/never-moves-HEAD;
   `pkgs/aoide/default.nix` carries `git` in `nativeCheckInputs` so the
   gc-survival test runs under `nix flake check`, not only in a dev shell.
@@ -1093,7 +1092,7 @@ Open / uncertain:
   `theme.json` — a pre-existing asymmetry (§5.2), not blocking; entries
   work correctly either way, and nothing here depends on the answer.
 - The design as a whole awaits the User's explicit LOCK. Landed pieces
-  (the entry tree, the edit journal, the git seam) are asserted by the CLI
+  (the entry tree, the edit journal) are asserted by the CLI
   reference pages on the strength of the code, not of a lock; wiki concept
   pages assert nothing from the unbuilt remainder.
 - Whether a claude `PostToolUse` payload carries `tool_input.file_path` is

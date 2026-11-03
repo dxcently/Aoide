@@ -420,8 +420,8 @@ pub enum FileState {
     /// action is deletion, and the deletion already happened, or never
     /// needed to because the edit that would have created it never
     /// landed). Both cases fall out of the SAME equality check
-    /// (`live_sha == planned.pre_sha`) because `hash_object` already
-    /// represents "file absent" as `None` (R2) and a creation's `pre_sha`
+    /// (`live_sha == planned.pre_sha`) because the live hash already
+    /// represents "file absent" as `None` and a creation's `pre_sha`
     /// is `None` by construction (plan §2.2) — no special-casing needed.
     /// Counts as success, not a skip that needs explaining: a `PreToolUse`
     /// capture whose edit was denied or failed (a `pre` line, no matching
@@ -436,7 +436,7 @@ pub enum FileState {
 }
 
 /// Classify one [`PlannedFile`] against `live_sha` (the file's CURRENT git
-/// blob hash, `None` when the file is absent — R2's `hash_object` shape).
+/// blob hash, `None` when the file is absent).
 /// Pure: the caller (R5) is the one that shells out to produce `live_sha`;
 /// this function never touches a filesystem, so it stays testable exactly
 /// like every other fold in this module.
@@ -773,8 +773,8 @@ mod tests {
         };
         // The revert action for a creation is deletion; the file is
         // correctly absent (the delete already ran, or the create never
-        // landed) — `live_sha` is `None` too, same as `hash_object` of an
-        // absent file (R2).
+        // landed) — `live_sha` is `None` too, the live hash of an absent
+        // file.
         assert_eq!(classify_file(&planned, None), FileState::AlreadyRestored);
     }
 

@@ -181,9 +181,9 @@ rustPlatform.buildRustPackage {
     ln -s strillix "$strillix/bin/strx"
   '';
 
-  # `aoide-storage::git` shells out to `git` (the project-revert plan's git
-  # seam, R2) — its own tests drive a real temp repo, so `git` must be on
-  # PATH in the sandboxed check phase. `aoide-client::commands::run_curl`
+  # `aoide-storage::git` shells out to `git` — its own tests drive a real temp
+  # repo, so `git` must be on PATH in the sandboxed check phase.
+  # `aoide-client::commands::run_curl`
   # (the crate's one HTTP transport, `post_json`/`node add`'s AgentCard
   # fetch) shells out to `curl` the same way — the ssh-transport lane's
   # dial-resolution tests (P-S4) drive real `curl` calls (a fast connection
