@@ -31,8 +31,8 @@ extractors.
 
 Aoide's session core: the PTY multiplexer (`aoide conduct`), the session DAG
 (bare `aoide graph`), Claude-Code hook plumbing, and liveness reaping. Makes
-every terminal a tracked, conductable session (root `AGENTS.md`, "Conducting
-— aoide's headline"). Core, never `strillix` — headless-safe by construction.
+every terminal a tracked, conductable session (root `AGENTS.md`, "Conducting").
+Core, never `strillix` — headless-safe by construction.
 
 The conducted session's terminal is `graph/pty.rs`: **one seam with an arm per
 host** — `openpty`/`TIOCSCTTY`/`poll`/`termios` on Unix, `CreatePseudoConsole`

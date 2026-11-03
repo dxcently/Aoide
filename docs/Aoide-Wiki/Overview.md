@@ -1,14 +1,14 @@
 ---
 type: overview
 created: 2026-07-25
-updated: 2026-08-29
+updated: 2026-11-02
 ---
 
 # Aoide — Overview
 
-**Aoide** tracks and conducts terminal and agent sessions. Sessions collaborate across agents and across hosts, with the human in the loop — and become the parts you build larger systems out of. Every terminal is a conductable, tracked session by default ([[Conductor-Channel]]), reachable through the bridges and APIs between terminal, shell, system, and OS — no MCP required, runnable anywhere there is a shell. **Strillix** is the distribution built on that core: this repo's NixOS flake, which additionally ships the [[Quickshell]] widget surfaces (bar, dock, gadgets, conductor views) and the rice/theme ricer ([[Self-Ricing]]). Strillix is the OS harness for your harness. A capability that works with only a shell is Aoide; one that needs desktop, Quickshell, or rice is Strillix. This wiki documents Strillix end to end, the flake being the core's concrete running instance.
+**Aoide** is mainly Eidolon's front end, on the desktop, on mobile and in the browser, the way deepseek-harness fronts its harness: other harnesses connect to it, drive it, and talk to each other through it. It tracks and conducts terminal and agent sessions. Sessions collaborate across agents and across hosts, with the human in the loop — and become the parts you build larger systems out of. Every terminal is a conductable, tracked session by default ([[Conductor-Channel]]), reachable through the bridges and APIs between terminal, shell, system, and OS — no MCP required, runnable anywhere there is a shell. **Strillix** is this repo's NixOS flake, which ships the [[Quickshell]] widget surfaces (bar, dock, gadgets, conductor views) and the rice/theme ricer ([[Self-Ricing]]). Strillix is the OS harness for your harness. A capability that works with only a shell is Aoide; one that needs desktop, Quickshell, or rice is Strillix. This wiki documents both products end to end.
 
-Strillix pairs a Hyprland compositor with a Quickshell shell, an orchestrator daemon, a content pipeline, and a self-ricing engine. Upstream ships the shape-making machinery (rice engine, contracts, walker, management tools) but never the shapes; your clone is your instance ([[Clone-and-Run]]). The frozen/performed naming thesis lives in [[Lexicon]].
+Strillix is the OS: it pairs a Hyprland compositor with a Quickshell shell, a content pipeline, and a self-ricing engine, and runs with or without Aoide. Upstream ships the shape-making machinery (rice engine, contracts, walker, management tools) but never the shapes; your clone is your instance ([[Clone-and-Run]]). The frozen/performed naming thesis lives in [[Lexicon]].
 
 Strillix is also a specialized widget maker: it integrates and launches the independently-owned [[Melete]] coding harness and [[Mneme]] knowledge server, and new integrations are written by that agent as declarative nix + QML + adapter rather than selected from a plugin registry. See [[Widget-Maker]] and [[Feature-Set]].
 

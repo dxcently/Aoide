@@ -1,19 +1,19 @@
 # AGENTS.md — how to drive Aoide
 
-**Aoide and Strillix are two products in one repo.** Aoide is the engine;
-Strillix is the OS built on it. Don't conflate them.
+**Aoide and Strillix are two products in one repo.** Aoide is a harness front
+end; Strillix is an OS. Don't conflate them.
 
-- **Aoide** is the engine: the `aoide`/`aoided` binaries, the bridges and APIs
-  between the terminal, shell, system, and OS, and the desktop app,
-  `aoide-desktop`. Aoide's main feature is helping conduct orchestration: one
-  interface through which agents are freely orchestrated for any task. Any agent
-  with a shell is fully capable, no MCP required, and **every terminal is a
-  conductable, tracked session by default** (see Conducting below). Aoide is
-  portable and headless-capable, and nix-independent: cargo builds it on any
-  Linux, with no nix shell-outs and no NixOS assumption. A portable capability
-  is written against a POSIX process table and unix file locks; a
-  `cfg(target_os)` branch is a tie-break or a taught refusal, never a second
-  discovery path.
+- **Aoide** is mainly Eidolon's front end, on the desktop, on mobile and in the
+  browser, the way deepseek-harness fronts its harness. Other harnesses connect
+  to it, drive it, and talk to each other through it. It is the `aoide`/`aoided`
+  binaries, the bridges and APIs between the terminal, shell, system, and OS,
+  and the desktop app, `aoide-desktop`. Any agent with a shell is fully capable,
+  no MCP required, and **every terminal is a conductable, tracked session by
+  default** (see Conducting below). Aoide is portable and headless-capable, and
+  nix-independent: cargo builds it on any Linux, with no nix shell-outs and no
+  NixOS assumption. A portable capability is written against a POSIX process
+  table and unix file locks; a `cfg(target_os)` branch is a tie-break or a
+  taught refusal, never a second discovery path.
 - **Strillix** is the OS: it owns the habit modules (this repo's `modules/`
   catalogue), the paint (Quickshell surfaces, the compositor, the theme), and the
   rice state. Its binary is **`strillix`**, shortened to `strx`. Strillix links
@@ -39,8 +39,8 @@ prints it at runtime, and `aoide schema --json` / `strx schema --json` is the
 machine-readable backstop at any tier. MCP and A2A see only the commands that
 declare them; `schema --json` shows each command's `doors`.
 
-**Conducting — commanding other sessions (Aoide's headline).** Every terminal
-is a conductable, tracked session; command another with `aoide send
+**Conducting — commanding other sessions.** Every terminal is a conductable,
+tracked session; command another with `aoide send
 --id <id> [--submit] [--yes] -- <text>`. The channel, its gate/autogate
 rules, and the liveness reaper:
 `docs/Aoide-Wiki/concepts/orchestration/Conductor-Channel.md` and

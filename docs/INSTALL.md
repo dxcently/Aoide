@@ -3,9 +3,8 @@
 There are two installs and one boundary between them (root `AGENTS.md`,
 `docs/architecture/PACKAGE-LAYOUT.md`): **Aoide** is the core — `aoide` and
 `aoided`, sessions and the DAG, conduct, the doors — and installs with cargo on
-any Linux, no nix. **Strillix** is the distribution built on that core, and its
-paint half (`strillix`, the bar, the dock, the rice loop) ships only through the
-nix flake.
+any Linux, no nix. **Strillix** is the OS — `strillix`, the bar, the dock, the
+rice loop — and ships only through the nix flake.
 
 | you want | binaries | how it installs |
 |---|---|---|

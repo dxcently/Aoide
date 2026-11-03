@@ -14,12 +14,13 @@ use crate::registry::Registry;
 const HEAD: &str = "\
 Aoide — how to drive it (aoide guide · tier-0 onboarding)
 
-Identity: Aoide is the engine. It tracks and conducts terminal and agent
-sessions, across agents and across hosts, with the human in the loop, and it
-is the part you build larger systems out of. Any agent with a shell is fully
-capable, no MCP required, and every terminal is a conductable, tracked session
-by default. Strillix is the OS built on Aoide: the habit modules, the paint and
-the rice state, in the `strillix` binary. `strillix guide` orients there. A
+Identity: Aoide is mainly Eidolon's front end, on the desktop, on mobile and
+in the browser; other harnesses connect to it, drive it, and talk to each
+other through it. It tracks and conducts terminal and agent sessions, across
+agents and across hosts, with the human in the loop. Any agent with a shell is
+fully capable, no MCP required, and every terminal is a conductable, tracked
+session by default. Strillix is the OS: the habit modules, the paint and the
+rice state, in the `strillix` binary. `strillix guide` orients there. A
 capability reachable with only a shell is Aoide; one that draws is Strillix.
 
 Orient through four tiers, in order:
@@ -33,7 +34,7 @@ Orient through four tiers, in order:
     `schema --json`; absent = cli, daemon).
   Tier 3 — network MCP: enabled by the USER only, never by an agent.
 
-Conducting (aoide's headline): command another session with
+Conducting: command another session with
   aoide send --id <id> [--submit] [--yes] -- <text>
 (held PENDING by default; --yes or an autogate policy delivers). `--yes` is
 a terminal-only flag: over MCP a send delivers by autogate or waits pending.
