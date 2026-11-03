@@ -96,9 +96,11 @@ ShellBridge.qml  (one table: cmd -> socket)
   work with the desktop process down.
 - Strillix writes core state through core's door, `aoide <verb> --json`:
   `session window closed <address>` for each window that closes,
-  `session window attach <id> <window>` for each binding the sweep decides,
-  `session window roster` (JSON on stdin) when the terminal roster changes and on
-  each reconnect, and `session codex sync` when a window appears and on each
+  `session window attach <id> <window>` for each binding core's
+  `window_bindings` hands the sweep, `session window roster` (JSON on stdin)
+  when the terminal roster changes and on each reconnect, where core places the
+  sessions those windows host and then publishes the rest as `win:*` records,
+  and `session codex sync` when a window appears and on each
   reconnect. It asks `session show <id>` for a session's window when it focuses
   one; that read runs whether or not aoided listens. Core checks and audits each
   call. A yes from core settles a call, and so does a no given while aoided
