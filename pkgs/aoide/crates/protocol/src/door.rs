@@ -303,55 +303,18 @@ fn command_for<'a>(path: &[String], registry: &'a Registry) -> Option<&'a Comman
     registry.get(path)
 }
 
-/// Heads only `aoide` registers, and heads both do (`cli`'s and `strillix`'s
-/// registry tests pin them against the real registries). A typed head the running
-/// binary lacks but `aoide` owns is refused instead of a did-you-mean: the refusal
-/// names the command to run in `aoide` when `AOIDE_CORE_BIN` or `PATH` finds an
-/// aoide binary, and says aoide is not installed when neither does. Core names no
-/// desktop head: a `strillix` verb typed at `aoide` is an unknown command there.
-pub const AOIDE_ONLY_HEADS: &[&str] = &[
-    "a2a", "adapter", "ask", "conduct", "conductor", "config", "content", "context", "daemon", "events", "graph",
-    "hooks", "identity", "job", "mail", "make", "melete", "mesh", "node", "project", "resurrect", "send", "session",
-    "soundcheck", "spawn", "update", "usage", "workspace",
-];
-pub const SHARED_HEADS: &[&str] = &["guide", "mcp", "onboard", "pair", "schema", "secrets"];
-
-/// The other binary's name when `head` belongs to it and not to this one.
-fn other_binary(head: &str, bin_name: &str, registry: &Registry) -> Option<&'static str> {
-    if registry.commands().any(|c| c.path[0] == head) {
-        return None;
-    }
-    match bin_name {
-        "strillix" if AOIDE_ONLY_HEADS.contains(&head) => Some("aoide"),
-        _ => None,
-    }
-}
-
-/// The answer to an unresolvable invocation. Four shapes, by intent:
+/// The answer to an unresolvable invocation. Three shapes, by intent:
 ///
 /// * The input is exactly a GROUP (`secrets`, `graph project`) — the caller
 ///   asked what is there: its listing, informational (exit 0).
-/// * The head belongs to the other binary (`spawn` typed at `strillix`): say so, and
-///   give the command to run there when that binary is installed on this host.
 /// * A typo of a command, group or leaf — each typed segment matched against
 ///   the registered paths by edit distance (`nodee lst` → `node list`).
 /// * Neither close nor a group: list what IS valid at the point it went wrong.
 ///
-/// The refusals end with the `aoide --help` pointer.
+/// The refusals end with a pointer to this binary's `--help`.
 fn unknown_command_outcome(positionals: &[String], registry: &Registry, bin_name: &str, t: &Term) -> Outcome {
     if let Some(listing) = help::group(positionals, registry, bin_name, t) {
         return help_outcome(&positionals.join("."), listing);
-    }
-    if let Some(other) = other_binary(&positionals[0], bin_name, registry) {
-        let what = format!("`{}` is {} command, not {} one", positionals[0], article_for(other), article_for(bin_name));
-        let (why, fix) = if crate::bin::core_present() {
-            let run = format!("{other} {}", positionals.join(" "));
-            (format!("{other} owns it; `{bin_name}` does not register it"), Fix::Run(run))
-        } else {
-            let absent = "it belongs to Aoide, which is not installed on this host";
-            (absent.to_string(), Fix::None("nothing on this host runs it"))
-        };
-        return Outcome::refuse(positionals[0].clone(), Kind::Usage, what, why, fix);
     }
     let mut message = format!("unknown command: `{}`", positionals.join(" "));
     let suggestions = did_you_mean(positionals, registry);
@@ -383,10 +346,6 @@ fn known_label(positionals: &[String], registry: &Registry) -> String {
         depth += 1;
     }
     positionals[..depth.max(1)].join(".")
-}
-
-fn article_for(bin_name: &str) -> String {
-    format!("{} {bin_name}", if bin_name.starts_with(['a', 'e', 'i', 'o', 'u']) { "an" } else { "a" })
 }
 
 /// The closest registered paths to a typo'd input, nearest first, at most
@@ -1753,105 +1712,6 @@ mod tests {
         assert_eq!(tie, vec!["alpha go"]);
     }
 
-    /// `AOIDE_CORE_BIN` set to `value`, or unset for `None`, for one test. Returns the value it
-    /// replaced, for [`restore_core_bin`]. Callers hold `crate::bin::path_test_lock()`.
-    fn scoped_core_bin(value: Option<&std::path::Path>) -> Option<std::ffi::OsString> {
-        let saved = std::env::var_os("AOIDE_CORE_BIN");
-        match value {
-            Some(path) => std::env::set_var("AOIDE_CORE_BIN", path),
-            None => std::env::remove_var("AOIDE_CORE_BIN"),
-        }
-        saved
-    }
-
-    fn restore_core_bin(saved: Option<std::ffi::OsString>) {
-        match saved {
-            Some(v) => std::env::set_var("AOIDE_CORE_BIN", v),
-            None => std::env::remove_var("AOIDE_CORE_BIN"),
-        }
-    }
-
-    /// `spawn x` typed at strillix, refused: the rendered text and the `fix` the refusal names.
-    fn refused_spawn_at_strillix() -> (String, serde_json::Value) {
-        let reg = test_registry();
-        let back = parse(&argv(&["spawn", "x"]), Door::Cli, "strillix", &reg).unwrap_err();
-        let fix = back.data.as_ref().map(|d| d["refusal"]["fix"].clone()).unwrap_or_default();
-        (back.render(false).0, fix)
-    }
-
-    /// An aoide head typed at strillix names `aoide` and the command to run when an aoide binary
-    /// is on `PATH`.
-    #[test]
-    fn a_core_head_typed_at_strillix_names_aoide_when_aoide_is_on_path() {
-        let _guard = crate::bin::path_test_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let saved_core = scoped_core_bin(None);
-        let (dir, saved) = scoped_empty_path("core_on_path");
-        write_executable(&dir, "aoide", "#!/bin/sh\nexit 0\n");
-
-        let (text, fix) = refused_spawn_at_strillix();
-        assert!(text.contains("`spawn` is an aoide command, not a strillix one"), "{text}");
-        assert!(text.contains("why: aoide owns it; `strillix` does not register it"), "{text}");
-        assert!(text.contains("fix: aoide spawn x"), "{text}");
-        assert_eq!(fix, serde_json::json!({ "run": "aoide spawn x" }));
-
-        restore_path(dir, saved);
-        restore_core_bin(saved_core);
-    }
-
-    /// The same refusal when `AOIDE_CORE_BIN` names an aoide binary that is not on `PATH`.
-    #[test]
-    fn a_core_head_typed_at_strillix_names_aoide_when_core_bin_names_a_file() {
-        let _guard = crate::bin::path_test_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let (dir, saved) = scoped_empty_path("core_by_env");
-        let elsewhere = dir.join("elsewhere");
-        std::fs::create_dir_all(&elsewhere).unwrap();
-        let stub = write_executable(&elsewhere, "aoide", "#!/bin/sh\nexit 0\n");
-        let saved_core = scoped_core_bin(Some(stub.as_path()));
-
-        let (text, fix) = refused_spawn_at_strillix();
-        assert!(text.contains("why: aoide owns it; `strillix` does not register it"), "{text}");
-        assert_eq!(fix, serde_json::json!({ "run": "aoide spawn x" }));
-
-        restore_core_bin(saved_core);
-        restore_path(dir, saved);
-    }
-
-    /// With no aoide on `PATH` and `AOIDE_CORE_BIN` unset, the refusal says aoide is not installed
-    /// on this host and offers no command to run.
-    #[test]
-    fn a_core_head_typed_at_strillix_says_aoide_is_not_installed_when_none_resolves() {
-        let _guard = crate::bin::path_test_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let saved_core = scoped_core_bin(None);
-        let (dir, saved) = scoped_empty_path("core_absent");
-
-        let (text, fix) = refused_spawn_at_strillix();
-        assert!(text.contains("`spawn` is an aoide command, not a strillix one"), "{text}");
-        assert!(text.contains("why: it belongs to Aoide, which is not installed on this host"), "{text}");
-        assert!(text.contains("fix: none: nothing on this host runs it"), "{text}");
-        assert_eq!(fix, serde_json::json!({ "none": "nothing on this host runs it" }));
-
-        restore_path(dir, saved);
-        restore_core_bin(saved_core);
-    }
-
-    /// `AOIDE_CORE_BIN` is taken as named, without a look at the file, so an override that names
-    /// no file counts as not installed even when `PATH` holds an aoide.
-    #[test]
-    fn a_core_bin_override_that_names_no_file_is_not_installed_even_with_aoide_on_path() {
-        let _guard = crate::bin::path_test_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let (dir, saved) = scoped_empty_path("core_stale_env");
-        write_executable(&dir, "aoide", "#!/bin/sh\nexit 0\n");
-        let missing = dir.join("gone").join("aoide");
-        let saved_core = scoped_core_bin(Some(missing.as_path()));
-
-        let (text, fix) = refused_spawn_at_strillix();
-        assert!(text.contains("why: it belongs to Aoide, which is not installed on this host"), "{text}");
-        assert_eq!(fix, serde_json::json!({ "none": "nothing on this host runs it" }));
-
-        restore_core_bin(saved_core);
-        restore_path(dir, saved);
-    }
-
     /// A desktop head typed at core is an unknown command, not a redirect.
     #[test]
     fn a_desktop_head_typed_at_aoide_is_not_redirected() {
@@ -1863,6 +1723,19 @@ mod tests {
         let text = err.render(false).0;
         assert!(!text.contains("strillix"), "core names no desktop head: {text}");
         assert!(text.contains("unknown command: `rice stage dusk`"), "{text}");
+    }
+
+    /// A core head typed at strillix is an unknown command, not a redirect.
+    #[test]
+    fn a_core_head_typed_at_strillix_is_not_redirected() {
+        let reg = test_registry();
+        let err = parse(&argv(&["spawn", "x"]), Door::Cli, "strillix", &reg).unwrap_err();
+        assert_eq!(err.status, Status::Usage);
+        assert!(err.data.is_none(), "an ordinary usage answer names no fix: {:?}", err.data);
+        let text = err.render(false).0;
+        assert!(text.contains("unknown command: `spawn x`"), "{text}");
+        assert!(text.contains("run 'strillix --help' for the full command list"), "{text}");
+        assert!(!text.contains("aoide"), "strillix names no aoide: {text}");
     }
 
     #[test]

@@ -154,12 +154,12 @@ let
       jq -n --arg p "$logon" --arg s ${lib.escapeShellArg config.strillix.rice} '{path: $p, rice: $s}' \
         > "$out/stage/wallpaper.json"
     ${lib.optionalString (desktopPicture != null) ''
-    else
-      dest="$out/rices/${face.owner}/wallpaper/${baseNameOf desktopPicture}"
-      mkdir -p "$(dirname "$dest")"
-      [ -f "$dest" ] || cp ${desktopPicture} "$dest"
-      jq -n --arg p "$dest" --arg s ${lib.escapeShellArg config.strillix.rice} '{path: $p, rice: $s}' \
-        > "$out/stage/wallpaper.json"
+      else
+        dest="$out/rices/${face.owner}/wallpaper/${baseNameOf desktopPicture}"
+        mkdir -p "$(dirname "$dest")"
+        [ -f "$dest" ] || cp ${desktopPicture} "$dest"
+        jq -n --arg p "$dest" --arg s ${lib.escapeShellArg config.strillix.rice} '{path: $p, rice: $s}' \
+          > "$out/stage/wallpaper.json"
     ''}
     fi
     cp ${manifest} "$q/rices/manifest.json"

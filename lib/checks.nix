@@ -92,15 +92,29 @@
 #       lives in tests/boundary/ — this file only invokes it (the same split
 #       as 8).
 #
+#   15. generator-runtime — the built `strillix` stages through the real
+#       `nix-instantiate`, as a host does. `rice refresh` and `rice mode stage`
+#       must succeed. A built-in rice's machine copy, edited, must stage with
+#       status ok, and its marker must end the staged bar.qml: that proves the
+#       machine copy, not the shipped one, is what stages. Both run-tree JSON
+#       files must hold that rice's key. The baked baseline also satisfies that,
+#       so it proves only that the files exist. A full copy of that rice under
+#       a new name, `runtime-copy`, must be absent from both shipped JSON files
+#       (checked first), stage with status ok, and leave a `runtime-copy` key in
+#       both run-tree files. Only the generator can supply that key, so this is
+#       the assertion that proves the generator's answer reaches the run tree.
+#       Checks 11 and 12 call the generator themselves, so only this one
+#       exercises the call the runtime makes.
+#
 # 1–3 and 5 are written so they PASS TRIVIALLY where nothing populates the
 # registry they inspect yet (1) and become real as Wave-1 lanes/packages
 # land. Each resolves to a trivial derivation: it either builds (assertion
 # held) or the eval fails with a readable message (assertion broken). 10 is
 # the same eval-time-assert shape against a fixed fixture instead of a
 # registry — always real, never trivially-empty. 13 is that shape over the
-# committed rices, one `readFile` per bar body. 4, 6, 7, 8, 9, and 14 are real
-# `runCommand`s — each has to actually run a binary, so it can only fail at
-# build time, not eval time.
+# committed rices, one `readFile` per bar body. 4, 6, 7, 8, 9, 11, 12, 14,
+# and 15 are real `runCommand`s — each has to actually run a binary, so it
+# can only fail at build time, not eval time.
 { lib, pkgs }:
 let
   # A check that succeeds as a buildable derivation, or throws at eval time
@@ -1093,6 +1107,93 @@ let
       set -euo pipefail
       perl ${src}/tests/boundary/scan.pl check ${src} ${src}/tests/boundary/crossings.golden > "$out"
     '';
+
+  # ── Check 15: the built strillix stages a rice the way a host does ─────────
+  # Checks 11 and 12 call the shipped generator themselves, so nothing else
+  # exercises the call the runtime makes: `strillix rice stage` and `reload`
+  # pass the generator its argument by name. This drives the BUILT `strillix`
+  # as a host does. `rice refresh` seeds the machine's rices (the activation's
+  # `aoideSeedRices`), one built-in rice's machine copy is edited, staging is
+  # unlocked as `rice mode stage` unlocks it, and `rice stage` runs over the
+  # real `nix-instantiate`. The run tree must then hold the edited file and both
+  # generated JSON files. A full copy of that machine rice under a name the
+  # shipped JSON lacks must reach both files too: the baked baseline cannot
+  # supply that key, so only the generator's answer can. The best-effort steps
+  # (hyprctl, kitty, the quickshell IPC, the wallpaper provider) have no binary
+  # here and cannot fail a stage.
+  generatorRuntime =
+    {
+      strillix,
+      strillixRices,
+      rice,
+    }:
+    pkgs.runCommand "aoide-check-generator-runtime"
+      {
+        nativeBuildInputs = [
+          pkgs.nix
+          pkgs.jq
+        ];
+      }
+      ''
+        export HOME="$TMPDIR/home" XDG_CACHE_HOME="$TMPDIR/cache"
+        export XDG_STATE_HOME="$TMPDIR/state" XDG_RUNTIME_DIR="$TMPDIR/runtime"
+        export AOIDE_ROOT="$TMPDIR/aoide" STRILLIX_ROOT="$TMPDIR/strillix"
+        export STRILLIX_TEMPLATES="${strillixRices}/share/strillix/rices"
+        mkdir -p "$HOME" "$XDG_CACHE_HOME" "$XDG_STATE_HOME" "$XDG_RUNTIME_DIR"
+        mkdir -p "$AOIDE_ROOT/run/qml"
+        strillix="${strillix}/bin/strillix"
+        marker='// generator-runtime: a machine copy the stage must carry'
+        fail() {
+          echo "aoide check generator-runtime FAILED: $1" >&2
+          cat "$TMPDIR/stage.err" "$TMPDIR/stage.json" >&2 2>/dev/null || true
+          exit 1
+        }
+
+        "$strillix" rice refresh || fail "rice refresh, the activation seed, failed"
+
+        bar="$STRILLIX_ROOT/rices/${rice}/widgets/bar.qml"
+        chmod u+w "$bar"
+        printf '%s\n' "$marker" >> "$bar"
+
+        "$strillix" rice mode stage || fail "rice mode stage, the unlock, failed"
+        if ! "$strillix" rice stage "${rice}" --json >"$TMPDIR/stage.json" 2>"$TMPDIR/stage.err"; then
+          fail "rice stage exited non-zero"
+        fi
+        if [ "$(jq -r .status "$TMPDIR/stage.json")" != ok ]; then
+          fail "rice stage did not report status ok"
+        fi
+        for file in manifest.json registry.json; do
+          if ! jq -e --arg rice "${rice}" 'has($rice)' "$AOIDE_ROOT/run/qml/rices/$file" >/dev/null; then
+            fail "run/qml/rices/$file is not JSON with a ${rice} key"
+          fi
+        done
+        staged="$AOIDE_ROOT/run/qml/rices/${rice}/bar.qml"
+        if [ "$(tail -n 1 "$staged")" != "$marker" ]; then
+          fail "the staged bar.qml does not end with the machine copy's marker"
+        fi
+        # A full copy of the machine rice under a name the shipped JSON lacks:
+        # only the generator can give the run tree that key.
+        copy="$STRILLIX_ROOT/rices/runtime-copy"
+        cp -r "$STRILLIX_ROOT/rices/${rice}" "$copy"
+        chmod -R u+w "$copy"
+        for file in manifest.json registry.json; do
+          if jq -e 'has("runtime-copy")' "$STRILLIX_TEMPLATES/$file" >/dev/null; then
+            fail "the shipped $file already has a runtime-copy key, so the check proves nothing"
+          fi
+        done
+        if ! "$strillix" rice stage runtime-copy --json >"$TMPDIR/stage.json" 2>"$TMPDIR/stage.err"; then
+          fail "rice stage runtime-copy exited non-zero"
+        fi
+        if [ "$(jq -r .status "$TMPDIR/stage.json")" != ok ]; then
+          fail "rice stage runtime-copy did not report status ok"
+        fi
+        for file in manifest.json registry.json; do
+          if ! jq -e 'has("runtime-copy")' "$AOIDE_ROOT/run/qml/rices/$file" >/dev/null; then
+            fail "run/qml/rices/$file is not JSON with a runtime-copy key"
+          fi
+        done
+        printf 'aoide check generator-runtime: ok\n' > "$out"
+      '';
 in
 {
   inherit
@@ -1111,5 +1212,6 @@ in
     themeFanout
     generatorOffline
     generatorRelocatable
+    generatorRuntime
     ;
 }

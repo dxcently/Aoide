@@ -8,14 +8,15 @@
   Nix; the ricing engine must apply a rice on generic Linux too (root
   `AGENTS.md`, "Nix-independence").
 - **`widgets::plan_stage` is the gate, and it runs BEFORE the first write.**
-  `rice stage`/`rice mode` call it ahead of the theme write and hand its
-  answer to both syncs; a refusal stages NOTHING. Don't move it back inside
-  `sync_rice_widgets`/`sync_rice_registry`, and don't add a write path that
-  precedes it — the two refusal texts are the contract
-  (`refusal_no_nix`, `refusal_rebuild_needed`).
+  `rice stage`, `rice mode`, `reload` and `rice back` each call it before their
+  first write. `rice stage`, `rice mode` and `reload` hand its answer to both
+  syncs; `rice back` hands it to `sync_rice_registry` alone. A refusal stages
+  NOTHING. Don't move it back inside `sync_rice_widgets`/`sync_rice_registry`,
+  and don't add a write path that precedes it — the two refusal texts are the
+  contract (`refusal_no_nix`, `refusal_rebuild_needed`).
 - **Nothing in the runtime reads a checkout for the rices.** The generator
   is the SHIPPED file (`<templates>/../nix/manifest.nix`), its argument is the
-  MACHINE's rices (`fs::rices_root`), and the spawn's
+  MACHINE's rices (`paths::rices_root`), and the spawn's
   `ErrorKind::NotFound` IS the no-nix answer — never a `which` probe, never a
   `flake_root()` check, never a `#<flake output>` argv. `$AOIDE_FLAKE_ROOT`
   survives for `rice declare`'s commit-in step, and for `host_config()`'s
@@ -429,7 +430,7 @@
 - **The rice stage is `paths::stage_dir()`, always `$STRILLIX_ROOT/stage`.** `paths` reads `strillix_root()` and nothing else for rice locations: `AOIDE_STAGE_DIR` names the conducting stage only and never relocates a rice path. A test that moves the rice tree pins `STRILLIX_ROOT` (the `paths` tests use `pin_roots`), never the stage override.
 - **The rice lock is `lock::with_stage_lock`, on `stage_dir()`.** It is `aoide_storage::fs::with_lock_in(&stage_dir(), f)`; core's `with_stage_lock` locks the conducting stage. The two lock files never guard the same state, and `lock.rs`'s tests prove the split and that each domain still serialises its own writers. Do not route a rice writer through core's lock, or the reverse.
 - **The rice move is explicit.** `migrate::migrate_rice_root` runs only from `strx migrate` and from `rice_root_at_start` under `STRILLIX_MIGRATE=1` (the home activation sets it). `rice_root_at_start` with the flag unset moves no rice state and prints one line naming `strx migrate` when old rice state is due. Never call `migrate_rice_root` from a library getter, a core binary or a plain start. `migrate_strillix_state` (`~/.local/state/lyra` to `~/.local/state/strillix`) runs inside `migrate_rice_root`, so it moves under the same flag and in the same activation: Hyprland sources the link from there until the rebuild rewrites its config.
-- **The rice move waits for core's legacy state while an aoide binary resolves.** `migrate_rice_root` returns an error, moving nothing, while `aoide_protocol::bin::core_present()` (the check the protocol door makes when it says aoide is installed) holds and `~/Aoide/state` holds state that `migrate_root_once` would move. With no aoide binary the move runs and leaves that state where it is. `legacy_state_pending` checks three things: the legacy `state/` holds state, the root's own `state/` is absent or empty, and `$AOIDE_STATE_DIR` is unset. The legacy audit log is not part of the check, because the aoided units export `AOIDE_AUDIT_LOG`, which keeps `migrate_root_once` from moving it in that process. The wait is pinned by `the_rice_move_waits_while_core_has_not_moved_its_legacy_state` and `the_rice_move_runs_without_aoide_and_leaves_core_legacy_state_in_place` in `migrate.rs`, and by `strillix/tests/core_state.rs`.
+- **The rice move waits for core's legacy state while an aoide binary resolves.** `migrate_rice_root` returns an error, moving nothing, while `aoide_protocol::bin::core_present()` (an aoide binary resolves) holds and `~/Aoide/state` holds state that `migrate_root_once` would move. With no aoide binary the move runs and leaves that state where it is. `legacy_state_pending` checks three things: the legacy `state/` holds state, the root's own `state/` is absent or empty, and `$AOIDE_STATE_DIR` is unset. The legacy audit log is not part of the check, because the aoided units export `AOIDE_AUDIT_LOG`, which keeps `migrate_root_once` from moving it in that process. The wait is pinned by `the_rice_move_waits_while_core_has_not_moved_its_legacy_state` and `the_rice_move_runs_without_aoide_and_leaves_core_legacy_state_in_place` in `migrate.rs`, and by `strillix/tests/core_state.rs`.
 - **`rice_status` judges every rice source before anything moves.** The old `~/Aoide/song/stage`, the aoide-root `song/` tree and the strillix root are read together. Rice state in both roots is `Both`; sources that would carry rice state across homes are `Refused`. `migrate_rice_root` returns an error for either, with nothing moved. Two roots named by absolute overrides are an explicit choice (`rice_move_allowed`) and may cross homes; a default root may not.
 - **An emptied `song/` becomes a marker file.** `mark_rice_tree_moved` replaces an empty `$AOIDE_ROOT/song` with a regular file, so an old binary that opens `song/stage` fails with ENOTDIR instead of recreating a second live tree. A leftover keeps the directory and is narrated; the marker is never written over it.
 - **Theme and wallpaper names move once, without clobbering.** `livery.json` becomes `theme.json` (stage, declared twin, each rice and draft), `cover.json` becomes `wallpaper.json`, `covers/` becomes `wallpapers/`, and each rice's `cover/` becomes `wallpaper/`. A file already at its new name is never overwritten.
@@ -460,7 +461,7 @@
 - `CONTRACTS.md §5`'s "Elements" subsection when a descriptor field rule
   changes.
 - `CONTRACTS.md §4`'s "shipped score templates" paragraph when a new
-  consumer of `fs::rice_templates_dir` is added — `rice compose --from`,
+  consumer of `paths::rice_templates_dir` is added — `rice compose --from`,
   the widget registry/manifest regeneration, and `seed_rices_from_templates`
   are the three today.
 - `pkgs/aoide/crates/AGENTS.md` for cross-crate invariants — not restated

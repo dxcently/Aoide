@@ -42,7 +42,7 @@ let
   byClass = import ./by-class.nix { inherit lib; };
 
   # The committed rices this flake's hosts' rices live in. Named ONCE here,
-  # as the caller's answer to `lib/rices.nix`'s own default (`rices ?
+  # as the caller's answer to `lib/rices.nix`'s own default (`ricesRoot ?
   # ../rices` — the same directory): the selection validates a host
   # against it, the hook below hands the same value to the lane that paints the
   # built-in rices, and the flake exports this same value as `ricesRoot`, so

@@ -1,11 +1,13 @@
 //! Session pid and window records, core side: the harness walk over a hook's pid ancestry, the
-//! chain a hook door stores, registration parentage, the untracked-terminal (`win:*`) reconciler,
-//! and the three window verbs the desktop calls through the door: `session window attach` (a
-//! session's window and workspace), `session window closed` (the sessions that ran in a closed
-//! window end, via the reaper) and `session window roster` (the terminal windows the desktop
-//! reads, published as `win:*` records). Nothing here reads a compositor: the desktop hands core
-//! what it saw. A session's liveness is its pid alone, except that a window reported closed is
-//! evidence the reaper acts on at once.
+//! chain a hook door stores, registration parentage, the placement rule (`window_bindings`: which
+//! session runs in which window), the untracked-terminal (`win:*`) reconciler, and the three window
+//! verbs the desktop calls through the door: `session window attach` (a session's window and
+//! workspace), `session window closed` (the sessions that ran in a closed window end, via the
+//! reaper) and `session window roster` (the terminal windows the desktop reads: core places the
+//! sessions they host, then publishes the rest as `win:*` records). Nothing here reads a
+//! compositor: the desktop hands core the windows it saw, and core decides from them. A session's
+//! liveness is its pid alone, except that a window reported closed is evidence the reaper acts on
+//! at once.
 
 use super::conduct::{is_invocation_plumbing, proc_argv};
 use super::doc::restage_graph;
@@ -264,11 +266,11 @@ pub(in crate::graph) fn windowless_by_lineage_from_parent(
 }
 
 /// Same check, starting from an ALREADY-REGISTERED session's own record
-/// rather than a raw parent id — the shape the desktop's sweep and the
-/// chain fill need. `false` (keep today's backfill)
+/// rather than a raw parent id — the shape the placement rule
+/// ([`window_bindings`]) and the chain fill need. `false` (keep today's backfill)
 /// for an unknown `id`. Answers `true` in TWO cases: `id` is ITSELF a
-/// windowless conducted wrap (task #89 — the desktop's
-/// sweep iterates every record with an empty
+/// windowless conducted wrap (task #89 — the placement rule
+/// visits every record with an empty
 /// address, the wrap's own included, so its self-windowlessness must be
 /// checked directly, not only inferred from a child's parent chain), or its
 /// `parentSessionId` chain is (delegates to
@@ -289,8 +291,8 @@ pub fn windowless_by_lineage(id: &str, sessions: &[SessionRecord]) -> bool {
 /// replaced, in one locked write. A chain a live process of the record's own holds is never
 /// written here, and a windowless-by-lineage record is never touched.
 /// `hook_pid` is the hook process, and `None` walks nothing. It never writes `pid`,
-/// `windowAddress` or the session `state`: binding a window is the desktop's, through
-/// [`attach_window`].
+/// `windowAddress` or the session `state`: binding a window is the placement rule's
+/// ([`window_bindings`]), applied through [`attach_window`] and the roster verb.
 pub(in crate::graph) fn ensure_session_chain(id: &str, hook_pid: Option<i32>) {
     let Some(hook_pid) = hook_pid else {
         return;
@@ -346,6 +348,31 @@ pub enum Attach {
     Unwritten,
 }
 
+/// The in-memory step of a window attach, taken by [`attach_window`] and by each binding the roster
+/// verb applies ([`place_and_publish`]): fill an empty window, refuse a different one, and pass a
+/// workspace through the one [`observe_workspace`] seam with the `projects` the caller read in its
+/// own stage-lock hold. `Err` is the window the record already holds. `Ok` says whether the record
+/// changed.
+fn place_in_window(
+    rec: &mut SessionRecord,
+    window: &str,
+    workspace: Option<i64>,
+    projects: &[Project],
+) -> Result<bool, String> {
+    if !rec.window_address.is_empty() && normalize_addr(&rec.window_address) != normalize_addr(window) {
+        return Err(rec.window_address.clone());
+    }
+    let mut changed = false;
+    if rec.window_address.is_empty() {
+        rec.window_address = window.to_string();
+        changed = true;
+    }
+    if let Some(ws) = workspace {
+        changed |= observe_workspace(rec, Some(ws), projects);
+    }
+    Ok(changed)
+}
+
 /// Record the window a session runs in. Filling an empty window is the bind. The same window
 /// again only moves the workspace, through the one `observe_workspace` seam, so the birth default
 /// project is never re-stamped. A different window is refused.
@@ -358,19 +385,10 @@ pub fn attach_window(id: &str, window: &str, workspace: Option<i64>) -> Attach {
         let Some(s) = file.sessions.iter_mut().find(|s| s.session_id == id) else {
             return Attach::NoSession;
         };
-        if !s.window_address.is_empty() && normalize_addr(&s.window_address) != normalize_addr(window) {
-            return Attach::Held {
-                window: s.window_address.clone(),
-            };
-        }
-        let mut changed = false;
-        if s.window_address.is_empty() {
-            s.window_address = window.to_string();
-            changed = true;
-        }
-        if let Some(ws) = workspace {
-            changed |= observe_workspace(s, Some(ws), &projects_now());
-        }
+        let changed = match place_in_window(s, window, workspace, &projects_now()) {
+            Ok(changed) => changed,
+            Err(held) => return Attach::Held { window: held },
+        };
         let bound = Attach::Bound {
             changed,
             workspace: s.workspace,
@@ -441,21 +459,29 @@ pub fn session_window_attach(inv: &Invocation) -> Outcome {
 
 
 
-/// Publish the untracked-terminal roster for these terminal windows: a `shell` record for every
-/// window no tracked session claims, and removal of any `win:*` record whose window has closed.
-/// Returns true iff `sessions.json` changed. Called by [`session_window_roster`].
-fn sync_untracked_terminal_rows(windows: &[TermWindow]) -> bool {
+/// What the roster verb does to the stage, in one stage-lock hold and one write: place the sessions
+/// these windows host (each binding of [`window_bindings`], applied by [`place_in_window`]), then
+/// publish the rest ([`reconcile_untracked_terminals`]): a `shell` record for every terminal window
+/// no session claims, and removal of any `win:*` record whose window has closed or that a session
+/// now claims. The order matters: the reconcile reads the claims the placement just made. Returns
+/// true iff `sessions.json` changed. Called by [`session_window_roster`].
+fn place_and_publish(windows: &[TermWindow]) -> bool {
     with_stage_lock(|| {
         let mut file: SessionsFile = match load_stage(&sessions_path()) {
             Ok(f) => f,
             Err(_) => return false,
         };
-        let (sessions, changed) = reconcile_untracked_terminals(
-            std::mem::take(&mut file.sessions),
-            windows,
-            &projects_now(),
-        );
+        let projects = projects_now();
+        let mut changed = false;
+        for binding in window_bindings(&file.sessions, windows) {
+            if let Some(rec) = file.sessions.iter_mut().find(|s| s.session_id == binding.session) {
+                changed |= place_in_window(rec, &binding.window, binding.workspace, &projects).unwrap_or(false);
+            }
+        }
+        let (sessions, reconciled) =
+            reconcile_untracked_terminals(std::mem::take(&mut file.sessions), windows, &projects);
         file.sessions = sessions;
+        changed |= reconciled;
         if !changed {
             return false;
         }
@@ -515,9 +541,11 @@ pub fn session_show(inv: &Invocation) -> Outcome {
 }
 
 /// `aoide session window roster`, the terminal windows on stdin as a JSON array of `TermWindow`s:
-/// the one reconcile the desktop makes, a `win:*` record for each terminal window no tracked session
-/// claims and the removal of any whose window is gone. Requires aoided. The CLI leg reads stdin once
-/// and forwards it on the payload flag, as `session hook` does.
+/// the one call in which the desktop hands core its windows. Core places the sessions those windows
+/// host ([`window_bindings`]), then gives a `win:*` record to each terminal window no session claims
+/// and removes any whose window is gone or now claimed, in one stage-lock hold and one write.
+/// Requires aoided. The CLI leg reads stdin once and forwards it on the payload flag, as `session
+/// hook` does.
 pub fn session_window_roster(inv: &Invocation) -> Outcome {
     let cmd = "session.window.roster";
     if inv.door != Door::Daemon {
@@ -540,7 +568,7 @@ pub fn session_window_roster(inv: &Invocation) -> Outcome {
         Ok(w) => w,
         Err(e) => return Outcome::usage(cmd, format!("stdin is not a JSON array of terminal windows: {e}")),
     };
-    let changed = sync_untracked_terminal_rows(&windows);
+    let changed = place_and_publish(&windows);
     let out = Outcome::ok(cmd, format!("published {} terminal window(s)", windows.len()))
         .with_data(json!({ "windows": windows.len(), "changed": changed }));
     if changed {
@@ -605,6 +633,111 @@ pub struct TermWindow {
     pub pid: Option<i32>,
     pub mapped: bool,
     pub cwd: String,
+}
+
+/// A session placed in a window: the window it runs in and the workspace that window reports.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WindowBinding {
+    pub session: String,
+    pub window: String,
+    pub workspace: Option<i64>,
+}
+
+/// Which session runs in which window, decided from the windows the desktop handed core and the
+/// process table: the bindings the stage is missing, in record order. Core reads no compositor.
+///
+/// A record with no window is skipped when it is windowless by lineage ([`windowless_by_lineage`]).
+/// Otherwise, with a pid it binds to the window of the nearest ancestor of that pid, the pid itself
+/// first, that owns one; with no pid and a state other than `done` it binds through its stored
+/// `hookAncestry`, to the window of the nearest chain pid that owns one, and only while a process
+/// nearer in the chain stands beneath that owner right now. A chain of dead pids, or of pids reused
+/// outside the owner's tree, binds nothing. Any other record without a window binds nothing. A record
+/// with a window takes that window's workspace from the list, and a window the list lacks, or one
+/// that reports no workspace, leaves it alone.
+///
+/// Of two windows with one owner pid the first listed wins, and a window with a blank address never
+/// matches. A window's class and `mapped` are not read: an app window binds, and so does an unmapped
+/// one. A binding is owed when its window differs from the one the record holds, or when the
+/// workspace is reported and differs from the one the record holds.
+pub fn window_bindings(sessions: &[SessionRecord], windows: &[TermWindow]) -> Vec<WindowBinding> {
+    bindings_by(sessions, windows, pid_ancestry)
+}
+
+/// [`window_bindings`] over a probe for a pid's ancestry, the pid first, so a test feeds it a fake
+/// process tree.
+fn bindings_by(
+    sessions: &[SessionRecord],
+    windows: &[TermWindow],
+    ancestry: impl Fn(i32) -> Vec<i32>,
+) -> Vec<WindowBinding> {
+    let mut bindings = Vec::new();
+    for s in sessions {
+        let (window, workspace) = if s.window_address.is_empty() {
+            if windowless_by_lineage(&s.session_id, sessions) {
+                continue;
+            }
+            let bound = match s.pid {
+                Some(pid) => match_window_and_pid(&ancestry(pid as i32), windows).map(|(window, _)| window),
+                None if s.state != "done" => {
+                    window_for_hook_chain(&s.hook_ancestry, windows, |p, owner| ancestry(p).contains(&owner))
+                }
+                None => None,
+            };
+            let Some(window) = bound else {
+                continue;
+            };
+            let workspace = workspace_of_window(windows, &window);
+            (window, workspace)
+        } else {
+            (s.window_address.clone(), workspace_of_window(windows, &s.window_address))
+        };
+        let moved = workspace.is_some() && workspace != s.workspace;
+        if s.window_address != window || moved {
+            bindings.push(WindowBinding { session: s.session_id.clone(), window, workspace });
+        }
+    }
+    bindings
+}
+
+/// The window of the nearest ancestor that owns one, with that ancestor's pid: the first pid of
+/// `ancestry` that some window reports as its owner, taking the first such window in list order. A
+/// window whose trimmed address is empty never matches. The owner pid is what
+/// [`window_for_hook_chain`] places a chain by.
+fn match_window_and_pid(ancestry: &[i32], windows: &[TermWindow]) -> Option<(String, i32)> {
+    ancestry.iter().find_map(|&pid| {
+        windows
+            .iter()
+            .find(|w| w.pid == Some(pid) && !w.address.trim().is_empty())
+            .map(|w| (w.address.trim().to_string(), pid))
+    })
+}
+
+/// The window a pid-less hosted session is bound to, read off its stored `hookAncestry` (a window
+/// hosts any number of agents, and a harness that never reports a pid is found only through its
+/// chain). The owner is the nearest chain pid that owns a window, the same nearest-ancestor rule
+/// [`match_window_and_pid`] applies to a recorded pid. The chain binds only when a process of its own
+/// stands BENEATH that owner right now: a stale chain whose pids are all dead (the ancestry of a dead
+/// pid is that pid alone) or reused outside the owner's tree binds nothing. `beneath(p, owner)` is
+/// that probe.
+fn window_for_hook_chain(
+    chain: &[i32],
+    windows: &[TermWindow],
+    beneath: impl Fn(i32, i32) -> bool,
+) -> Option<String> {
+    let (window, owner) = match_window_and_pid(chain, windows)?;
+    let at = chain.iter().position(|&p| p == owner)?;
+    chain[..at].iter().any(|&p| beneath(p, owner)).then_some(window)
+}
+
+/// The workspace id the first window at `address` that reports one carries, `0x`- and case-tolerant
+/// like every address comparison ([`normalize_addr`]). `None` when the window is not in the list,
+/// reports no workspace, or `address` is blank: the stored workspace is then left alone.
+fn workspace_of_window(windows: &[TermWindow], address: &str) -> Option<i64> {
+    let want = normalize_addr(address);
+    if want.is_empty() {
+        return None;
+    }
+    windows.iter().filter(|w| normalize_addr(&w.address) == want).find_map(|w| w.workspace)
 }
 
 /// Reconcile the synthetic `win:*` terminal records against the live terminal
@@ -2023,6 +2156,395 @@ mod tests {
         let cli = crate::graph::session_codex_sync(&invocation(&["session", "codex", "sync"], &[]));
         assert_eq!(cli.status, Status::Error);
         assert!(cli.message.contains("aoided must be running"), "{}", cli.message);
+        drop(world);
+    }
+
+    // ---- The placement rule: which session runs in which window ----
+
+    /// A fake process table for [`bindings_by`]: `parents` lists (child, parent) pairs, and a pid's
+    /// ancestry is itself followed by each parent up the table. A pid the table does not list is a
+    /// dead one, whose ancestry is itself alone.
+    fn process_tree(parents: &[(i32, i32)]) -> impl Fn(i32) -> Vec<i32> + '_ {
+        move |pid| {
+            let mut chain = vec![pid];
+            for _ in 0..64 {
+                let Some(&(_, parent)) = parents.iter().find(|&&(child, _)| Some(&child) == chain.last()) else {
+                    break;
+                };
+                chain.push(parent);
+            }
+            chain
+        }
+    }
+
+    /// The bindings [`bindings_by`] decides over the process table `tree`.
+    fn bind(sessions: &[SessionRecord], windows: &[TermWindow], tree: &[(i32, i32)]) -> Vec<WindowBinding> {
+        bindings_by(sessions, windows, process_tree(tree))
+    }
+
+    /// A record that holds no window yet, placed by `pid` or, with none, by its hook `chain`.
+    fn unplaced(id: &str, pid: Option<u32>, chain: &[i32]) -> SessionRecord {
+        SessionRecord {
+            window_address: String::new(),
+            pid,
+            hook_ancestry: chain.to_vec(),
+            ..session(id, "/w", "working", "t", None)
+        }
+    }
+
+    /// A mapped window of `class` that `pid` owns, on `workspace`.
+    fn win(address: &str, class: &str, pid: i32, workspace: Option<i64>) -> TermWindow {
+        TermWindow {
+            address: address.into(),
+            class: class.into(),
+            pid: Some(pid),
+            workspace,
+            mapped: true,
+            ..Default::default()
+        }
+    }
+
+    fn binding(session: &str, window: &str, workspace: Option<i64>) -> WindowBinding {
+        WindowBinding { session: session.into(), window: window.into(), workspace }
+    }
+
+    /// The nearest ancestor that owns a window decides, whatever order the windows are listed in.
+    #[test]
+    fn a_pid_binds_to_the_window_of_its_nearest_ancestor() {
+        let tree = [(100, 42), (42, 7)];
+        let rec = [unplaced("s", Some(100), &[])];
+        let windows = [win("0xFAR", "kitty", 42, Some(1)), win("0xNEAR", "kitty", 100, Some(2))];
+        assert_eq!(bind(&rec, &windows, &tree), [binding("s", "0xNEAR", Some(2))]);
+        // With no window of its own, the next ancestor's is the one.
+        assert_eq!(bind(&rec, &windows[..1], &tree), [binding("s", "0xFAR", Some(1))]);
+    }
+
+    /// Two windows with one owner pid: the first in list order is the one.
+    #[test]
+    fn windows_that_share_a_pid_bind_the_first_in_list_order() {
+        let rec = [unplaced("s", Some(42), &[])];
+        let one = win("0xONE", "kitty", 42, Some(1));
+        let two = win("0xTWO", "kitty", 42, Some(2));
+        assert_eq!(bind(&rec, &[one.clone(), two.clone()], &[]), [binding("s", "0xONE", Some(1))]);
+        assert_eq!(bind(&rec, &[two, one], &[]), [binding("s", "0xTWO", Some(2))]);
+    }
+
+    /// No ancestor owns a window, or the window an ancestor owns has a blank address: nothing
+    /// binds, and a blank address never stands in front of a farther owner's window.
+    #[test]
+    fn a_pid_with_no_window_to_bind_gets_none() {
+        let tree = [(100, 42), (42, 7)];
+        let rec = [unplaced("s", Some(100), &[])];
+        assert!(bind(&rec, &[win("0xX", "kitty", 5, Some(1))], &tree).is_empty(), "no ancestor owns it");
+        for blank in ["", "   "] {
+            let windows = [win(blank, "kitty", 42, Some(1))];
+            assert!(bind(&rec, &windows, &tree).is_empty(), "a window at {blank:?} binds nothing");
+        }
+        let windows = [
+            win("", "kitty", 100, Some(1)),
+            win("  ", "kitty", 100, Some(1)),
+            win("0xOK", "kitty", 42, Some(3)),
+        ];
+        assert_eq!(bind(&rec, &windows, &tree), [binding("s", "0xOK", Some(3))]);
+        assert!(bind(&rec, &[], &tree).is_empty(), "no windows");
+        assert!(bind(&[], &windows, &tree).is_empty(), "no records");
+    }
+
+    /// A window's class and `mapped` are not read: an app window binds by pid, and so does an
+    /// unmapped one.
+    #[test]
+    fn an_app_window_and_an_unmapped_window_bind_by_pid() {
+        let app = win("0xAPP", "com.example.App", 10, Some(1));
+        let hidden = TermWindow { mapped: false, ..win("0xHID", "kitty", 20, Some(2)) };
+        let recs = [unplaced("a", Some(10), &[]), unplaced("h", Some(20), &[])];
+        assert_eq!(
+            bind(&recs, &[hidden, app], &[]),
+            [binding("a", "0xAPP", Some(1)), binding("h", "0xHID", Some(2))]
+        );
+    }
+
+    /// The match returns the owner's pid with the window: a hook chain is placed by it.
+    #[test]
+    fn the_match_returns_the_owning_pid_with_its_window() {
+        let windows = [win("0xKITTY", "kitty", 42, None), win("0xOTHER", "firefox", 999, None)];
+        assert_eq!(match_window_and_pid(&[100, 42, 7], &windows), Some(("0xKITTY".to_string(), 42)));
+        assert_eq!(match_window_and_pid(&[5], &windows), None);
+        assert_eq!(match_window_and_pid(&[], &windows), None);
+        assert_eq!(match_window_and_pid(&[42], &[]), None);
+    }
+
+    /// A harness (1137986) under a desktop app (867785) whose window's class is not a terminal's:
+    /// the owner is found by pid alone, whatever the class.
+    #[test]
+    fn a_desktop_chain_binds_to_its_app_window_not_a_terminal() {
+        let windows = [win("0x639050c25000", "com.example.App", 867785, Some(3))];
+        let tree = [(1137986, 867785), (867785, 1454)];
+        let hosted = [unplaced("h", None, &[119735, 1137986, 867785, 1454])];
+        assert_eq!(bind(&hosted, &windows, &tree), [binding("h", "0x639050c25000", Some(3))]);
+    }
+
+    /// A chain whose pids are dead has nothing beneath its owner, so it binds nothing.
+    #[test]
+    fn a_stale_chain_with_nothing_beneath_its_owner_binds_nothing() {
+        let windows = [win("0xAA", "com.example.App", 867785, Some(3))];
+        let tree = [(867785, 1454)];
+        let hosted = [unplaced("h", None, &[2_000_000_000, 2_000_000_001, 867785, 1454])];
+        assert!(bind(&hosted, &windows, &tree).is_empty());
+    }
+
+    /// The owner is a pid of the stored chain. A window owned by a live ancestor of a chain pid, that
+    /// the chain itself never names, is no owner.
+    #[test]
+    fn a_chain_with_no_owner_window_binds_nothing() {
+        let windows = [win("0xAA", "com.example.App", 999, Some(3))];
+        let tree = [(1, 2), (2, 999)];
+        assert!(bind(&[unplaced("h", None, &[1, 2, 3])], &windows, &tree).is_empty());
+    }
+
+    #[test]
+    fn the_nearest_owner_wins_over_a_farther_one() {
+        let windows = [win("0xFAR", "com.example.App", 900, Some(1)), win("0xNEAR", "kitty", 500, Some(2))];
+        let tree = [(10, 500), (500, 900)];
+        assert_eq!(
+            bind(&[unplaced("h", None, &[10, 500, 900])], &windows, &tree),
+            [binding("h", "0xNEAR", Some(2))]
+        );
+    }
+
+    /// An owner at the head of the chain has no chain process beneath it, itself included.
+    #[test]
+    fn an_owner_at_the_head_of_the_chain_has_nothing_beneath_it() {
+        let windows = [win("0xAA", "kitty", 500, Some(3))];
+        let tree = [(500, 1)];
+        assert!(bind(&[unplaced("h", None, &[500, 1])], &windows, &tree).is_empty());
+    }
+
+    /// A done record binds nothing by its chain, and the same record not done binds. A done record
+    /// that holds a pid is placed by it, like any other.
+    #[test]
+    fn a_done_record_binds_nothing_by_its_chain() {
+        let windows = [win("0xAA", "com.example.App", 867785, Some(3))];
+        let tree = [(1137986, 867785)];
+        let chain = [1137986, 867785];
+        let done = SessionRecord { state: "done".into(), ..unplaced("done", None, &chain) };
+        assert_eq!(
+            bind(&[done.clone(), unplaced("live", None, &chain)], &windows, &tree),
+            [binding("live", "0xAA", Some(3))]
+        );
+        let held = SessionRecord { pid: Some(1137986), ..done };
+        assert_eq!(bind(&[held], &windows, &tree), [binding("done", "0xAA", Some(3))]);
+    }
+
+    /// A conducted headless wrap and a child of one are windowless by construction: they bind to no
+    /// window, though a window of their own pid is there to take. A record outside that lineage
+    /// binds.
+    #[test]
+    fn a_record_windowless_by_lineage_binds_nothing() {
+        let wrap = SessionRecord { conductable: Some(true), headless: true, ..unplaced("wrap", Some(100), &[]) };
+        let child = SessionRecord { parent_session_id: Some("wrap".into()), ..unplaced("child", Some(200), &[]) };
+        let free = unplaced("free", Some(300), &[]);
+        let windows = [
+            win("0xW", "kitty", 100, Some(1)),
+            win("0xC", "kitty", 200, Some(1)),
+            win("0xF", "kitty", 300, Some(1)),
+        ];
+        assert_eq!(bind(&[wrap, child, free], &windows, &[]), [binding("free", "0xF", Some(1))]);
+    }
+
+    /// A record with a window follows the workspace its window reports: a move is one binding to
+    /// the stored window with the new workspace. The same workspace, none reported, a window the
+    /// list lacks and no windows at all give none.
+    #[test]
+    fn a_bound_record_is_bound_again_only_for_a_workspace_its_window_newly_reports() {
+        let held = |ws: Option<i64>| SessionRecord {
+            window_address: "0xA".into(),
+            workspace: ws,
+            ..session("s", "/w", "working", "t", None)
+        };
+        // The list spells the window in lower case: the stored spelling is the binding's.
+        let at = |ws: Option<i64>| [win("0xa", "kitty", 5, ws)];
+        assert_eq!(bind(&[held(Some(1))], &at(Some(3)), &[]), [binding("s", "0xA", Some(3))]);
+        assert_eq!(bind(&[held(None)], &at(Some(3)), &[]), [binding("s", "0xA", Some(3))]);
+        assert!(bind(&[held(Some(3))], &at(Some(3)), &[]).is_empty(), "the same workspace");
+        assert!(bind(&[held(Some(3))], &at(None), &[]).is_empty(), "no workspace reported");
+        assert!(bind(&[held(Some(3))], &[win("0xB", "kitty", 5, Some(9))], &[]).is_empty(), "another window");
+        assert!(bind(&[held(Some(3))], &[], &[]).is_empty(), "no windows");
+    }
+
+    /// A record that let go of its window (a closed window releases the claim and keeps the
+    /// workspace) binds again though its workspace did not move, whether or not the window reports
+    /// one.
+    #[test]
+    fn a_record_that_lost_its_window_binds_again_though_its_workspace_did_not_move() {
+        let released = SessionRecord { workspace: Some(3), ..unplaced("s", Some(5), &[]) };
+        assert_eq!(
+            bind(&[released.clone()], &[win("0xA", "kitty", 5, Some(3))], &[]),
+            [binding("s", "0xA", Some(3))]
+        );
+        assert_eq!(bind(&[released], &[win("0xA", "kitty", 5, None)], &[]), [binding("s", "0xA", None)]);
+    }
+
+    /// The workspace lookup is `0x`- and case-tolerant, and a special workspace's negative id comes
+    /// back verbatim. A window the list lacks, a blank address and a window that reports no
+    /// workspace find none, and the first window that reports one wins.
+    #[test]
+    fn the_workspace_lookup_tolerates_0x_and_case() {
+        let windows = [
+            win("0x55aabb", "kitty", 1, Some(3)),
+            win("0x1234ef", "kitty", 2, Some(7)),
+            win("0xdeadbe", "kitty", 3, Some(-99)),
+        ];
+        assert_eq!(workspace_of_window(&windows, "0x55aabb"), Some(3));
+        assert_eq!(workspace_of_window(&windows, "55AABB"), Some(3));
+        assert_eq!(workspace_of_window(&windows, "0X1234EF"), Some(7));
+        assert_eq!(workspace_of_window(&windows, "0xdeadbe"), Some(-99));
+        assert_eq!(workspace_of_window(&windows, "0xnope"), None);
+        assert_eq!(workspace_of_window(&windows, ""), None);
+
+        let silent = [
+            win("0xaa", "kitty", 1, None),
+            win("0xAA", "kitty", 2, Some(4)),
+            win("0xaa", "kitty", 3, Some(5)),
+            win("", "kitty", 4, Some(9)),
+        ];
+        assert_eq!(workspace_of_window(&silent, "0xaa"), Some(4));
+        assert_eq!(workspace_of_window(&silent, ""), None, "a blank address finds nothing");
+        assert_eq!(workspace_of_window(&silent[..1], "0xaa"), None, "a window that reports none");
+    }
+
+    /// `window_bindings` reads the real process table: a record whose pid is this process binds to
+    /// the window of this process's parent, and so does a hosted record whose chain runs from this
+    /// process up to that parent.
+    #[test]
+    fn window_bindings_reads_the_real_process_tree() {
+        let me = std::process::id();
+        let parent = *pid_ancestry(me as i32).get(1).expect("this test process has a parent above init");
+        let recs = [unplaced("by-pid", Some(me), &[]), unplaced("by-chain", None, &[me as i32, parent])];
+        let windows = [win("0xPARENT", "com.example.App", parent, Some(2))];
+        assert_eq!(
+            window_bindings(&recs, &windows),
+            [binding("by-pid", "0xPARENT", Some(2)), binding("by-chain", "0xPARENT", Some(2))]
+        );
+    }
+
+    // ---- The roster verb places before it publishes ----
+
+    /// A project bound to workspace 3, a tracked session with no window and no pid, and a roster that
+    /// lists one kitty window on workspace 3 owned by this test process. The first roster call
+    /// publishes the window as a `win:*` record, since no session can be placed in it. Then the
+    /// session gets this process's pid, so the next call can place it. Returns the world and the
+    /// roster payload.
+    fn a_terminal_published_before_its_session_can_be_placed(tag: &str) -> (WindowWorld, String) {
+        let world = window_world(tag);
+        let project = Project { name: "aoide".into(), workspaces: vec![3], ..Default::default() };
+        write_stage(&projects_path(), &ProjectsFile { schema_version: "0".into(), projects: vec![project] }).unwrap();
+        let tracked = SessionRecord { window_address: String::new(), ..session("tracked", "/w", "working", "t", None) };
+        write_stage(&sessions_path(), &SessionsFile { schema_version: "0".into(), sessions: vec![tracked] }).unwrap();
+        let window = TermWindow {
+            address: "0xTERM".into(),
+            class: "kitty".into(),
+            title: String::new(),
+            workspace: Some(3),
+            pid: Some(std::process::id() as i32),
+            mapped: true,
+            cwd: "/w".into(),
+        };
+        let payload = serde_json::to_string(&vec![window]).unwrap();
+
+        let first = session_window_roster(&roster_door(Some(&payload)));
+        assert_eq!(first.data.as_ref().unwrap()["changed"], json!(true));
+        let mut file: SessionsFile = load_stage(&sessions_path()).unwrap();
+        assert!(
+            file.sessions.iter().any(|s| s.session_id == "win:term"),
+            "no session can be placed yet, so the window is published"
+        );
+        file.sessions.iter_mut().find(|s| s.session_id == "tracked").unwrap().pid = Some(std::process::id());
+        write_stage(&sessions_path(), &file).unwrap();
+        (world, payload)
+    }
+
+    /// The roster verb binds a tracked session to its terminal window, and the `win:*` row that
+    /// window had is gone in the same call: no row names it afterwards. The birth default project
+    /// is stamped as an attach stamps it, and a second identical roster changes nothing.
+    #[test]
+    fn the_roster_verb_binds_a_session_to_its_window_and_retires_the_terminal_row_in_one_call() {
+        let (world, payload) = a_terminal_published_before_its_session_can_be_placed("window-roster-binds");
+
+        let out = session_window_roster(&roster_door(Some(&payload)));
+        assert_eq!(out.status, Status::Ok);
+        assert_eq!(out.data.as_ref().unwrap()["changed"], json!(true));
+        assert!(!out.changed.is_empty());
+        let after: SessionsFile = load_stage(&sessions_path()).unwrap();
+        let ids: Vec<&str> = after.sessions.iter().map(|s| s.session_id.as_str()).collect();
+        assert_eq!(ids, ["tracked"], "the terminal row is retired in the call that binds its window");
+        let tracked = &after.sessions[0];
+        assert_eq!(tracked.window_address, "0xTERM");
+        assert_eq!(tracked.workspace, Some(3));
+        assert_eq!(tracked.workspace_project.as_deref(), Some("aoide"));
+
+        let again = session_window_roster(&roster_door(Some(&payload)));
+        assert_eq!(again.data.as_ref().unwrap()["changed"], json!(false), "the same roster changes nothing");
+        assert!(again.changed.is_empty());
+        drop(world);
+    }
+
+    /// Counts the atomic writes of the paths it watches.
+    struct CountWrites(std::sync::atomic::AtomicUsize);
+
+    impl aoide_storage::fs::WriteWatch for CountWrites {
+        fn around_write(
+            &self,
+            _path: &std::path::Path,
+            rename: &mut dyn FnMut() -> std::io::Result<()>,
+        ) -> std::io::Result<()> {
+            self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            rename()
+        }
+    }
+
+    /// A roster that binds a session and retires a terminal row writes `sessions.json` once, and one
+    /// that changes nothing writes it not at all.
+    #[test]
+    fn the_roster_verb_writes_sessions_json_once_for_a_bind_and_a_reconcile() {
+        let (world, payload) = a_terminal_published_before_its_session_can_be_placed("window-roster-once");
+        let writes = std::sync::Arc::new(CountWrites(std::sync::atomic::AtomicUsize::new(0)));
+        let watch: std::sync::Arc<dyn aoide_storage::fs::WriteWatch> = writes.clone();
+        aoide_storage::fs::watch_writes(vec![sessions_path()], std::sync::Arc::downgrade(&watch));
+        let seen = || writes.0.load(std::sync::atomic::Ordering::SeqCst);
+
+        let out = session_window_roster(&roster_door(Some(&payload)));
+        assert_eq!(out.data.as_ref().unwrap()["changed"], json!(true));
+        assert_eq!(seen(), 1, "the bind and the reconcile are one write");
+
+        let again = session_window_roster(&roster_door(Some(&payload)));
+        assert_eq!(again.data.as_ref().unwrap()["changed"], json!(false));
+        assert_eq!(seen(), 1, "a roster that changes nothing writes nothing");
+        drop(world);
+    }
+
+    /// A bind alone is a change: a session placed in a window that is no terminal, so the reconcile
+    /// has no `win:*` record to make or retire, is still written, once, and the verb says it changed.
+    #[test]
+    fn the_roster_verb_writes_a_bind_that_reconciles_nothing() {
+        let world = window_world("window-roster-bind-only");
+        let me = std::process::id();
+        let parent = *pid_ancestry(me as i32).get(1).expect("this test process has a parent above init");
+        let tracked =
+            SessionRecord { window_address: String::new(), pid: Some(me), ..session("tracked", "/w", "working", "t", None) };
+        write_stage(&sessions_path(), &SessionsFile { schema_version: "0".into(), sessions: vec![tracked] }).unwrap();
+        let payload = serde_json::to_string(&vec![win("0xAPP", "com.example.App", parent, Some(3))]).unwrap();
+        let writes = std::sync::Arc::new(CountWrites(std::sync::atomic::AtomicUsize::new(0)));
+        let watch: std::sync::Arc<dyn aoide_storage::fs::WriteWatch> = writes.clone();
+        aoide_storage::fs::watch_writes(vec![sessions_path()], std::sync::Arc::downgrade(&watch));
+
+        let out = session_window_roster(&roster_door(Some(&payload)));
+        assert_eq!(out.data.as_ref().unwrap()["changed"], json!(true), "a bind alone is a change");
+        assert!(!out.changed.is_empty());
+        let after: SessionsFile = load_stage(&sessions_path()).unwrap();
+        assert_eq!(after.sessions.len(), 1, "an app window gets no terminal record");
+        assert_eq!(after.sessions[0].window_address, "0xAPP");
+        assert_eq!(after.sessions[0].workspace, Some(3));
+        assert_eq!(writes.0.load(std::sync::atomic::Ordering::SeqCst), 1);
         drop(world);
     }
 }

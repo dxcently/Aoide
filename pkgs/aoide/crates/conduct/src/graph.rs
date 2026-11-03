@@ -307,7 +307,7 @@ pub use self::node_list::node_list;
 pub use self::job::{job_add, job_list, job_remove, job_runs, jobs_path};
 pub use self::window::{
     pid_ancestry, session_show, session_window_attach, session_window_closed, session_window_roster,
-    windowless_by_lineage, TermWindow,
+    window_bindings, windowless_by_lineage, TermWindow, WindowBinding,
 };
 // `workspace set/clear/list/root` — the workspace ↔ project binding
 // (`graph/workspace.rs`'s own module doc). Bindings live on the project

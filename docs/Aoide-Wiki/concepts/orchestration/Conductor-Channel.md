@@ -51,8 +51,9 @@ channel's shape: one PTY, one control socket, one gated door per session.
   with dispatch-on-Enter (the `L` link handler, `app.rs:652-664,724-786`),
   and one audited `Door::Cli` dispatch seam (`app.rs:522-534`).
 - `session_wrap`/`session_conduct` pass `windowAddress: None` at spawn time
-  (`graph.rs`) — the cue path only gets an address later, from the event
-  listener or hook backfill (see [[Terminal-Commander]]).
+  (`graph.rs`) — the cue path only gets an address later, when core places
+  the session in a window the event listener reported (see
+  [[Terminal-Commander]]).
 
 ## Architecture — the PTY lives in the wrap process
 
@@ -107,7 +108,8 @@ threads `AOIDE_SESSION_ID`, already blocks on `wait()`.
   <name>` resolves a local id/tail4/petname or a `node/<query>` instead of a
   raw `--id`; a node-resolved send is always attempted over A2A rather than
   queued locally; the receiving node parks it — see [[Node-Federation]].
-- **Title discovery** — a small hyprctl step (`hyprctl clients -j`, match the
+- **Title discovery** — a small step over the compositor's client list
+  (`hyprctl clients -j`, handed to core by the desktop; core matches the
   session's process to a client) populates `windowAddress` and reads the
   live chat title claude already writes to its terminal window, so
   un-conducted sessions still label correctly.
@@ -438,8 +440,8 @@ surprising a bare `claude`.
    through `dispatch.rs`'s registry lookup (two-doors-one-schema); the PTY
    multiplexer + per-session socket + injection; the aoided gate
    (pending/autogate/audit).
-2. **Discovery** — hyprctl-client match populates `windowAddress` and reads
-   live chat titles.
+2. **Discovery** — core's placement over the compositor's clients populates
+   `windowAddress` and reads live chat titles.
 3. **Interactive conductor** — `InputKind::Send`, key arm, label-by-title,
    conductable + pending rendering, approve/deny keys.
 4. **Ergonomics + docs** — the aoide-specific conduct alias; wiki updates to

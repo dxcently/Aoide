@@ -3295,10 +3295,83 @@ mod tests {
     }
 
     #[test]
+    fn stage_from_templates_drops_a_baked_entry_the_generator_has_no_slot_for() {
+        // The stale-entry bug this pins. `dusk` is built in, so the baked baseline
+        // carries its manifest entry. Its machine copy declares no slot, so the
+        // generator answers a registry entry for it and no manifest entry. The merge
+        // must drop the baked key too: keeping it stages a manifest that names a slot
+        // owner the machine copy no longer declares.
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _s = EnvSaver::capture(&[
+            "AOIDE_STAGE_DIR",
+            "AOIDE_FLAKE_ROOT",
+            "STRILLIX_TEMPLATES",
+            "PATH",
+            crate::widgets::RICES_EVAL_FIXTURE_VAR,
+        ]);
+        std::env::remove_var(crate::widgets::RICES_EVAL_FIXTURE_VAR);
+        let _armed = crate::commands::test_support::require_the_real_rices_path();
+        let (root, stage, run_qml, payload) = templates_fallback_tmp("stage-stale-baked-key");
+        aoide_test_support::pin_stage(&stage);
+        std::env::set_var("AOIDE_FLAKE_ROOT", root.join("no-flake"));
+        std::env::set_var("STRILLIX_TEMPLATES", root.join("templates"));
+
+        let templates = root.join("templates");
+        std::fs::write(
+            templates.join("builtin.json"),
+            json!({ "rices": ["dusk"], "packages": [] }).to_string(),
+        )
+        .unwrap();
+        std::fs::write(
+            templates.join("manifest.json"),
+            json!({ "dusk": { "dusk": { "owner": "dusk", "file": "dusk.qml" } } }).to_string(),
+        )
+        .unwrap();
+        std::fs::write(
+            templates.join("registry.json"),
+            json!({ "dusk": { "dusk": { "kind": "dock", "order": 0 } } }).to_string(),
+        )
+        .unwrap();
+        // No shipped `dusk` folder beside the baseline, so the machine copy differs and
+        // the stage takes the generator path.
+
+        let rice = crate::paths::rice_dir("dusk");
+        std::fs::create_dir_all(rice.join("widgets")).unwrap();
+        std::fs::write(rice.join("theme.json"), VALID_NOTES).unwrap();
+        std::fs::write(rice.join("widgets").join("bar.qml"), "// bar\n").unwrap();
+
+        // What the generator answers for that machine copy: the registry names `dusk`,
+        // and the manifest has no entry for it.
+        std::fs::write(
+            &payload,
+            json!({
+                "manifest": {},
+                "registry": { "dusk": { "dusk": { "kind": "dock", "order": 0 } } },
+                "packages": { "dusk": [] },
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let out = handle_rice_stage(&inv(&["rice", "stage"], &["dusk"]));
+        assert_eq!(out.status, Status::Ok, "{:?}", out.data);
+
+        let manifest: Value = serde_json::from_str(
+            &std::fs::read_to_string(run_qml.join("rices").join("manifest.json")).unwrap(),
+        )
+        .unwrap();
+        assert!(
+            manifest.get("dusk").is_none(),
+            "the baked dusk key is gone: the generator gave dusk no manifest entry: {manifest:?}"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn stage_evaluates_the_shipped_generator_with_the_machine_rices_and_no_flake() {
         // §9(a): the generator is a plain FILE eval of the SHIPPED
         // `nix/manifest.nix` (found through the templates dir this binary
-        // resolves), its rices argument is the MACHINE's own root, and its
+        // resolves), its ricesRoot argument is the MACHINE's own root, and its
         // argv carries no flake ref and no checkout path — that is what makes
         // the runtime offline and its result a function of the machine.
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -3348,7 +3421,19 @@ mod tests {
         );
         assert!(
             argv.contains(&crate::paths::rices_root().to_string_lossy().to_string()),
-            "the rices argument is the MACHINE's own root: {argv}"
+            "the ricesRoot argument is the MACHINE's own root: {argv}"
+        );
+        let named_root = format!(
+            "ricesRoot = \"{}\"",
+            crate::paths::rices_root().to_string_lossy(),
+        );
+        assert!(
+            argv.contains(&named_root),
+            "the argument is named `ricesRoot`, the name manifest.nix takes: {argv}"
+        );
+        assert!(
+            !argv.contains("rices = "),
+            "no argument is named `rices`; the generator takes `ricesRoot`: {argv}"
         );
         assert!(
             !argv.contains(&checkout.to_string_lossy().to_string()),

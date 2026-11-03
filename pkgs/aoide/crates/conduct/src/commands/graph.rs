@@ -553,7 +553,7 @@ pub fn register(r: &mut Registry) {
     ));
     r.insert(cmd!(
         path: ["session", "window", "roster"],
-        summary: "Publish the terminal windows the desktop sees. The window list is read from stdin as a JSON array of window objects (address, class, title, workspace, pid, mapped, cwd); every terminal window no tracked session claims gets a `win:*` record, and a `win:*` record whose window is gone is removed. Idempotent: an unchanged roster changes nothing. Requires aoided.",
+        summary: "Hand core the windows the desktop sees. The window list is read from stdin as a JSON array of window objects (address, class, title, workspace, pid, mapped, cwd). Core first places the sessions those windows host: a session with no window binds to the window of its pid or hook chain, and a bound session takes the workspace its window reports. It then publishes the rest: every terminal window no tracked session claims gets a `win:*` record, and a `win:*` record whose window is gone or now claimed is removed. All of it is one stage write. Idempotent: an unchanged roster changes nothing. Requires aoided.",
         args: [],
         flags: [],
         gated: false,

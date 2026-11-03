@@ -688,8 +688,8 @@ blank one is refused too.
   be read.
 
 - `graph/window.rs` — the session window record (`session window attach`,
-  `session window closed`, `session window roster`, the untracked-terminal
-  reconciler) PLUS the
+  `session window closed`, `session window roster`, the placement rule
+  `window_bindings`, the untracked-terminal reconciler) PLUS the
   automatic-parenting seam (task #89):
   `is_windowless_wrap` (a conducted record is windowless when `headless` is
   set OR its own `windowAddress` is empty — `headless` overrides a stray
@@ -743,16 +743,23 @@ blank one is refused too.
   own alive outside that record's chain, and the two chains meet at the same
   depth. A record with no chain is a twin only when it holds a pid. Both passes call that one rule. See AGENTS.md's invariants for the full reasoning
   and every site that must agree: the listener self-check, the chain
-  fill (`ensure_session_chain`), and the desktop's window sweep.
-  Core binds no window. A window is a fact the desktop reports: `session window
-  attach <id> <address> [--workspace <n>]` fills an empty window, moves the
-  workspace when the same window reports again, and refuses a second window while
-  the first one is held. A closed window is reported by `session window closed <address>`: the
+  fill (`ensure_session_chain`), and the placement rule (`window_bindings`).
+  A window is a fact the desktop reports, and which session runs in it is
+  core's decision: `window_bindings` places a session in a window from the
+  windows it is handed (the nearest ancestor of its pid that owns one, or the
+  owner beneath which its hook chain still runs) and follows the workspace
+  that window reports. The desktop's sweep asks it and records each answer
+  as `session window attach <id> <address> [--workspace <n>]`, which fills an
+  empty window, moves the workspace when the same window reports again, and
+  refuses a second window while the first one is held. A closed window is
+  reported by `session window closed <address>`: the
   reaper judges the sessions that ran in it at once (`reap::reap_closed_window`),
   sparing one a live harness still anchors, and releases every claim on it. The
   desktop's terminal roster arrives as `session window roster` (a JSON array of
-  terminal windows on stdin) and reconciles the `win:*` records. Core reads no
-  compositor and stamps no owner pid.
+  terminal windows on stdin): core applies the placement to the sessions those
+  windows host, then reconciles the `win:*` records over the claims it just
+  made, in one stage-lock hold and one write. Core reads no compositor and
+  stamps no owner pid.
   `hookAncestry` is filled and healed by a per-turn hook through
   `ensure_session_chain`: a chainless record takes the hook's chain unless a live
   process of its own holds it outside that chain, and a stored chain is replaced
@@ -760,10 +767,11 @@ blank one is refused too.
   walk from the hook pid (`hook_chain`, at most 8 pids). The heal reads
   `sessions.json` once, walks the process table once, and writes only on a change.
   It never writes `pid`, `windowAddress` or `state`.
-  A pid-less hosted session binds through the desktop's sweep (strillix's
-  `hypr/sweep.rs`), which walks the record's stored chain: the nearest chain pid
-  that owns a client is the owner, and the session binds while a live process of
-  its own chain stands beneath that owner. Core never performs that walk.
+  A pid-less hosted session binds through the placement rule
+  (`window_bindings`, which the roster verb applies and the desktop's sweep
+  asks), which walks the record's stored chain: the nearest chain pid that owns
+  a window is the owner, and the session binds while a live process of its own
+  chain stands beneath that owner. The walk writes no pid.
   Residuals. A hand-run hook under an `aoide conduct` wrap or a multiplexer server
   takes that process as its harness, since the plumbing list names shells and
   forwarding launchers only. A hook behind `timeout`, `script`, `nix`, `su`, `doas`
@@ -784,8 +792,8 @@ blank one is refused too.
   (`session_store.rs`) refuse a `kind:"app"` record outright rather than
   stamp some other state onto it, so `apply_codex_capture` really is the
   only writer, not just the only one anything happens to call today
-  (P-CX-5 S3b). `windowAddress`/`workspace` are left empty for the desktop's window
-  sweep to fill — this module reads no compositor.
+  (P-CX-5 S3b). `windowAddress`/`workspace` are left empty for the placement
+  rule (`window_bindings`) to fill — this module reads no compositor.
 
   Discovery (P-CX-2) is one Unix lock probe and one parsed `ps` table, with
   no per-OS second path; where the probe is not implemented it answers
@@ -982,7 +990,7 @@ blank one is refused too.
   cannot be read right now says nothing about liveness, so the pass carries
   on with `None` for that one session rather than voiding every observation.
   `windowAddress`/`workspace` are left empty
-  for the existing `resolve_pending_sessions_windows` sweep to fill, exactly
+  for the placement rule (`window_bindings`) to fill, exactly
   as codex's own module leaves them.
 
   Discovery is read-only over `$XDG_RUNTIME_DIR/eidolon/<id>/{meta.json,

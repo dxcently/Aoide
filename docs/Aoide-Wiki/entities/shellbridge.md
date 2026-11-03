@@ -239,14 +239,16 @@ stamping `parentSessionId` at spawn time.
 **Authoritative window capture.** Alongside the socket accept loop, `strillix
 shellbridge --run` spawns a background thread that reads Hyprland's`socket2` event stream (`$XDG_RUNTIME_DIR/hypr/
 $HYPRLAND_INSTANCE_SIGNATURE/.socket2.sock`). On each window lifecycle
-event it keeps `sessions.json` authoritative: an `openwindow` (re-checked on
-`movewindow`/`movewindowv2`/`windowtitle`) resolves any tracked session
+event it reads the client list (`j/clients` on the request socket) and asks
+core where each tracked session runs, and core keeps `sessions.json`
+authoritative: an `openwindow` (re-checked on
+`movewindow`/`movewindowv2`/`windowtitle`) places any tracked session
 still missing its `windowAddress` by walking that session's recorded `pid`
-up the `/proc` ppid chain and matching an ancestor against the client list (`j/clients`
-on the request socket), then stamping the client's canonical `0x…` address via the atomic
-graph writer. A pid-less hosted session (the hook-only shape) resolves the
-same way through its stored `hookAncestry`: the nearest chain pid that owns a
-client is the owner, and the session binds while any live process of its own chain, a tab shell included, stands beneath that owner. A chain whose processes have all exited binds nothing until the next per-turn hook from a live harness replaces it, and the sweep never writes a pid. A `closewindow` clears that address off whatever session held
+up the `/proc` ppid chain and matching an ancestor against those windows; the
+sweep records the placement through `aoide session window attach`, which
+stamps the client's canonical `0x…` address. A pid-less hosted session (the
+hook-only shape) is placed the same way through its stored `hookAncestry`: the
+nearest chain pid that owns a client is the owner, and the session binds while any live process of its own chain, a tab shell included, stands beneath that owner. A chain whose processes have all exited binds nothing until the next per-turn hook from a live harness replaces it, and no pid is ever written. A `closewindow` clears that address off whatever session held
 it. The lazy hook-time backfill alone leaves the address frequently empty
 at click time, so capturing it at window-creation time keeps the
 [[Terminal-Commander]] jump reliable. The listener reuses the same

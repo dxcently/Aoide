@@ -105,7 +105,7 @@ in
 
     # name -> rice directory, the rices's registry. The rice hook sets it
     # (lib/rices.nix's `riceDirs`) so a merged rices's rices come from
-    # the input books; a host that wires only `rices` gets the directory's
+    # the input books; a host that wires only `ricesRoot` gets the directory's
     # own discovery, at the lower priority the hook's value overrides.
     _module.args.riceDirs =
       lib.mkDefault

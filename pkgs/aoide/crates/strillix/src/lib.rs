@@ -34,8 +34,7 @@ pub fn run_strillix(argv: &[String]) -> i32 {
         // `mcp serve --stdio` is a long-running server, not a one-shot
         // dispatch. The registry + dispatcher are injected here (the DI
         // seam `aoide-server`'s module doc comment explains) — STRILLIX's own
-        // assembled registry, not core's, so the tool list matches strillix's
-        // 42-path bundle.
+        // assembled registry, not core's, so the tool list matches strillix's own bundle.
         if inv.path == ["mcp", "serve"] && inv.flag_present("stdio") {
             return Some(match aoide_server::mcp::serve_stdio(dispatch::registry(), dispatch::dispatch) {
                 Ok(()) => output::exit::OK,
