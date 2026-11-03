@@ -123,6 +123,7 @@ fn lives_apart(
 ///     same depth in both chains: yes (the same process position);
 ///   - otherwise, including no shared pid at all: no (the new run is nested
 ///     beneath `old`, or another shape).
+///
 /// Both eviction passes call this, so registration and the reaper agree.
 pub(crate) fn superseded_by(
     old: &SessionRecord,
@@ -300,6 +301,7 @@ pub(in crate::graph) fn do_session_start(
 /// An id in the reserved `sub:` namespace is refused before either
 /// ([`reserved_id_refusal`]). The `bool` is true for those three answers, so the
 /// caller lands nothing after them either.
+#[allow(clippy::too_many_arguments)]
 pub(in crate::graph) fn do_hook_session_start(
     door: aoide_protocol::Door,
     id: &str,
@@ -1101,6 +1103,7 @@ pub(in crate::graph) fn stamp_wrap(id: &str, is_shell: bool, program: Option<Str
 ///     record from the DOOR that authenticated the node name, never
 ///     threaded through the child's env at all. This is the only place a
 ///     `node:*` value may originate.
+///
 /// The raw field is attribution, not authentication: a same-uid process
 /// can still forge a LOCAL-class origin. The authenticated form is the
 /// sealed credential (`stamp_seal` below, P-ID1/P-ID2) — a consumer gates
@@ -1584,7 +1587,8 @@ pub(crate) fn refresh_subagent_says(
         return false;
     };
     // (sub_id, say, model, tool) — any of the three may be None for a given sub.
-    let mut updates: Vec<(String, Option<String>, Option<String>, Option<String>)> = Vec::new();
+    type SubUpdate = (String, Option<String>, Option<String>, Option<String>);
+    let mut updates: Vec<SubUpdate> = Vec::new();
     for sub_id in &subs {
         let Some(tuid) = sub_id.strip_prefix("sub:") else {
             continue;
@@ -4876,6 +4880,7 @@ mod hosted_death_tests {
         let forged_cli = move || {
             session_end(&forged);
         };
+        #[allow(clippy::type_complexity)]
         let cases: [(&str, Box<dyn FnOnce()>); 5] = [
             ("cli", Box::new(cli_end)),
             ("hook", Box::new(hook_end)),
@@ -5106,12 +5111,12 @@ mod hosted_death_tests {
             let par = session_start(&crate::graph::testutil::flag_invocation(&["session", "start"], &[("id", "kid"), ("parent", "other")]));
             assert_eq!(par.data.as_ref().unwrap()["reason"], "harness-anchored", "{}", par.message);
             let same = session_start(&crate::graph::testutil::flag_invocation(&["session", "start"], &[("id", "kid"), ("parent", "wrap")]));
-            assert!(same.data.as_ref().map_or(true, |d| d["reason"] != "harness-anchored"), "{}", same.message);
-            assert!(anchored_start_refusal("kid", Some(h as i32), Some("0xbbb"), Some("other")).is_none(), "the harness may move its own record");
+            assert!(same.data.as_ref().is_none_or(|d| d["reason"] != "harness-anchored"), "{}", same.message);
+            assert!(anchored_start_refusal("kid", Some(h), Some("0xbbb"), Some("other")).is_none(), "the harness may move its own record");
         });
         assert_eq!(kid.window_address, "0xkid", "the window is unchanged");
         assert_eq!(kid.parent_session_id.as_deref(), Some("wrap"), "the parent is unchanged");
-        assert_eq!(kid.hook_ancestry, vec![h as i32, 4242], "and so is the chain");
+        assert_eq!(kid.hook_ancestry, vec![h, 4242], "and so is the chain");
     }
 
     /// `graph link` re-parents a record only where its live harness does not

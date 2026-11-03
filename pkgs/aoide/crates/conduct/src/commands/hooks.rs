@@ -1140,7 +1140,7 @@ mod tests {
         // whatever this process's own env happens to be, and never a
         // hardcoded `~/Aoide` or an install-time-resolved absolute path.
         let profile = agent_profile("kimi").unwrap();
-        let cmd = door_command(&profile, true, "SessionStart");
+        let cmd = door_command(profile, true, "SessionStart");
         assert!(
             cmd.contains("${AOIDE_ROOT:-$HOME/.aoide}/state/kimi-hooks.jsonl"),
             "wrap did not carry the AOIDE_ROOT-with-fallback expansion: {cmd}"
@@ -1161,7 +1161,7 @@ mod tests {
         // speak.
         let profile = agent_profile("claude").unwrap();
         for evt in ["SessionStart", "UserPromptSubmit"] {
-            let cmd = door_command(&profile, false, evt);
+            let cmd = door_command(profile, false, evt);
             assert!(cmd.contains("2>/dev/null"), "{evt}: {cmd}");
             assert!(!cmd.contains(">/dev/null 2>&1"), "{evt}: {cmd}");
         }
@@ -1175,7 +1175,7 @@ mod tests {
             "SessionEnd",
             "Notification",
         ] {
-            let cmd = door_command(&profile, false, evt);
+            let cmd = door_command(profile, false, evt);
             assert!(cmd.contains(">/dev/null 2>&1"), "{evt}: {cmd}");
         }
     }
@@ -1293,7 +1293,7 @@ mod tests {
         for evt in events {
             hooks.insert(evt.to_string(), json!([{ "hooks": [ {
                 "type": "command",
-                "command": door_command(&claude_profile, false, evt)
+                "command": door_command(claude_profile, false, evt)
             } ] } ]));
         }
         // The pointer entry too (the real hand-written file carries it), so a

@@ -825,7 +825,7 @@ fn approve_spawn(
     }
     let done = if resurrect { "resurrected" } else { "spawned" };
     Outcome::ok(cmd, format!("pending entry {index} approved → {done} `{}`", visible(session_id)))
-        .changed(vec![format!("pending[{index}] for {}: approved and launched", visible(&session_id))])
+        .changed(vec![format!("pending[{index}] for {}: approved and launched", visible(session_id))])
         .with_data(json!({
             "id": index.to_string(),
             "sessionId": session_id,

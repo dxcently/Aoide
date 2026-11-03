@@ -2378,7 +2378,7 @@ mod tests {
     fn a_record_that_lost_its_window_binds_again_though_its_workspace_did_not_move() {
         let released = SessionRecord { workspace: Some(3), ..unplaced("s", Some(5), &[]) };
         assert_eq!(
-            bind(&[released.clone()], &[win("0xA", "kitty", 5, Some(3))], &[]),
+            bind(std::slice::from_ref(&released), &[win("0xA", "kitty", 5, Some(3))], &[]),
             [binding("s", "0xA", Some(3))]
         );
         assert_eq!(bind(&[released], &[win("0xA", "kitty", 5, None)], &[]), [binding("s", "0xA", None)]);

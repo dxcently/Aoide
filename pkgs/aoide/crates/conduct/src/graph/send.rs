@@ -738,7 +738,7 @@ const HOLD_TTL_SECS: i64 = 7 * 86_400;
 /// that does not parse is expired: nothing says when it was queued, so nothing
 /// keeps it.
 pub(super) fn is_expired(queued_at: &str, now: i64) -> bool {
-    aoide_storage::time::parse_iso_utc(queued_at).map_or(true, |queued| now > queued + HOLD_TTL_SECS)
+    aoide_storage::time::parse_iso_utc(queued_at).is_none_or(|queued| now > queued + HOLD_TTL_SECS)
 }
 
 /// The instant a hold expires, as the stamp `list --json` shows, or `None` when
@@ -753,7 +753,7 @@ pub(super) fn expires_stamp(queued_at: &str) -> Option<String> {
 /// well-formed one that has lapsed goes.
 fn is_evictable(entry: &PendingSend, now: i64) -> bool {
     !entry.session_id.is_empty()
-        && entry.spawn.as_ref().map_or(true, |spawn| spawn.is_known())
+        && entry.spawn.as_ref().is_none_or(|spawn| spawn.is_known())
         && is_expired(&entry.queued_at, now)
 }
 
@@ -2573,6 +2573,7 @@ fn hook_ensure_session(
 /// when it never reached one (a `sub:` id, or an existing record) — the caller
 /// turns that into the outcome's trace, because only the caller knows which arm
 /// this hook arrived on ([`claim_trace`]).
+#[allow(clippy::too_many_arguments)]
 fn hook_ensure_session_with(
     door: Door,
     profile: &AgentProfile,

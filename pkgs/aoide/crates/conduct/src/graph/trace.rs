@@ -743,7 +743,7 @@ fn render_any(line: &str, dim: bool) -> String {
 }
 
 /// The last `tail` lines of a trace, in file order — the render window.
-fn last_lines<'a>(lines: &'a [String], tail: usize) -> Vec<&'a String> {
+fn last_lines(lines: &[String], tail: usize) -> Vec<&String> {
     lines.iter().rev().take(tail).rev().collect()
 }
 
@@ -845,8 +845,8 @@ pub(super) fn resolve_local(
     let nodes = aoide_storage::node_store::load_nodes();
     let node_names: Vec<&str> = nodes.iter().map(|p| p.name.as_str()).collect();
 
-    let echo_target = strip_unsafe(&target);
-    let (id, ended) = match addr::resolve(&target, &host, &candidates, &node_names) {
+    let echo_target = strip_unsafe(target);
+    let (id, ended) = match addr::resolve(target, &host, &candidates, &node_names) {
         Resolution::Local(id) => (id, None),
         Resolution::Remote { node, .. } => {
             let node = strip_unsafe(&node);
@@ -871,7 +871,7 @@ pub(super) fn resolve_local(
             )
             .with_data(json!({ "reason": "ambiguous", "target": echo_target, "candidates": found })));
         }
-        Resolution::NotFound => match ledger_ended(&target) {
+        Resolution::NotFound => match ledger_ended(target) {
             Some(entry) => (entry.session_id.clone(), Some(entry)),
             None => {
                 let hint = if !target.contains('/') && node_names.contains(&target) {
@@ -1082,6 +1082,7 @@ fn follow_tick<'a>(window: &'a [String], cursor: Option<&str>) -> (&'a [String],
 /// as the one-shot path. What it resumes after is a record's identity
 /// ([`record_cursor`]), never a line count: the window is a bounded 1 MiB tail,
 /// so once a trace outgrows it a count stops tracking the end.
+#[allow(clippy::too_many_arguments)]
 fn follow_trace(
     cmd: &str,
     id: &str,
@@ -1836,7 +1837,7 @@ mod tests {
 
         // A malformed line contributes no step (it keeps its `?` human line and
         // its line in `data.lines`), and a readable one after it still does.
-        let lines = vec!["{ not json".to_string(), START.to_string()];
+        let lines = ["{ not json".to_string(), START.to_string()];
         let refs: Vec<&String> = lines.iter().collect();
         let (steps, omitted) = steps_of_lines(&refs, Clip::Line);
         assert_eq!(omitted, 0);

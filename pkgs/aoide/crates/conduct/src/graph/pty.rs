@@ -1555,23 +1555,19 @@ impl Inbox {
     /// arrived and wrote before this call is never missed.
     pub(in crate::graph) fn drain(&mut self) -> Vec<Vec<u8>> {
         use std::io::Read as _;
-        loop {
-            match self.listener.accept() {
-                Ok((stream, _)) => {
-                    if self.conns.len() >= MAX_INJECTION_CONNS {
-                        continue; // a bound, not a queue (module note).
-                    }
-                    let self_injection = aoide_protocol::peercred::peer_cred(&stream)
-                        .map(|cred| refused_self_injection(cred.pid, &self.id))
-                        .unwrap_or(false);
-                    if self_injection {
-                        continue; // dropped outright — never accepted into the set.
-                    }
-                    let _ = stream.set_nonblocking(true);
-                    self.conns.push(stream);
-                }
-                Err(_) => break, // EAGAIN — no more pending.
+        // An Err (EAGAIN) ends the loop — no more pending.
+        while let Ok((stream, _)) = self.listener.accept() {
+            if self.conns.len() >= MAX_INJECTION_CONNS {
+                continue; // a bound, not a queue (module note).
             }
+            let self_injection = aoide_protocol::peercred::peer_cred(&stream)
+                .map(|cred| refused_self_injection(cred.pid, &self.id))
+                .unwrap_or(false);
+            if self_injection {
+                continue; // dropped outright — never accepted into the set.
+            }
+            let _ = stream.set_nonblocking(true);
+            self.conns.push(stream);
         }
         let mut chunks = Vec::new();
         let mut buf = [0u8; 8192];
@@ -2443,7 +2439,7 @@ mod tests {
             "a hung-up stdin must be REPORTED ready — otherwise the loop never wakes its stdin \
              arm again and spins on a poll that returns at once"
         );
-        assert_eq!(eof.map(|n| n).unwrap_or(usize::MAX), 0, "and it reads as EOF, which is what latches stdin_eof");
+        assert_eq!(eof.unwrap_or(usize::MAX), 0, "and it reads as EOF, which is what latches stdin_eof");
     }
 
     /// The command line the child's own C runtime will parse back: a plain

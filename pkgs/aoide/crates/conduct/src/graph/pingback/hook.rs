@@ -340,7 +340,7 @@ fn host_gone(roster: &[SessionRecord], id: &str) -> bool {
     roster
         .iter()
         .find(|r| r.session_id == id)
-        .map_or(true, |w| w.pid.is_some_and(|pid| !aoide_storage::fs::pid_is_alive(pid)))
+        .is_none_or(|w| w.pid.is_some_and(|pid| !aoide_storage::fs::pid_is_alive(pid)))
 }
 
 /// A phase the turn is still open in.
@@ -1758,7 +1758,7 @@ mod tests {
         let recorded = HookRecord { death: Some(fact), ..hook_rec("K", "done", "2026-10-07T10:01:00Z") };
         let only_spawner = |r: &SessionRecord| r.session_id == "P";
         let mut after = CursorFile::new();
-        let lines = claim(&exited, &[recorded.clone()], &only_spawner, &next, &mut after, at_ms() + 60_000);
+        let lines = claim(&exited, std::slice::from_ref(&recorded), &only_spawner, &next, &mut after, at_ms() + 60_000);
         assert_eq!(
             lines,
             vec![ChildClaim { parent: "P".into(), line: "[claude fond-aspen] died mid-turn (exit 3) · last: Edit".into() }]

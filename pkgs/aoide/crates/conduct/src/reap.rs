@@ -27,6 +27,7 @@
 //!     is gone: silence past a week-long band (see
 //!     [`REAP_WORKING_STALE_SECS`]) condemns it, while a live harness firing
 //!     hooks on its own cadence is proven alive by its fresh hook `updatedAt`.
+//!
 //! And three ghosts that answer NO to every signal above and are dead anyway:
 //! a record whose evidence all predates the machine's own boot instant (see
 //! [`pre_boot_ghosts`] — the case a recycled pid shields forever), a dependent
@@ -158,12 +159,14 @@ pub const REAP_SPAWNED_SHELL_STALE_SECS: i64 = 48 * 3600; // 48 hours (2 days)
 ///         except a `subagent`-kind record, which judges mid-turn silence against
 ///         [`REAP_SUBAGENT_STALE_SECS`] (2h) instead: it cannot legitimately outlive its parent's
 ///         own Task-tool call, so it needs no week-long grace.
+///
 ///     Eligible records: a HEADLESS one (no window AND no pid — the classic hook-only shape; every
 ///     `subagent` record is shaped this way) or an AGENT one ([`is_agent_kind`]). The kind gate
 ///     keeps SHELLS out — a shell record's pid IS its terminal, so a live pid means the shell is
 ///     alive and staleness must never overrule it. A live pid of the record's own vetoes the
 ///     staleness arm: the record's terminal and its agent cannot be told apart by pid alone, so a
 ///     live pid is taken as proof of life.
+///
 ///   A closed window is not a death signal here: `session window closed` judges the sessions that
 ///   ran in it on that evidence alone ([`reap_closed_window`]), and the pid decides every other
 ///   record. One more veto, orthogonal to all of the above: `rec.exempt`
@@ -387,6 +390,7 @@ pub(crate) fn superseded_agent_duplicates(
 ///     finished, whose done pose the widgets deliberately show until
 ///     `session prune` sweeps it. Its predecessors are as superseded as they
 ///     would be beside a live one.
+///
 /// So this never empties a window's roster entry, and never leaves two.
 ///
 /// [`prune_done`]: crate::graph::prune_done
@@ -479,6 +483,7 @@ pub fn boot_epoch() -> Option<i64> {
 ///     number and the pid reads live again, shielding the ghost forever;
 ///   * the staleness bands hold their fire for 72h / 7 days, and the live-pid
 ///     veto can stop them firing at all.
+///
 /// This collapses that wait to the one thing already known for certain: the
 /// box rebooted, and this record never woke up.
 ///
@@ -682,12 +687,12 @@ fn abandoned_spawned_shells(
 /// [`spared_exempt_spawned_shells`] read the exact same candidacy test and
 /// differ only in which side of `exempt` they keep. See
 /// `abandoned_spawned_shells`'s own doc for what each clause means.
-fn spawned_shell_shape<'a>(
-    sessions: &'a [SessionRecord],
+fn spawned_shell_shape(
+    sessions: &[SessionRecord],
     now_epoch: i64,
     log_mtime: impl Fn(&SessionRecord) -> Option<i64>,
     band: Option<i64>,
-) -> impl Iterator<Item = &'a SessionRecord> {
+) -> impl Iterator<Item = &SessionRecord> {
     sessions
         .iter()
         .filter(|s| s.state != "done")
@@ -735,6 +740,7 @@ fn spared_exempt_spawned_shells(
 ///     what keeps the unit tests honest: they run against a temp stage whose
 ///     roster knows none of the desktop's real sessions, and every one of
 ///     those sockets answers.)
+///
 /// Plus [`SOCKET_SETTLE_SECS`] off the file's mtime, for the moment between
 /// `bind` and `listen` where an infant socket would refuse a connection.
 fn sweep_orphan_sockets(live_ids: &HashSet<&str>, now_epoch: i64) -> Vec<String> {
@@ -796,6 +802,7 @@ fn sweep_orphan_sockets(live_ids: &HashSet<&str>, now_epoch: i64) -> Vec<String>
 ///   * [`TUNNEL_SETTLE_SECS`] off the record FILE's own mtime spares an
 ///     infant record from the moment between the forward answering and
 ///     `open_or_reuse` finishing its write.
+///
 /// A record whose file cannot be resolved or stat'd (a mid-write,
 /// torn-directory, or permission edge) is skipped, never treated as a hard
 /// error — `aoide_storage::tunnel::list_records` already holds this same
@@ -1104,6 +1111,7 @@ fn reap_pass(inv: &Invocation, closed: Option<&str>) -> Outcome {
 ///     [`aoide_protocol::pick::interactive`] recognises — this repo's one
 ///     probe for "a person is at a keyboard", the same one the pickers gate
 ///     on, door-checked first so no non-CLI door can ever read as a human.
+///
 /// Everything else — the ~12s systemd timer, the daemon's own tick, an
 /// agent's piped shell — is the unattended sweep and keeps the band.
 ///
@@ -3674,7 +3682,7 @@ mod tests {
             abandoned_spawned_shells(&[spawned_shell("w", "idle")], now, at(60 * 3600), band),
             vec!["w".to_string()],
         );
-        assert!(60 * 3600 < REAP_IDLE_STALE_SECS, "the 60h case must be under the at-rest band");
+        const { assert!(60 * 3600 < REAP_IDLE_STALE_SECS, "the 60h case must be under the at-rest band") }
     }
 
     #[test]

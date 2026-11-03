@@ -28,11 +28,11 @@
 //! decision onto the accept side would require inventing a wire protocol,
 //! which this phase does not do (scope fence: only the per-session socket
 //! + the send gate). `SO_PEERCRED` earns its keep at the accept side for a
-//! DIFFERENT, narrower property instead: [`aoide_protocol::peercred::peer_cred`] backs
-//! `pty.rs`'s own self-injection refusal (a connecting pid that is a
-//! descendant of the socket's OWN session gets dropped, unconditionally,
-//! un-bypassably — the replacement for the old client-side `is_self_send`
-//! guard, which only ever guarded well-behaved callers of `aoide send`).
+//!   DIFFERENT, narrower property instead: [`aoide_protocol::peercred::peer_cred`] backs
+//!   `pty.rs`'s own self-injection refusal (a connecting pid that is a
+//!   descendant of the socket's OWN session gets dropped, unconditionally,
+//!   un-bypassably — the replacement for the old client-side `is_self_send`
+//!   guard, which only ever guarded well-behaved callers of `aoide send`).
 
 use super::model::SessionRecord;
 use std::collections::HashSet;

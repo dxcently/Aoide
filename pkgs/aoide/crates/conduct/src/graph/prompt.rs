@@ -864,7 +864,7 @@ mod tests {
     #[test]
     fn an_unterminated_escape_stops_hiding_the_line_once_the_window_has_passed_it() {
         let mut bytes = b"\x1b]0;never closed".to_vec();
-        bytes.extend(std::iter::repeat(b'a').take(WINDOW_BYTES + 10));
+        bytes.extend(std::iter::repeat_n(b'a', WINDOW_BYTES + 10));
         bytes.extend_from_slice(b"\nProceed?");
         assert_eq!(standing_after(&bytes, QUIET).unwrap().question, "Proceed?");
     }
