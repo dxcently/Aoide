@@ -198,7 +198,7 @@ mod tests {
         let first = Policy::new("a", "pass", "x");
         save_policies(&home, &[first]).unwrap();
         let second = Policy::new("b", "pass", "y");
-        save_policies(&home, &[second.clone()]).unwrap();
+        save_policies(&home, std::slice::from_ref(&second)).unwrap();
         assert_eq!(load_policies(&home).unwrap(), vec![second]);
         std::fs::remove_dir_all(&home).ok();
     }

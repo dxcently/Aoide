@@ -324,6 +324,70 @@ pub fn describe_home_file_error(home: &Path, file: &Path, err: &io::Error) -> St
     )
 }
 
+// ── the private-policy assertion, in the host's own terms ────────────────
+//
+// Every privacy test in this crate used to ask `mode() & 0o777`. That is one
+// host's spelling of the guarantee; the guarantee itself is "nobody but the
+// owner can read it", which Unix answers with mode bits and native Windows
+// with the object's DACL. These two helpers are the ONE place the two
+// spellings meet, so a test keeps asserting `0o600`/`0o700` — the numbers a
+// reader recognises — and gets an answer that is real on whatever host it
+// runs on.
+
+/// This object's privacy as the mode a reader would recognise: Unix's actual
+/// bits; on native Windows `0o600`/`0o700` for an object whose policy reads
+/// back owner-only, `0o644` for one that does not (so a test asserting "this
+/// is NOT private" is answered honestly there too).
+#[cfg(test)]
+pub fn mode_of(path: &Path) -> u32 {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::metadata(path).expect("stat").permissions().mode() & 0o777
+    }
+    #[cfg(windows)]
+    {
+        let is_dir = std::fs::metadata(path).map(|m| m.is_dir()).unwrap_or(false);
+        let reason = if is_dir {
+            aoide_protocol::owner_only::dir_privacy(path)
+        } else {
+            aoide_protocol::owner_only::file_privacy(path)
+        };
+        match reason.expect("read the object's own policy back") {
+            None => {
+                if is_dir {
+                    0o700
+                } else {
+                    0o600
+                }
+            }
+            Some(_) => 0o644,
+        }
+    }
+}
+
+/// Arrange `path`'s policy for a test. `0o600`/`0o700` ask for the private
+/// policy on either host — the native call on Windows, `chmod` on Unix. A
+/// LOOSENING mode is a Unix-only fixture: there is no "world-writable" native
+/// policy to attach, and the object keeps whatever default policy it was
+/// created with (which is what a test wants when it is arranging an object
+/// that must FAIL the privacy check), so the Windows arm is a no-op.
+#[cfg(test)]
+pub fn set_mode(path: &Path, mode: u32) -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode))
+    }
+    #[cfg(windows)]
+    {
+        match mode {
+            0o600 => aoide_protocol::owner_only::set_file_access(path),
+            0o700 => aoide_protocol::owner_only::ensure_private_dir(path),
+            _ => Ok(()),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -559,69 +623,5 @@ mod tests {
         let dir = tmp_dir("euid-sanity");
         assert_eq!(owner_of(&dir), effective_user());
         std::fs::remove_dir_all(&dir).ok();
-    }
-}
-
-// ── the private-policy assertion, in the host's own terms ────────────────
-//
-// Every privacy test in this crate used to ask `mode() & 0o777`. That is one
-// host's spelling of the guarantee; the guarantee itself is "nobody but the
-// owner can read it", which Unix answers with mode bits and native Windows
-// with the object's DACL. These two helpers are the ONE place the two
-// spellings meet, so a test keeps asserting `0o600`/`0o700` — the numbers a
-// reader recognises — and gets an answer that is real on whatever host it
-// runs on.
-
-/// This object's privacy as the mode a reader would recognise: Unix's actual
-/// bits; on native Windows `0o600`/`0o700` for an object whose policy reads
-/// back owner-only, `0o644` for one that does not (so a test asserting "this
-/// is NOT private" is answered honestly there too).
-#[cfg(test)]
-pub fn mode_of(path: &Path) -> u32 {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::metadata(path).expect("stat").permissions().mode() & 0o777
-    }
-    #[cfg(windows)]
-    {
-        let is_dir = std::fs::metadata(path).map(|m| m.is_dir()).unwrap_or(false);
-        let reason = if is_dir {
-            aoide_protocol::owner_only::dir_privacy(path)
-        } else {
-            aoide_protocol::owner_only::file_privacy(path)
-        };
-        match reason.expect("read the object's own policy back") {
-            None => {
-                if is_dir {
-                    0o700
-                } else {
-                    0o600
-                }
-            }
-            Some(_) => 0o644,
-        }
-    }
-}
-
-/// Arrange `path`'s policy for a test. `0o600`/`0o700` ask for the private
-/// policy on either host — the native call on Windows, `chmod` on Unix. A
-/// LOOSENING mode is a Unix-only fixture: there is no "world-writable" native
-/// policy to attach, and the object keeps whatever default policy it was
-/// created with (which is what a test wants when it is arranging an object
-/// that must FAIL the privacy check), so the Windows arm is a no-op.
-#[cfg(test)]
-pub fn set_mode(path: &Path, mode: u32) -> io::Result<()> {
-    #[cfg(unix)]
-    {
-        std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode))
-    }
-    #[cfg(windows)]
-    {
-        match mode {
-            0o600 => aoide_protocol::owner_only::set_file_access(path),
-            0o700 => aoide_protocol::owner_only::ensure_private_dir(path),
-            _ => Ok(()),
-        }
     }
 }

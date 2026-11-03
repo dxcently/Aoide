@@ -2487,11 +2487,11 @@ fn audit_resolve(
 /// Write BOTH audit lines for one `put` attempt — the `put` mirror of
 /// [`audit_resolve`], same two destinations (the broker's own `audit.log`
 /// + the mirrored `EventClass::Secret` aoide-log line), same name-only
-/// discipline. No `consumer`/`argv0` fields — `put`'s wire request carries
-/// neither (module doc). `replaced` (P-67) is `Some(bool)` only on a
-/// GRANTED put — names only, never a value, same as everything else this
-/// function writes — so the audit trail can say "replaced" vs "stored new"
-/// without re-deriving it from the reason string.
+///   discipline. No `consumer`/`argv0` fields — `put`'s wire request
+///   carries neither (module doc). `replaced` (P-67) is `Some(bool)` only
+///   on a GRANTED put — names only, never a value, same as everything else
+///   this function writes — so the audit trail can say "replaced" vs
+///   "stored new" without re-deriving it from the reason string.
 fn audit_put(
     secrets_home: &Path,
     secret: &str,
@@ -3671,7 +3671,7 @@ mod tests {
 
         let (granted, result) = put_outcome_as_result(put_gate(&home, "t", "the-stored-value", false));
         assert!(granted, "{result:?}");
-        assert_eq!(result.unwrap(), false, "the store dir starts empty — this is a NEW store, not a replace");
+        assert!(!result.unwrap(), "the store dir starts empty — this is a NEW store, not a replace");
         assert_eq!(std::fs::read_to_string(&out).unwrap(), "the-stored-value");
         std::fs::remove_dir_all(&home).ok();
     }
@@ -3860,7 +3860,7 @@ mod tests {
 
         let (granted, result) = put_outcome_as_result(put_gate(&home, "t", "new-value", true));
         assert!(granted, "{result:?}");
-        assert_eq!(result.unwrap(), true, "an existing value was overwritten — `replaced` must be true");
+        assert!(result.unwrap(), "an existing value was overwritten — `replaced` must be true");
         assert_eq!(std::fs::read_to_string(&out).unwrap(), "new-value");
         std::fs::remove_dir_all(&home).ok();
     }

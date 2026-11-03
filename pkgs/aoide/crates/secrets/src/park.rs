@@ -426,6 +426,7 @@ impl ParkRegistry {
     /// `BTreeMap`'s own iteration order — the nonce prefix is constant
     /// across every entry in one registry, so formatting it on afterward
     /// never disturbs that order.
+    #[allow(clippy::type_complexity)]
     pub fn list(&self) -> Vec<(String, String, String, u64, Option<crate::peercred::PeerUser>, Option<String>, AskOrigin, Option<String>)> {
         self.lock()
             .iter()

@@ -2057,7 +2057,7 @@ mod tests {
             out.push_str(&rest[..at]);
             rest = &rest[at..];
             match escape_value(rest) {
-                Some((used, value)) if matches!(value, 0x09..=0x0d | 0x20) => {
+                Some((used, 0x09..=0x0d | 0x20)) => {
                     out.push(' ');
                     rest = &rest[used..];
                 }

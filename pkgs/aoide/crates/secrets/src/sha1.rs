@@ -25,7 +25,7 @@ pub fn sha1(input: &[u8]) -> [u8; DIGEST_LEN] {
     }
     msg.extend_from_slice(&bit_len.to_be_bytes());
 
-    for chunk in msg.chunks_exact(BLOCK_LEN) {
+    for chunk in msg.as_chunks::<BLOCK_LEN>().0 {
         // RFC 3174 §6.1 step (a)/(b): 16 words from the block, extended
         // to 80 via the XOR-rotate recurrence.
         let mut w = [0u32; 80];

@@ -1822,7 +1822,7 @@ mod tests {
     fn a_customized_stored_template_under_a_builtin_name_is_ignored_at_use_time() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let home = tmp_home("builtin-template-ignored");
-        std::fs::create_dir_all(&home.join("store")).unwrap();
+        std::fs::create_dir_all(home.join("store")).unwrap();
         std::fs::write(home.join("store").join("k"), "the-real-stored-value").unwrap();
         let doc = serde_json::json!({
             "file": { "get": "printf %s this-would-prove-the-stale-template-ran" }

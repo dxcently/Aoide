@@ -253,7 +253,7 @@ fn put_then_get_round_trips_through_the_real_socket_with_the_seeded_file_backend
     assert!(connected, "broker did not bind {} in time", socket_path.display());
 
     // ── put ──────────────────────────────────────────────────────────
-    assert_eq!(client::put(&socket_path, "filed", "sentinel-put-value", false).unwrap(), false);
+    assert!(!client::put(&socket_path, "filed", "sentinel-put-value", false).unwrap());
 
     // The seeded `file` backend's contract: 0600 file under a 0700 store
     // dir, named after the POLICY's `key` (not the secret's own name).
@@ -277,7 +277,7 @@ fn put_then_get_round_trips_through_the_real_socket_with_the_seeded_file_backend
     assert_eq!(read_to_string(&stored_file), "sentinel-put-value", "a refused put must never touch the store");
 
     // ── overwrite: true replaces the value wholesale ────────────────────
-    assert_eq!(client::put(&socket_path, "filed", "second-value", true).unwrap(), true);
+    assert!(client::put(&socket_path, "filed", "second-value", true).unwrap());
     assert_eq!(client::resolve(&socket_path, "filed", "m", None, None).unwrap(), "second-value");
 
     // ── neither audit log ever carries the value ────────────────────────
@@ -451,7 +451,7 @@ fn park_then_approve_over_the_real_socket_releases_the_value_to_the_original_cal
 
     // Seed the value through the seeded `file` backend — a REAL `put` over
     // its own connection, same as every other e2e test here.
-    assert_eq!(client::put(&socket_path, "locked", "the-real-value", false).unwrap(), false);
+    assert!(!client::put(&socket_path, "locked", "the-real-value", false).unwrap());
 
     // `resolve` with no code — a new connection, blocked on its own read
     // until `approve` completes it. Runs on its own thread since it BLOCKS.
@@ -542,7 +542,7 @@ fn a_second_connection_is_accepted_and_served_while_the_first_sits_parked() {
     }
     assert!(connected, "broker did not bind {} in time", socket_path.display());
 
-    assert_eq!(client::put(&socket_path, "open", "open-value", false).unwrap(), false);
+    assert!(!client::put(&socket_path, "open", "open-value", false).unwrap());
 
     // Park a resolve on its own connection/thread — it will sit blocked
     // until this test dismisses it below.
@@ -575,7 +575,7 @@ fn a_second_connection_is_accepted_and_served_while_the_first_sits_parked() {
 
     // Clean up: dismiss the still-parked ask so the spawned thread returns.
     client::dismiss(&socket_path, &ask.id).unwrap();
-    assert_eq!(resolve_thread.join().unwrap().unwrap_err().to_lowercase().contains("dismissed"), true);
+    assert!(resolve_thread.join().unwrap().unwrap_err().to_lowercase().contains("dismissed"));
 
     drop(broker_thread);
     std::env::remove_var("AOIDE_AUDIT_LOG");
@@ -663,14 +663,14 @@ fn watch_follower_sees_a_parked_event_within_about_a_second_through_the_real_eve
     // fail or silently skip the line. `wait_for_follower`'s own
     // NotFound-poll semantics (goal 3) are proven directly in `watch.rs`'s
     // own unit tests; this test only needs a file to already be there.
-    assert_eq!(client::put(&socket_path, "open", "open-value", false).unwrap(), false);
+    assert!(!client::put(&socket_path, "open", "open-value", false).unwrap());
     assert_eq!(client::resolve(&socket_path, "open", "m", None, None).unwrap(), "open-value");
 
     let mut follower =
         watch::Follower::open_at_end(&events_path).expect("the events feed must already exist after the resolve above");
 
     // NOW start the clock and park a `resolve` with no code.
-    assert_eq!(client::put(&socket_path, "locked", "the-real-value", false).unwrap(), false);
+    assert!(!client::put(&socket_path, "locked", "the-real-value", false).unwrap());
     let start = std::time::Instant::now();
     let sock_for_resolve = socket_path.clone();
     let resolve_thread = std::thread::spawn(move || client::resolve(&sock_for_resolve, "locked", "m", None, None));
