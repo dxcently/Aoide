@@ -55,7 +55,7 @@ name aoide pkgs/aoide/crates/storage/src/seal.rs 35
 name aoide pkgs/aoide/crates/test-support/src/lib.rs 8
 name aoide pkgs/aoide/crates/upkeep/src/checklane.rs 7
 name aoide pkgs/aoide/default.nix 3
-name aoide pkgs/aoide/flake.nix 1
+name aoide pkgs/aoide/flake.nix 2
 name aoide pkgs/aoide/module/options.nix 2
 name strillix lib/rice.nix 3
 name strillix lib/rices-merge.nix 1

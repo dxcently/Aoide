@@ -368,6 +368,11 @@ See `tests/README.md` for why Rust's own tests do NOT live here.
   `strillix-rice`/`aoide-screen`/`strillix` and never shells out to nix
   (AGENTS.md's "core is nix-independent" claim, CONTRACTS.md §"Core is
   nix-independent").
+- `aoide-clippy` — clippy with `-D warnings` over every core crate and target
+  (`strillix`, `strillix-rice` and `aoide-screen` are excluded by name), a
+  derivation of its own beside the package build (`checks.clippy` in
+  `pkgs/aoide/flake.nix`): a toolchain bump that adds a lint turns it red and
+  never blocks a host's build of the package.
 - `boundary` — Aoide and Strillix name each other only where
   `tests/boundary/crossings.golden` records it. `tests/boundary/scan.pl`
   counts, per file, the lines one product's files spend on the other's name

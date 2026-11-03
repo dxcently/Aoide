@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Core passes clippy
+
+- `cargo clippy --workspace --all-targets --all-features` reports no warning for any core crate, and the `aoide-clippy` flake check holds it there with `-D warnings`; `strillix`, `strillix-rice` and `aoide-screen` are left out by name.
+
 ### Core stops moving old stage files
 
 - Core no longer moves conducting stage files from `$STRILLIX_ROOT/stage` (default `~/.strillix/stage`); a host that never ran an aoide from after 2026-08-27 keeps those files there, unread.

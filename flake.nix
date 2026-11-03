@@ -357,6 +357,8 @@
               # The static-musl variant builds too — a link-and-run proof,
               # not a second test run (default.nix's `doCheck` comment).
               pkg-aoide-static = inputs.aoide.packages.${system}.aoide-static;
+              # Core's clippy gate, a derivation apart from the package build.
+              aoide-clippy = inputs.aoide.checks.${system}.clippy;
             };
         in
         pkgChecks

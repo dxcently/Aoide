@@ -42,9 +42,10 @@ Outputs, all tolerant of empty layers so eval stays robust:
   `discovery`, `phantom-commands`, `nix-independence`, `boundary`,
   `portability`, `nix-lint`, `theme-fanout`, `generator-offline`,
   `generator-relocatable`, `bar-ricemode`, `generator-runtime`),
-  one auto-generated `pkg-<name>` per discovered package, plus the `vm-boot`
-  headless boot test (below) and the `vm-lock-greeter` graphical login and
-  lock test (`tests/vm-lock-greeter.nix`).
+  one auto-generated `pkg-<name>` per discovered package, `aoide-clippy`
+  (core's clippy `-D warnings` gate, from `pkgs/aoide/flake.nix`), plus the
+  `vm-boot` headless boot test (below) and the `vm-lock-greeter` graphical
+  login and lock test (`tests/vm-lock-greeter.nix`).
 - `devShells.default` — Rust (cargo/rustc/clippy/rust-analyzer) + nix
   tooling (nixfmt/nil/deadnix/statix).
 - `formatter` — nixfmt.

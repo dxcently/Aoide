@@ -12,7 +12,8 @@
 # and the nixpkgs input follows the root's, so the core always builds against
 # the same revision the Strillix flake locks. The build itself is default.nix
 # (rustPlatform + vendored cargo deps, doCheck runs the cargo tests), so
-# `checks.default` IS the package build.
+# `checks.default` IS the package build, and `checks.clippy` is a second
+# derivation over the same source that runs clippy with `-D warnings`.
 {
   description = "Aoide core — the aoide CLI + aoided daemon (agent-first desktop control), as a self-contained nixpkgs-only flake.";
 
@@ -90,11 +91,37 @@
       nixosModules.default = import ./module { inherit self; };
 
       # ── Checks ─────────────────────────────────────────────────────────────
-      # The check IS the package build: default.nix runs `cargo test` in the
-      # sandbox (doCheck), so a green `checks.default` is the full Rust suite.
-      checks = forAllSystems (system: {
-        default = self.packages.${system}.default;
-      });
+      # Two checks. `default` IS the package build: default.nix runs `cargo
+      # test` in the sandbox (doCheck), so a green `checks.default` is the full
+      # Rust suite. `clippy` is a derivation of its own, so that a toolchain
+      # bump that adds a lint turns it red and never blocks a host's build of
+      # the package: the package with `paint = false` (the core crates, tests
+      # off), its build phase swapped for clippy with `-D warnings` over every
+      # core crate and its output left empty. The Strillix side is excluded by
+      # name.
+      checks = forAllSystems (
+        system:
+        let
+          pkgs = nixpkgs.legacyPackages.${system};
+        in
+        {
+          default = self.packages.${system}.default;
+          clippy = (pkgs.callPackage ./default.nix { paint = false; }).overrideAttrs (old: {
+            pname = "aoide-clippy";
+            nativeBuildInputs = old.nativeBuildInputs ++ [ pkgs.clippy ];
+            buildPhase = ''
+              runHook preBuild
+              cargo clippy --offline --frozen --workspace --all-targets --all-features \
+                --exclude strillix --exclude strillix-rice --exclude aoide-screen \
+                -- -D warnings
+              runHook postBuild
+            '';
+            installPhase = ''
+              touch $out
+            '';
+          });
+        }
+      );
 
       # ── Dev shell ──────────────────────────────────────────────────────────
       # The COMPLETE dev surface for this workspace — every tool development
