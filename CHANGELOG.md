@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Staging an edited rice, or one not built in, works again
+
+- `strillix rice stage`, `strillix rice back` and `strillix reload` stage a built-in rice whose machine copy differs from the shipped one, and a rice that is not built in when this system has the packages it needs. Otherwise the stage is refused and asks for a rebuild. `rice back` goes through the same gate. Before, the runtime named the shipped generator's argument `rices` where the generator takes `ricesRoot`; nix refused the call, so the stage was refused, and a login or a switch left the bar on the widgets the last activation deployed.
+- The `generator-runtime` flake check stages an edited copy of barcarolle with the built `strillix` and the real `nix-instantiate`.
+
 ### Thin flakes: `lib.mkFlake`
 
 - A flake builds its machines with `aoide.lib.mkFlake { root = ./.; }`: its own `hosts/`, `modules/default.nix` and `rices/` are read by convention and come back as `nixosConfigurations` and `inventory`, so a consumer's flake needs no host loop of its own.

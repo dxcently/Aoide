@@ -107,7 +107,7 @@ name strillix pkgs/aoide/crates/strillix-rice/src/commands/mode.rs 114
 name strillix pkgs/aoide/crates/strillix-rice/src/commands/quickshell.rs 4
 name strillix pkgs/aoide/crates/strillix-rice/src/commands/refresh.rs 12
 name strillix pkgs/aoide/crates/strillix-rice/src/commands/reload.rs 47
-name strillix pkgs/aoide/crates/strillix-rice/src/commands/rice.rs 270
+name strillix pkgs/aoide/crates/strillix-rice/src/commands/rice.rs 275
 name strillix pkgs/aoide/crates/strillix-rice/src/commands/test_support.rs 2
 name strillix pkgs/aoide/crates/strillix-rice/src/commands/theme.rs 10
 name strillix pkgs/aoide/crates/strillix-rice/src/commands/wallpaper.rs 95

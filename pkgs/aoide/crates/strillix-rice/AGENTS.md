@@ -8,14 +8,15 @@
   Nix; the ricing engine must apply a rice on generic Linux too (root
   `AGENTS.md`, "Nix-independence").
 - **`widgets::plan_stage` is the gate, and it runs BEFORE the first write.**
-  `rice stage`/`rice mode` call it ahead of the theme write and hand its
-  answer to both syncs; a refusal stages NOTHING. Don't move it back inside
-  `sync_rice_widgets`/`sync_rice_registry`, and don't add a write path that
-  precedes it — the two refusal texts are the contract
-  (`refusal_no_nix`, `refusal_rebuild_needed`).
+  `rice stage`, `rice mode`, `reload` and `rice back` each call it before their
+  first write. `rice stage`, `rice mode` and `reload` hand its answer to both
+  syncs; `rice back` hands it to `sync_rice_registry` alone. A refusal stages
+  NOTHING. Don't move it back inside `sync_rice_widgets`/`sync_rice_registry`,
+  and don't add a write path that precedes it — the two refusal texts are the
+  contract (`refusal_no_nix`, `refusal_rebuild_needed`).
 - **Nothing in the runtime reads a checkout for the rices.** The generator
   is the SHIPPED file (`<templates>/../nix/manifest.nix`), its argument is the
-  MACHINE's rices (`fs::rices_root`), and the spawn's
+  MACHINE's rices (`paths::rices_root`), and the spawn's
   `ErrorKind::NotFound` IS the no-nix answer — never a `which` probe, never a
   `flake_root()` check, never a `#<flake output>` argv. `$AOIDE_FLAKE_ROOT`
   survives for `rice declare`'s commit-in step, and for `host_config()`'s
@@ -460,7 +461,7 @@
 - `CONTRACTS.md §5`'s "Elements" subsection when a descriptor field rule
   changes.
 - `CONTRACTS.md §4`'s "shipped score templates" paragraph when a new
-  consumer of `fs::rice_templates_dir` is added — `rice compose --from`,
+  consumer of `paths::rice_templates_dir` is added — `rice compose --from`,
   the widget registry/manifest regeneration, and `seed_rices_from_templates`
   are the three today.
 - `pkgs/aoide/crates/AGENTS.md` for cross-crate invariants — not restated

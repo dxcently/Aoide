@@ -284,8 +284,8 @@
         };
 
       # Aoide's rices directory, for a consumer whose hosts perform Aoide's
-      # rices: what it hands `lib.rices` and its rices hook's
-      # `_module.args.rices`.
+      # rices: a consumer hands it to `lib.rices` as `ricesRoot`, and the hook
+      # of that call sets it as `_module.args.ricesRoot`.
       inherit (strillix) ricesRoot;
 
       # ── The front door: parts and rices (CONTRACTS.md §2, §5) ───────────────
@@ -435,6 +435,29 @@
               registry = ricesLib.registryAttrs;
             };
           };
+          # The built strillix stages an edited built-in rice the way a host does
+          # (`rice refresh`, `rice mode stage`, `rice stage`) over the real
+          # nix-instantiate; the run tree must carry the machine's copy
+          # (lib/checks.nix's Check 15).
+          generator-runtime =
+            let
+              builtIn = ricesLib.builtIn {
+                declared = "barcarolle";
+                available = [ ];
+              };
+            in
+            checks.generatorRuntime {
+              strillix = inputs.aoide.packages.${system}.strillix;
+              strillixRices = (pkgsWalk.discover pkgs).strillix-rices.override {
+                rices = builtIn;
+                builtin = {
+                  declared = "barcarolle";
+                  rices = builtIn;
+                  packages = ricesLib.packagesFor builtIn;
+                };
+              };
+              rice = "barcarolle";
+            };
           # VM boot test — boots the Aoide desktop config headless and asserts
           # the stack comes up (multi-user.target, aoide on PATH,
           # greeter enabled, aoided + shellbridge user services active, graph
