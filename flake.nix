@@ -405,6 +405,8 @@
           # and never shells out to nix — AGENTS.md's nix-independence claim
           # made a real gate (see lib/checks.nix's Check 7).
           nix-independence = checks.nixIndependence self;
+          # Aoide and Strillix cross only where the golden says (see lib/checks.nix's Check 14).
+          boundary = checks.boundary self;
           # §9(b): the SHIPPED generator, evaluated exactly as the runtime
           # evaluates it, reproduces `#ricesManifest` over the committed
           # rices — offline, no flake, no checkout.

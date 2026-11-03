@@ -368,6 +368,13 @@ See `tests/README.md` for why Rust's own tests do NOT live here.
   `strillix-rice`/`aoide-screen`/`strillix` and never shells out to nix
   (AGENTS.md's "core is nix-independent" claim, CONTRACTS.md §"Core is
   nix-independent").
+- `boundary` — Aoide and Strillix name each other only where
+  `tests/boundary/crossings.golden` records it. `tests/boundary/scan.pl`
+  counts, per file, the lines one product's files spend on the other's name
+  and every Cargo edge from a crate on one side to a crate on the other; a
+  row the golden lacks or exceeds fails the build, and so does a golden row
+  whose crossing is gone, until `scan.pl tighten` shrinks the golden
+  (`tests/boundary/README.md`).
 - `vm-boot` — headless NixOS boot of the whole stack (`tests/vm-boot.nix`).
 - `vm-lock-greeter` — the login screen and the screen lock on a graphical VM
   (`tests/vm-lock-greeter.nix`): the Quickshell greeter and LockHost for a

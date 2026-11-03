@@ -82,13 +82,23 @@
 #       owner; a rice with no bar of its own renders sonata's), and sonata
 #       carries the `ricemode` record every bar's slot falls back to.
 #
+#   14. boundary — Aoide and Strillix share this repo and are kept from naming
+#       each other, and this is the ratchet on it. `tests/boundary/scan.pl`
+#       counts, per file, the lines one product's files spend on the other's
+#       name and every Cargo edge from a crate on one side to a crate on the
+#       other, then holds those rows against `tests/boundary/crossings.golden`:
+#       a crossing the golden lacks fails the build, and so does a golden row
+#       whose crossing is gone, until `scan.pl tighten` shrinks it. Content
+#       lives in tests/boundary/ — this file only invokes it (the same split
+#       as 8).
+#
 # 1–3 and 5 are written so they PASS TRIVIALLY where nothing populates the
 # registry they inspect yet (1) and become real as Wave-1 lanes/packages
 # land. Each resolves to a trivial derivation: it either builds (assertion
 # held) or the eval fails with a readable message (assertion broken). 10 is
 # the same eval-time-assert shape against a fixed fixture instead of a
 # registry — always real, never trivially-empty. 13 is that shape over the
-# committed rices, one `readFile` per bar body. 4, 6, 7, 8, and 9 are real
+# committed rices, one `readFile` per bar body. 4, 6, 7, 8, 9, and 14 are real
 # `runCommand`s — each has to actually run a binary, so it can only fail at
 # build time, not eval time.
 { lib, pkgs }:
@@ -1069,6 +1079,20 @@ let
         ++ lib.optional noFloor "sonata has no `ricemode` slot, the floor every bar's slot resolves to"
       )
     );
+
+  # ── Check 14: Aoide and Strillix cross only where the golden says ──────────
+  # Thin wiring only — the scan, the sides it sorts every file into and the
+  # golden it compares against live in tests/boundary/ (scan.pl's header and
+  # README.md), the way Check 8's assertions live in tests/portability.nix.
+  # `src` is the flake's own store copy, which nix already git-filters, so like
+  # Check 4 this scopes to the COMMITTED tree: the files a build sees are the
+  # files counted.
+  boundary =
+    src:
+    pkgs.runCommand "aoide-check-boundary" { nativeBuildInputs = [ pkgs.perl ]; } ''
+      set -euo pipefail
+      perl ${src}/tests/boundary/scan.pl check ${src} ${src}/tests/boundary/crossings.golden > "$out"
+    '';
 in
 {
   inherit
@@ -1081,6 +1105,7 @@ in
     discovery
     phantomCommands
     nixIndependence
+    boundary
     portability
     nixLint
     themeFanout

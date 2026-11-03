@@ -39,8 +39,9 @@ Outputs, all tolerant of empty layers so eval stays robust:
   derived option list `strx onboard` reads.
 - `checks` — the contractual coupling discipline from `lib/checks.nix`
   (`surface-ownership`, `rice-runtime-untracked`, `rice-shape`, `fmt`,
-  `discovery`, `phantom-commands`, `nix-independence`, `portability`,
-  `nix-lint`, `theme-fanout`, `generator-offline`, `generator-relocatable`),
+  `discovery`, `phantom-commands`, `nix-independence`, `boundary`,
+  `portability`, `nix-lint`, `theme-fanout`, `generator-offline`,
+  `generator-relocatable`),
   one auto-generated `pkg-<name>` per discovered package, plus the `vm-boot`
   headless boot test (below) and the `vm-lock-greeter` graphical login and
   lock test (`tests/vm-lock-greeter.nix`).

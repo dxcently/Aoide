@@ -28,6 +28,11 @@ what those checks actually test.
   Screenshots land in the driver's output directory. Requires KVM.
 - `portability.nix` — asserts `packages.aoide-static` is genuinely free of
   nix, wired as `checks.<system>.portability` (`lib/checks.nix` Check 8).
+- `boundary/` — `scan.pl`, wired as `checks.<system>.boundary`
+  (`lib/checks.nix` Check 14): every place Aoide's files and Strillix's files
+  name each other, held against `crossings.golden`. A crossing the golden lacks
+  fails the build, and so does one that is gone until `scan.pl tighten`
+  shrinks the golden. Its README says how to read a failure.
 - `inventory.sh` — `tests/inventory.sh <flakeref> <host>`, the per-host
   evaluation inventory for the phase-5 gates: systemPackages names (an entry
   with no `name` keeps its outPath basename), the systemd unit namespaces
