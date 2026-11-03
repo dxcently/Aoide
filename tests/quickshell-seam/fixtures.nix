@@ -27,13 +27,10 @@ let
   # defines `_module.args.aoideInputs`. Read out of the ref rather than
   # reconstructed here, so the fixtures cannot drift from what a host really
   # gets; `specialArgs` therefore carries no `inputs` at all.
-  strillix = import (src + "/lib/strillix.nix") {
-    inherit inputs lib system;
-    username = "khoa";
-  };
+  strillix = import (src + "/lib/strillix.nix") { inherit inputs lib; };
 
   # The module argument a real host's rice hook hands in (`lib/strillix.nix`'s
-  # `mkHost`), for the fixture whose lanes read one: the strillix runtime reads
+  # `mkFlake`), for the fixture whose lanes read one: the strillix runtime reads
   # the rices it paints from. No rice is selected, so the rice facts keep
   # their defaults and no `rice.nix` is imported.
   riceArgs = {

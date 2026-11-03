@@ -77,22 +77,20 @@
       forAllSystems = f: nixpkgs.lib.genAttrs systems f;
       inherit (nixpkgs) lib;
 
-      # Per-host assembly (selection constructor + host module + home-manager).
-      strillix = import ./lib/strillix.nix {
-        inherit inputs lib;
-        system = "x86_64-linux";
-        username = "khoa";
+      # Strillix's constructor: host assembly (selection, host module, home-manager).
+      strillix = import ./lib/strillix.nix { inherit inputs lib; };
+
+      # The machines this flake builds, through the constructor a consumer's flake
+      # calls too (`lib.mkFlake` below). `mkFlake` reads `hosts/` — the ONE site that
+      # does — so this file never names a machine. `_desktop`/`_laptop`/`_server` are
+      # the templates to copy; `_mac` needs the darwin seam first. Its `root` is this
+      # tree, which is Strillix's base already.
+      machines = strillix.mkFlake {
+        root = ./.;
+        specialArgs = {
+          username = "khoa";
+        };
       };
-
-      # The machines this flake builds. `hostNames` lives in lib/strillix.nix —
-      # the ONE site that reads `hosts/` — so what this file builds and what
-      # `mkHost` takes as `knownHosts` cannot disagree. `_desktop`/`_laptop`/
-      # `_server` are the templates to copy; `_mac` needs the darwin seam first.
-      inherit (strillix) hostNames;
-
-      # One per discovered host; lazy per attribute, so an output that names one
-      # host never forces the others.
-      hosts = lib.genAttrs hostNames strillix.mkHost;
 
       # The rices's own discovery — the same file a host's rice selection is
       # validated against, so the `rice-shape` check and the selection can never
@@ -121,16 +119,20 @@
       };
 
       # The catalogue, read once: `lib.catalogue` and `nixosModules` are two
-      # views of this one record (`modules/default.nix` is plain data).
+      # views of this one record (`modules/default.nix` is plain data). Its
+      # `{ byClass = …; }` lines are rendered (lib/by-class.nix) before any view
+      # reads them, so `catalogue` is the one value every view takes.
       registry = import ./modules;
+      byClass = import ./lib/by-class.nix { inherit lib; };
+      catalogue = byClass.renderCatalogue registry.catalogue;
     in
     {
       # ── NixOS configurations ───────────────────────────────────────────────
-      # One per DISCOVERED host (see `hostNames` above) — this file never names
-      # a machine. Both outputs are derived from the same `hosts`, so what
+      # One per DISCOVERED host (`mkFlake` reads `hosts/`) — this file never names
+      # a machine. Both outputs come from the same `machines`, so what
       # `nixosConfigurations.<name>` builds and what `inventory.<name>` says it
       # resolved can never disagree.
-      nixosConfigurations = lib.mapAttrs (_: h: h.system) hosts;
+      inherit (machines) nixosConfigurations;
 
       # What each host actually resolved: its aggregations, every dendrite it
       # selected with the provider answering it and the file that answered, its
@@ -138,7 +140,7 @@
       # habit's composition, never maintained by hand — this is the review
       # surface for "no accidental all-dendrite loading":
       # `nix eval --json .#inventory.yomi-strix`.
-      inventory = lib.mapAttrs (_: h: h.inventory) hosts;
+      inherit (machines) inventory;
 
       # ── Packages ───────────────────────────────────────────────────────────
       # Auto-discovered by lib/pkgs.nix: every `pkgs/<name>/default.nix` (not
@@ -209,8 +211,9 @@
       };
 
       # ── Library ────────────────────────────────────────────────────────────
-      # The one public seam for assembling a host's module list. A consumer
-      # that wants the constructor takes it from here by name.
+      # `mkFlake` is the constructor a flake calls: its `root` is the flake's own
+      # tree, and it returns that flake's `nixosConfigurations` and `inventory`
+      # (lib/strillix.nix's header says what it reads from the root).
       #
       # `composition` is habit's (`inputs.habit`), re-exported unchanged: the
       # selection constructor (docs/architecture/NIX-COMPOSITION.md "Selection
@@ -221,12 +224,15 @@
       # registries takes habit directly.
       #
       # Each entry is its file's own function, still UNAPPLIED (so a consumer
-      # applies it with its own `lib`), except `catalogue`, which is data: the
+      # applies it with its own `lib`), except `mkFlake`, which is already applied to
+      # this flake's inputs and `lib`: the machines it returns are built with Strillix's
+      # own inputs, which a consumer chooses through `follows`. `catalogue` is the
       # same `name = <entry>` record `nixosModules.<name>` spells one name at a
-      # time, for a consumer that wants all of them at once. `lib/options.nix`
-      # is NOT here: it reads this tree's modules, which a consumer neither has
-      # nor should name.
+      # time, rendered as lib/by-class.nix renders it, for a consumer that wants all
+      # of them at once. `lib/options.nix` is NOT here: it reads this tree's modules,
+      # which a consumer neither has nor should name.
       lib = {
+        inherit (strillix) mkFlake;
         composition = inputs.habit.lib.composition;
         theme = import ./lib/theme.nix;
         # The rice record: called as a function (`lib.rices { inherit lib; … }`),
@@ -235,7 +241,7 @@
           __functor = _: import ./lib/rices.nix;
           merge = import ./lib/rices-merge.nix;
         };
-        inherit (registry) catalogue;
+        inherit catalogue;
       };
 
       # ── The export surface a consumer builds against ───────────────────────
@@ -250,17 +256,17 @@
       # `melete-adapter`, `aoide-nix`, `aoide-packages` — and `aoide-secrets` and
       # `aoide-config` are catalogue entries a host selects by name; a consumer
       # selects from its own aggregation): one entry per catalogue
-      # name, each the entry this flake's own registry holds for that
+      # name, each the entry this flake's rendered catalogue holds for that
       # capability (the path of a plain module or of a provider-set directory,
       # or an inline provider set `{ providers.<p> = <path>; }`, as the
       # component slots are: what the constructor's `registry.catalogue` takes
       # — the same value, spelled one name at a time), and `nucleus` the ONE module that sets
-      # `_module.args.aoideInputs`, which is also what `mkHost` passes as an
+      # `_module.args.aoideInputs`, which is also what `mkFlake` passes to every host as an
       # extra module. A consumer's catalogue is that attrset minus `nucleus`.
       nixosModules = {
         nucleus = strillix.nucleusModule;
       }
-      // registry.catalogue;
+      // catalogue;
 
       # The option contract for Home Manager (lib/strillix.nix `standaloneNucleus`): a
       # standalone home imports it beside the habit selection.
@@ -310,7 +316,7 @@
             # `default.nix` of the directory it names (`wallpaper`).
             name:
             let
-              entry = registry.catalogue.${name};
+              entry = catalogue.${name};
               set = if builtins.isAttrs entry then entry else import entry;
             in
             set.providers.strillix

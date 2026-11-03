@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Thin flakes: `lib.mkFlake`
+
+- A flake builds its machines with `aoide.lib.mkFlake { root = ./.; }`: its own `hosts/`, `modules/default.nix` and `rices/` are read by convention and come back as `nixosConfigurations` and `inventory`, so a consumer's flake needs no host loop of its own.
+- `lib/strillix.nix` takes `{ inputs, lib }` and returns `mkFlake`, `ricesRoot`, `nucleusModule`, `homeNucleus` and `standaloneNucleus`. `mkHost`, `hostNames` and the file's `system` and `username` arguments are gone: a caller that imports the file by path passes `system` to `mkFlake`, and `username` through `mkFlake`'s `specialArgs`.
+- A host that `mkFlake` builds from a tree other than Strillix's own sets `strillix.hostConfig` itself. It has no default there, and reading it unset fails by name.
+- A catalogue line, or the target of an inline provider set, may be `{ byClass = X; }`. X is a NixOS module and a Home Manager module written together, `{ nixos = …; homeManager = …; }`, with at least one of the two and no other key. `mkFlake` renders the marker in the registry before habit reads it, and a flake without habit imports `X.nixos` or `X.homeManager` directly.
+
+### Home half reads the host's own rices book
+
+- The home half reads the rices directory its system half reads: the host's own book when it has one, and Strillix's otherwise. Before, the home half always read Strillix's book, so a host's own rices reached its system half and not its home.
+
 ### barcarolle's calendar opens above the clock
 
 - The calendar sat near the top edge of every screen and ran off its right edge, because the clock stored its cell's corner in the bar window's coordinates, not the screen's, and the bar sits at the bottom. Opened from the clock, it now sits above it, its right edge on the clock's right edge and its bottom flush on the bar.

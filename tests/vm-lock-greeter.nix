@@ -43,10 +43,7 @@ let
     stock = inputs.nixpkgs.legacyPackages.${system};
   };
 
-  strillix = import ../lib/strillix.nix {
-    inherit inputs lib system;
-    username = "khoa";
-  };
+  strillix = import ../lib/strillix.nix { inherit inputs lib; };
 
   ricesRoot = ./lock-greeter/rices;
   rices = import ../lib/rices.nix {

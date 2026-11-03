@@ -430,8 +430,14 @@ A dendrite is one file (or a directory with `default.nix`) at
 composition splits a selected one into two halves when it wraps it. The
 module's own settings are its system half; what it sets under `habit.home` is
 its home half, a Home Manager module handed to each user the dendrite reaches.
-This repo is the shape's only consumer, and dxflake pins its own revision
-rather than following this one.
+The other form is a **byClass record**, `{ nixos = …; homeManager = …; }`: a NixOS
+module and a Home Manager module, with at least one of the two. It is data, not a
+module: its catalogue line names it as `{ byClass = <file>; }` (or the record inline),
+and `lib/by-class.nix` renders that marker into the plain module habit reads, which
+imports the `nixos` module and sets `habit.home` to the `homeManager` module. The
+constructor renders it lazily, so a record's file is read only when a host selects the
+entry, and a file that is not a record is refused by name. This repo is the shape's
+only consumer, and dxflake pins its own revision rather than following this one.
 
 ```nix
 # modules/dendrites/<name>.nix
@@ -467,7 +473,10 @@ Rules:
   (the component slots: `bar = { providers.strillix = ./dendrites/strillix/bar.nix;
   };`). Either way a provider file is named once, by the set, and the host
   picks one by name (`habit.dendrites.<slot>.provider`); a slot enabled with
-  no provider fails eval naming the ones it has.
+  no provider fails eval naming the ones it has. An inline provider target may be
+  a byClass record, `{ byClass = …; }`. A set held in a file may not: rendering a
+  marker there would import that file for every host, so habit reads the marker
+  as a module and refuses it.
 - **A dendrite never reads another module** — only `config.aoide.*` options it
   declares itself, plus stock NixOS options.
 - **Growth is additive**: a new dendrite is a new file plus one catalogue line,

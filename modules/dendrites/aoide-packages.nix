@@ -1,7 +1,8 @@
 # modules/dendrites/aoide-packages.nix — the aoide CLI on every PATH.
 #
 # The control plane's binaries (`aoide`, `aoided` — one derivation as of P-A7
-# of the binary-split workstream) are injected into pkgs by mkHost's overlay;
+# of the binary-split workstream) are injected into pkgs by the base overlay every host gets
+# (lib/strillix.nix over lib/pkgs.nix);
 # this module puts them on the SYSTEM profile so agent sessions and the user at
 # a terminal can invoke them by name. `strillix` is a separate output and the
 # strillix dendrite installs it, so this module reads no strillix fact. The
