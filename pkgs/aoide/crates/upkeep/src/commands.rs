@@ -171,7 +171,7 @@ mod tests {
         assert_eq!(unrecognized["severity"], "error");
         assert_eq!(unrecognized["path"], "stray.md");
         assert_eq!(unrecognized["assertedAt"], "CONTRACTS.md §2 — the repo root is closed");
-        assert_eq!(unrecognized["action"].as_str().unwrap().is_empty(), false);
+        assert!(!unrecognized["action"].as_str().unwrap().is_empty());
 
         let orphan = by_id("orphan-tracked:cache-ignored");
         assert_eq!(orphan["check"], "orphan-tracked");

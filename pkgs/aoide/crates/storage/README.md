@@ -178,11 +178,6 @@ by decision — no embedded database yet
   rather than a second copy in this one. The state tree's privacy
   boundary is `state/`, which `fs::ensure_write_dir` locks; the rule is
   CONTRACTS.md §4.
-  `conducting_stage_dir`'s first no-override resolution in a process also
-  drives `fs::migrate_conducting_stage`: a one-shot, idempotent move of the
-  six core files off their legacy location, `$STRILLIX_ROOT/stage/`, into
-  `state/stage/`. It never clobbers a fresher `state/stage/` file and never
-  touches a rice file.
   `fs::migrate_root_once` is the one-shot migration for the root layout
   itself: an old host's `~/Aoide/{state,log}` moves into the current root, and
   the peer-era state names are renamed. It is deliberately NOT wired into

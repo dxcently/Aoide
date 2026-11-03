@@ -424,7 +424,7 @@ fn hex_encode(bytes: &[u8]) -> String {
 /// field in the msgid-recomputation check, never trusted as well-formed).
 fn hex_decode(s: &str) -> Option<Vec<u8>> {
     let s = s.trim();
-    if s.is_empty() || s.len() % 2 != 0 {
+    if s.is_empty() || !s.len().is_multiple_of(2) {
         return None;
     }
     let mut out = Vec::with_capacity(s.len() / 2);
@@ -3515,7 +3515,7 @@ mod tests {
         std::fs::create_dir_all(crate::fs::conducting_stage_dir()).unwrap();
 
         let lock_path = crate::fs::conducting_stage_dir().join(".stage.lock");
-        let held = std::fs::OpenOptions::new().create(true).write(true).open(&lock_path).unwrap();
+        let held = std::fs::OpenOptions::new().create(true).write(true).truncate(false).open(&lock_path).unwrap();
         assert!(crate::fs::lock_exclusive(&held), "test setup must actually hold the lock");
 
         let released = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -4184,7 +4184,7 @@ mod tests {
         // No cursor map for "bob" at all yet.
         let err = stamp_rung("bob", "sess-1", 1).unwrap_err();
         assert!(!err.is_empty());
-        assert!(load_cursors().unwrap().get("bob").is_none(), "stamping an unenrolled reader must insert nothing");
+        assert!(!load_cursors().unwrap().contains_key("bob"), "stamping an unenrolled reader must insert nothing");
 
         // A cursor map exists for the name, but not this reader.
         enrol_reader("bob", "sess-2").unwrap();
@@ -4419,7 +4419,7 @@ mod tests {
         let outcome = deposit(signed_from_alice("carol", ENTRY_TYPE_LETTER, "hi", &alice), "sakaki").unwrap();
         assert_eq!(outcome, DepositOutcome::UnknownBox);
         assert!(!box_path("carol").exists(), "a far deposit created a box");
-        assert!(load_cursors().unwrap().get("carol").is_none(), "a far deposit wrote a cursor");
+        assert!(!load_cursors().unwrap().contains_key("carol"), "a far deposit wrote a cursor");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -4474,7 +4474,7 @@ mod tests {
         let (_env, dir) = root("s5-absent-read");
         assert!(read_for("ghost", true, None).unwrap().is_empty());
         assert_eq!(mark("ghost", None).unwrap(), 0);
-        assert!(load_cursors().unwrap().get("ghost").is_none(), "a read of an absent box wrote a cursor");
+        assert!(!load_cursors().unwrap().contains_key("ghost"), "a read of an absent box wrote a cursor");
         assert!(!box_path("ghost").exists(), "a read created the box");
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -4524,7 +4524,7 @@ mod tests {
         assert_eq!(removed, BoxRemoval { entries: 1, readers: 1 });
         assert!(!box_path("bob").exists(), "the box's log is gone");
         let cursors = load_cursors().unwrap();
-        assert!(cursors.get("bob").is_none(), "the box's cursor keys are gone");
+        assert!(!cursors.contains_key("bob"), "the box's cursor keys are gone");
         assert!(cursors.get("carol").is_some_and(|c| c.contains_key(&session_reader_key("sess-2"))), "another box's keys stay");
         assert!(box_path("carol").exists(), "another box stays");
         let _ = std::fs::remove_dir_all(&dir);

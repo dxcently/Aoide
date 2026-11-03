@@ -876,13 +876,14 @@ pub fn record_inbound_code_try(id: &str, now_epoch: i64) -> Result<u32, MarkAppr
 /// simply lacking a revealed nonce; an outbound entry only ever exists
 /// AFTER its own reveal already succeeded (`park_outbound`'s one caller,
 /// `pair`, parks only on a successful reveal).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum OutboundState {
     /// Waiting on the approver's own human to confirm the SAS and approve
     /// locally — the state every outbound entry starts in. This instance
     /// learns of the approval only by polling `aoide/pairPoll` (task #119:
     /// there is no approver→requester callback).
     #[serde(rename = "awaiting-approval")]
+    #[default]
     AwaitingApproval,
     /// A poll answered `approved` with a matching pubkey
     /// ([`mark_outbound_awaiting_confirm`]) — THIS instance's own operator
@@ -890,12 +891,6 @@ pub enum OutboundState {
     /// <id>` on this entry, the requester-side confirm path).
     #[serde(rename = "awaiting-confirm")]
     AwaitingConfirm,
-}
-
-impl Default for OutboundState {
-    fn default() -> Self {
-        Self::AwaitingApproval
-    }
 }
 
 impl OutboundState {

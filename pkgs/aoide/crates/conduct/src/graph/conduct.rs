@@ -1708,6 +1708,7 @@ struct MultiplexEnd {
 /// seam, so the loop itself is one function on both hosts: it asks
 /// [`wait_ready`] which of its three inputs is readable, services them, and
 /// ticks.
+#[allow(clippy::too_many_arguments)]
 fn conduct_multiplex(
     pty: &mut Pty,
     console: &mut Console,
@@ -2609,8 +2610,8 @@ mod tests {
                                 );
                                 break;
                             }
-                            let mut ts = libc::timespec { tv_sec: 0, tv_nsec: 10_000_000 };
-                            libc::nanosleep(&mut ts, std::ptr::null_mut());
+                            let ts = libc::timespec { tv_sec: 0, tv_nsec: 10_000_000 };
+                            libc::nanosleep(&ts, std::ptr::null_mut());
                         }
                         libc::close(fd);
                     }
@@ -3749,8 +3750,8 @@ mod tests {
                             libc::write(fd, payload.as_ptr() as *const libc::c_void, payload.len());
                             break;
                         }
-                        let mut ts = libc::timespec { tv_sec: 0, tv_nsec: 10_000_000 };
-                        libc::nanosleep(&mut ts, std::ptr::null_mut());
+                        let ts = libc::timespec { tv_sec: 0, tv_nsec: 10_000_000 };
+                        libc::nanosleep(&ts, std::ptr::null_mut());
                     }
                     libc::close(fd);
                 }
@@ -3838,8 +3839,8 @@ mod tests {
                             libc::write(fd, payload.as_ptr() as *const libc::c_void, payload.len());
                             break;
                         }
-                        let mut ts = libc::timespec { tv_sec: 0, tv_nsec: 10_000_000 };
-                        libc::nanosleep(&mut ts, std::ptr::null_mut());
+                        let ts = libc::timespec { tv_sec: 0, tv_nsec: 10_000_000 };
+                        libc::nanosleep(&ts, std::ptr::null_mut());
                     }
                     libc::close(fd);
                 }

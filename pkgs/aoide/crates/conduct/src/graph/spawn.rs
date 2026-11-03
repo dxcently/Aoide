@@ -171,6 +171,7 @@ fn spawn_exe() -> std::io::Result<PathBuf> {
 /// wrapper by construction rather than by a second argv kept in step by hand.
 /// Everything a caller passes is its own decision — this function is the
 /// SHAPE, never the policy about which flags a door may set.
+#[allow(clippy::too_many_arguments)]
 pub fn build_conduct_args(
     headless: bool,
     agent: &str,

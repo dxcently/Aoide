@@ -782,9 +782,8 @@ fn render_from(frame: &Frame, node: Option<&str>) -> Vec<String> {
         Some(path) => format!("session {} · log {path}", frame.session_id),
         None => format!("session {}", frame.session_id),
     });
-    match (&frame.task, &frame.socket, frame.conductable) {
-        (Some(task), _, _) => out.push(format!("task {task} · mailbox self/{task}")),
-        (None, _, _) => {}
+    if let Some(task) = &frame.task {
+        out.push(format!("task {task} · mailbox self/{task}"));
     }
     match (&frame.socket, frame.conductable) {
         (Some(socket), conductable) => out.push(format!(
@@ -1001,6 +1000,7 @@ fn read_refused(
 /// (a tail, not a delta) and reprinting an unchanged view every two seconds
 /// would bury the change it exists to show. Read-only in the same sense the
 /// local one is: nothing here moves a cursor, on either box.
+#[allow(clippy::too_many_arguments)]
 fn follow_remote(
     cmd: &'static str,
     node: &aoide_storage::node_store::Node,
@@ -1095,7 +1095,6 @@ fn write_event(
     text: Vec<String>,
     data: serde_json::Value,
 ) -> usize {
-    use std::io::Write as _;
     let lines = stream_lines(json_mode, kind, text, data);
     for line in &lines {
         let _ = writeln!(out, "{line}");

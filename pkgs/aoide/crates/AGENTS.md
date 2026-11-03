@@ -107,6 +107,15 @@ code under test withholds then FAILS that one test inside `DELIVERY_BUDGET`
 instead of parking it, and with it every test queued behind the crate's
 `env_lock`. The rig's own contract lives in that crate's `AGENTS.md`.
 
+## Clippy `-D warnings` gates every core crate
+
+`cargo clippy --workspace --all-targets --all-features -- -D warnings` runs as
+the flake check `aoide-clippy` (`checks.clippy` in `pkgs/aoide/flake.nix`,
+listed in the root `checks`), and a core crate that earns a warning turns it
+red. The Strillix-side crates (`strillix`, `strillix-rice`, `aoide-screen`) are
+excluded by name. A clippy lint is allowed only on the item it fires on, never
+for a whole module or crate.
+
 ## Declared validation, and the taught error
 
 A command's argument rules are DECLARED on its registry entry and checked once,

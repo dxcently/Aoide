@@ -423,9 +423,9 @@ fn term(word: &str, at: usize, key: &str, values: &str) -> Result<Term, FindErro
 fn grade(want: &str, have: &str) -> Option<Grade> {
     if have == want {
         Some(Grade::Exact)
-    } else if have.starts_with(&want) {
+    } else if have.starts_with(want) {
         Some(Grade::Prefix)
-    } else if have.contains(&want) {
+    } else if have.contains(want) {
         Some(Grade::Substring)
     } else {
         None
@@ -2411,7 +2411,7 @@ mod tests {
 
     #[test]
     fn the_weakest_grade_ranks_first_then_the_sum_of_grades() {
-        let rows = vec![
+        let rows = [
             local("x", "brave-otter", "idle"),
             local("y", "brave", "idle"),
             local("z", "brave-x", "idle"),

@@ -203,7 +203,7 @@ impl Default for Pairing {
 
 /// `[upkeep]` — the check lane's own intent (`aoide session hook`'s
 /// SessionStart/Stop wiring, `aoide-upkeep::checklane`).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Upkeep {
     /// The shell command the check lane runs to answer "is the working tree
@@ -215,12 +215,6 @@ pub struct Upkeep {
     /// lane outright — core ships with zero opinion on what "clean" means.
     #[serde(rename = "verifyCommand", default)]
     pub verify_command: String,
-}
-
-impl Default for Upkeep {
-    fn default() -> Self {
-        Upkeep { verify_command: String::new() }
-    }
 }
 
 /// `[mesh.<name>]` — a declared mesh: a named set of nodes an operator
@@ -775,20 +769,17 @@ fn validate_pair_transit(
                 ),
             ));
         }
-        match all.get(other).filter(|b| b.operator.is_none()) {
-            Some(back) => {
-                if back.gates.get(name).map(String::as_str) != Some(gate.as_str()) {
-                    return Err(invalid(
-                        format!("mesh.{name}.gates.{other}"),
-                        format!(
-                            "`mesh.{name}` gates into `{other}` through `{gate}`, but \
-                             `mesh.{other}` does not gate back through it — a gate is symmetric or it \
-                             is nothing: put `{name} = \"{gate}\"` under `[mesh.{other}.gates]`"
-                        ),
-                    ));
-                }
+        if let Some(back) = all.get(other).filter(|b| b.operator.is_none()) {
+            if back.gates.get(name).map(String::as_str) != Some(gate.as_str()) {
+                return Err(invalid(
+                    format!("mesh.{name}.gates.{other}"),
+                    format!(
+                        "`mesh.{name}` gates into `{other}` through `{gate}`, but \
+                         `mesh.{other}` does not gate back through it — a gate is symmetric or it \
+                         is nothing: put `{name} = \"{gate}\"` under `[mesh.{other}.gates]`"
+                    ),
+                ));
             }
-            None => {}
         }
     }
     Ok(())

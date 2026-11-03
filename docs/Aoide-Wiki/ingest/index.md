@@ -41,7 +41,7 @@ updated: 2026-09-27
 - [[Package-Layout]] — the landed pi-style single-charter crate split of `pkgs/aoide`, the per-crate charters, and the two-binary split (`aoide`/`aoided` vs `strillix`)
 - [[Agent-Hooking]] — how any harness registers on the conductor: hook payloads through the `AgentProfile` seam, the `session` commands, the conduct wrapper
 - [[Conductor-TUI]] — the `aoide conductor` interactive terminal frontend: seven panels, keys, what each dispatches
-- [[Secrets-Commands]] — the `aoide secrets` credential door's 17 commands: direct-home admin, over-the-socket operator, and the daemon itself
+- [[Secrets-Commands]] — the `aoide secrets` credential door's commands: direct-home admin, over-the-socket operator, and the daemon itself
 - [[Controls]] — the day-to-day surface: rebuild aliases, compositor keybinds, the bar's click/scroll/hover interactions, shell aliases
 - [[Screen-Control]] — `strx screen`, Strillix's computer-use surface: look, ground, act, verify — fourteen commands behind one CLI group
 

@@ -674,7 +674,7 @@ pub fn list_entries(node: &str) -> Result<Vec<OutboxEntry>, String> {
 /// [`list_entries`]'s read, for a caller that already holds the outbox lock:
 /// the sweeps read every node inside one locked section.
 fn list_entries_unlocked(node: &str) -> Result<Vec<OutboxEntry>, String> {
-    let dir = node_dir(&node);
+    let dir = node_dir(node);
     let read_dir = match std::fs::read_dir(&dir) {
         Ok(rd) => rd,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),

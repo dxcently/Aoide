@@ -333,8 +333,7 @@ fn add_roots(name: &str, paths: &[String], new: bool, auto_resume: bool, host: O
 
         let mut changed: Vec<String> = Vec::new();
         let mut added_roots: Vec<String> = Vec::new();
-        let message;
-        match file.projects.iter_mut().find(|p| p.name == name) {
+        let message = match file.projects.iter_mut().find(|p| p.name == name) {
             Some(existing) => {
                 let mut current: Vec<String> =
                     existing.roots().into_iter().map(str::to_string).collect();
@@ -365,7 +364,7 @@ fn add_roots(name: &str, paths: &[String], new: bool, auto_resume: bool, host: O
                         existing.roots = current;
                     }
                 }
-                message = if !added_roots.is_empty() {
+                if !added_roots.is_empty() {
                     if added_roots.len() == 1 {
                         format!("added root {} to project `{name}`", added_roots[0])
                     } else {
@@ -384,7 +383,7 @@ fn add_roots(name: &str, paths: &[String], new: bool, auto_resume: bool, host: O
                     format!("project `{name}` already registered (no change)")
                 } else {
                     format!("project `{name}` already has root {} (no change)", paths.join(", "))
-                };
+                }
             }
             None => {
                 let mut full: Vec<String> = Vec::new();
@@ -412,15 +411,15 @@ fn add_roots(name: &str, paths: &[String], new: bool, auto_resume: bool, host: O
                 if auto_resume {
                     changed.push(format!("project {name}: autoResume → true"));
                 }
-                message = if first.is_empty() {
+                if first.is_empty() {
                     format!("registered project `{name}` with no folder")
                 } else if rest_len > 0 {
                     format!("registered project `{name}` → {first} (+{rest_len} more root(s))")
                 } else {
                     format!("registered project `{name}` → {first}")
-                };
+                }
             }
-        }
+        };
 
         let final_auto_resume = auto_resume
             || file
@@ -1808,7 +1807,7 @@ mod tests {
         assert_eq!(out.status, aoide_protocol::output::Status::Ok, "{}", out.message);
         let file: ProjectsFile = load_stage(&projects_path()).unwrap();
         assert_eq!(file.projects[0].lead, None);
-        assert!(!std::fs::read_to_string(&projects_path()).unwrap().contains("lead"));
+        assert!(!std::fs::read_to_string(projects_path()).unwrap().contains("lead"));
 
         match saved {
             Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
@@ -2740,6 +2739,7 @@ mod tests {
         let stage = unique_stage("link-prune-lock");
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
 
+        #[allow(clippy::type_complexity)]
         let ops: [(&str, fn() -> Outcome); 2] = [
             ("link", || link(&invocation(&["graph", "link"], &["c", "p"]))),
             ("prune", || prune(&invocation(&["session", "prune"], &[]))),

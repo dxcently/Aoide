@@ -1914,7 +1914,7 @@ mod tests {
         let elapsed = start.elapsed();
 
         // Restore before cleanup can remove the tempfile.
-        let _ = crate::home::set_mode(&&path, 0o644);
+        let _ = crate::home::set_mode(&path, 0o644);
 
         assert_eq!(result.err(), Some(1), "a permission error must fail immediately (Err(1)), never wait");
         assert!(elapsed < Duration::from_secs(5), "must not have waited at all, took {elapsed:?}");

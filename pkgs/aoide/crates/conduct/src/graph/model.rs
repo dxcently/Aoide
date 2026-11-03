@@ -291,9 +291,9 @@ pub(in crate::graph) fn sorted_projects(projects: &[Project]) -> Vec<Project> {
 
 /// Does the child's parent resolve to a registered session? (a dangling
 /// `parentSessionId` falls back to project anchoring).
-pub(in crate::graph) fn resolved_parent<'a>(
+pub(in crate::graph) fn resolved_parent(
     s: &SessionRecord,
-    ids: &HashSet<&'a str>,
+    ids: &HashSet<&str>,
 ) -> Option<String> {
     s.parent_session_id
         .as_deref()
@@ -562,12 +562,12 @@ mod tests {
         // exactly as before — the workspace rung is inert without a binding.
         let alone = session("a", "/srv/cadenza/x", "working", "t", None);
         assert_eq!(
-            effective_project_for(&alone, &[alone.clone()], &projects)
+            effective_project_for(&alone, std::slice::from_ref(&alone), &projects)
                 .map(|i| projects[i].name.as_str()),
             Some("cadenza")
         );
         let unanchored = session("u", "/tmp/elsewhere", "working", "t", None);
-        assert_eq!(effective_project_for(&unanchored, &[unanchored.clone()], &projects), None);
+        assert_eq!(effective_project_for(&unanchored, std::slice::from_ref(&unanchored), &projects), None);
         assert_eq!(project_for(&unanchored, &projects), None);
     }
 

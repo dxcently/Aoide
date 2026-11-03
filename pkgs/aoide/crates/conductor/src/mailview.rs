@@ -209,7 +209,7 @@ impl MailBoard {
                 }
             }
         }
-        letters.sort_by(|a, b| b.seq.cmp(&a.seq));
+        letters.sort_by_key(|letter| std::cmp::Reverse(letter.seq));
         if letters.len() > MAX_LETTERS {
             letters.truncate(MAX_LETTERS);
             truncated = true;
@@ -497,13 +497,15 @@ mod tests {
 
     #[test]
     fn conversations_group_both_directions_and_order_without_changing_identity() {
-        let mut board = MailBoard::default();
-        board.letters = vec![
-            letter(4, ("a", "one"), ("b", "two")),
-            letter(2, ("b", "two"), ("a", "one")),
-            letter(3, ("c", "three"), ("c", "three")),
-            letter(1, ("a", "one"), ("c", "three")),
-        ];
+        let mut board = MailBoard {
+            letters: vec![
+                letter(4, ("a", "one"), ("b", "two")),
+                letter(2, ("b", "two"), ("a", "one")),
+                letter(3, ("c", "three"), ("c", "three")),
+                letter(1, ("a", "one"), ("c", "three")),
+            ],
+            ..Default::default()
+        };
         let groups = board.conversations();
         assert_eq!(groups.len(), 3);
         assert_eq!(
@@ -519,11 +521,13 @@ mod tests {
 
     #[test]
     fn conversation_identity_does_not_use_ambiguous_display_delimiters() {
-        let mut board = MailBoard::default();
-        board.letters = vec![
-            letter(1, ("node", "name@part"), ("other", "peer")),
-            letter(2, ("part@node", "name"), ("other", "peer")),
-        ];
+        let board = MailBoard {
+            letters: vec![
+                letter(1, ("node", "name@part"), ("other", "peer")),
+                letter(2, ("part@node", "name"), ("other", "peer")),
+            ],
+            ..Default::default()
+        };
         assert_eq!(board.letters[0].from, board.letters[1].from);
         let groups = board.conversations();
         assert_eq!(groups.len(), 2);

@@ -28,6 +28,7 @@
 //!     way in so the QML side matches one vocabulary.
 //!   - `DUNST_TIMESTAMP` is a MONOTONIC number, not a wall clock — useless for
 //!     "5 minutes ago". The ledger stamps its own `receivedAt` instead.
+//!
 //! There is no `DUNST_ACTIONS`: a third-party sender's action labels never
 //! reach us, so a plain toast carries no buttons. The case that matters is
 //! unaffected — an aoide permission SUMMONS is published straight into this

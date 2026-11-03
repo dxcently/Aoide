@@ -1234,7 +1234,7 @@ pub(crate) mod tests {
         let scratch = Scratch::new("agreeing");
         let operator = scratch.dir("operator");
         let sakaki_line = line_for(&scratch.dir("sakaki"), "sakaki");
-        sign_on(&operator, "home", &body(&[], &[], &[], &[sakaki_line.clone()]));
+        sign_on(&operator, "home", &body(&[], &[], &[], std::slice::from_ref(&sakaki_line)));
         sign_on(&operator, "away", &body(&[], &[], &[], &[sakaki_line]));
         let key = ok("home").key_of("sakaki").unwrap().to_string();
 
@@ -1416,7 +1416,7 @@ pub(crate) mod tests {
         let operator = scratch.dir("operator");
         let sakaki_line = line_for(&scratch.dir("sakaki"), "sakaki");
         let evo_line = line_for(&scratch.dir("evo"), "evo");
-        sign_on(&operator, "home", &body(&[], &[], &[], &[sakaki_line.clone()]));
+        sign_on(&operator, "home", &body(&[], &[], &[], std::slice::from_ref(&sakaki_line)));
         sign_on(&operator, "away", &body(&[], &[], &[], &[sakaki_line, evo_line]));
 
         assert_eq!(ok("home").key_of("sakaki"), ok("away").key_of("sakaki"), "one name, one key");
@@ -1435,7 +1435,7 @@ pub(crate) mod tests {
         let scratch = Scratch::new("one-sided-gate");
         let operator = scratch.dir("operator");
         let line = line_for(&scratch.dir("sakaki"), "sakaki");
-        sign_on(&operator, "home", &body(&[], &[], &[("away", "sakaki")], &[line.clone()]));
+        sign_on(&operator, "home", &body(&[], &[], &[("away", "sakaki")], std::slice::from_ref(&line)));
         sign_on(&operator, "away", &body(&[], &[], &[], &[line]));
 
         assert_eq!(refused("home").reason, ONE_SIDED_GATE);
@@ -1453,7 +1453,7 @@ pub(crate) mod tests {
         let scratch = Scratch::new("one-sided");
         let operator = scratch.dir("operator");
         let line = line_for(&scratch.dir("sakaki"), "sakaki");
-        sign_on(&operator, "home", &body(&[], &[], &[("away", "sakaki")], &[line.clone()]));
+        sign_on(&operator, "home", &body(&[], &[], &[("away", "sakaki")], std::slice::from_ref(&line)));
         sign_on(&operator, "away", &body(&[], &[], &[], &[line]));
 
         let refusal = refused("home");
@@ -1469,7 +1469,7 @@ pub(crate) mod tests {
         let operator = scratch.dir("operator");
         let line = line_for(&scratch.dir("sakaki"), "sakaki");
         let evo_line = line_for(&scratch.dir("evo"), "evo");
-        sign_on(&operator, "home", &body(&[], &[], &[("away", "sakaki")], &[line.clone()]));
+        sign_on(&operator, "home", &body(&[], &[], &[("away", "sakaki")], std::slice::from_ref(&line)));
         sign_on(&operator, "away", &body(&[], &[], &[("home", "sakaki")], &[line, evo_line]));
 
         let away = ok("away");

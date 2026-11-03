@@ -489,7 +489,7 @@ fn runs(inv: &Invocation, host: Host) -> Outcome {
     if let Some((query, tool)) = first_failure.filter(|_| !answered) {
         return journal_refused(CMD, &query, tool);
     }
-    rows.sort_by(|a: &Run, b: &Run| a.micros.cmp(&b.micros));
+    rows.sort_by_key(|a| a.micros);
     let mut lines: Vec<String> = rows.iter().map(run_text).collect();
     lines.extend(unread.iter().map(|(job, why)| format!("unread {job}: {why}")));
     let message = if lines.is_empty() {
@@ -1042,6 +1042,7 @@ mod tests {
     fn the_job_verbs_open_to_the_cli_and_daemon_doors_only() {
         let mut r = Registry::new();
         crate::commands::job::register(&mut r);
+        #[allow(clippy::type_complexity)]
         let verbs: [(&[&str], &[&str], &[(&str, &str)]); 4] = [
             (&["job", "add"], &["/bin/true"], &[("name", "nightly"), ("on", "daily")]),
             (&["job", "remove"], &[], &[("name", "nightly")]),
@@ -1386,6 +1387,7 @@ exit 0
             let plain = w.root.join("bin/plain").display().to_string();
             std::fs::write(&plain, "not a program").unwrap();
             let long = "x".repeat(49);
+            #[allow(clippy::type_complexity)]
             let cases: Vec<(&str, &str, Vec<&str>, Vec<(&str, &str)>)> = vec![
                 ("Bad_Name", "daily", vec![tool.as_str()], vec![]),
                 ("a.b", "daily", vec![tool.as_str()], vec![]),

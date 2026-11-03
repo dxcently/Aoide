@@ -940,7 +940,7 @@ fn invocation_from_dispatch_request(req: &Value, door_pid: Option<i32>) -> Resul
         }
         Some(_) => return Err("dispatch request's `flags` must be an object".to_string()),
     }
-    flags.entry("from".to_string()).or_insert_with(String::new);
+    flags.entry("from".to_string()).or_default();
     // The door's OWN `SO_PEERCRED` pid — the one kernel fact this daemon holds
     // about the connection, and the ONLY pid any hop-crossed command may use as
     // evidence about its caller. Written UNCONDITIONALLY: a value the wire
@@ -1415,10 +1415,10 @@ pub fn run_loop(
         tick_hand_edits(&hand_edit_watcher, &feed);
 
         ticks += 1;
-        if ticks % REAP_EVERY_TICKS == 0 {
+        if ticks.is_multiple_of(REAP_EVERY_TICKS) {
             run_internal_reap();
         }
-        if ticks % DRAIN_EVERY_TICKS == 0 {
+        if ticks.is_multiple_of(DRAIN_EVERY_TICKS) {
             run_internal_mail_drain();
         }
 

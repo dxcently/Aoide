@@ -280,7 +280,7 @@ pub fn load_or_mint_seed_file(path: &std::path::Path) -> io::Result<(Keypair, bo
             }
             let mut seed = [0u8; 32];
             getrandom::fill(&mut seed)
-                .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("system RNG unavailable: {e}")))?;
+                .map_err(|e| io::Error::other(format!("system RNG unavailable: {e}")))?;
             fs::atomic_write_private(path, &seed)?;
             Ok((
                 Keypair {
@@ -320,7 +320,7 @@ pub fn load_or_mint_seed_file(path: &std::path::Path) -> io::Result<(Keypair, bo
 pub fn mint_ephemeral() -> io::Result<Keypair> {
     let mut seed = [0u8; 32];
     getrandom::fill(&mut seed)
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("system RNG unavailable: {e}")))?;
+        .map_err(|e| io::Error::other(format!("system RNG unavailable: {e}")))?;
     let signing_key = SigningKey::from_bytes(&seed);
     Ok(Keypair {
         signing_key,

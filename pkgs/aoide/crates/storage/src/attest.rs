@@ -231,11 +231,11 @@ pub fn verify_seal_over(rec: &SessionRecord, pubkey_hex: &str) -> bool {
 /// "done"`) session whose `pid` matches an ancestor AND whose `verify`
 /// passes. Private — [`attested_session`] and [`attested_caller`] are the
 /// two shapes callers consume.
-fn attested_record<'a>(
+fn attested_record(
     start_pid: i32,
-    sessions: &'a [SessionRecord],
+    sessions: &[SessionRecord],
     verify: impl Fn(&SessionRecord) -> bool,
-) -> Option<&'a SessionRecord> {
+) -> Option<&SessionRecord> {
     for pid in pid_ancestry(start_pid) {
         if let Some(rec) = sessions.iter().find(|s| {
             s.pid == Some(pid as u32) && canonical_state(&s.state) != "done" && verify(s)

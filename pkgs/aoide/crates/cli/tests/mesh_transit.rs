@@ -112,7 +112,7 @@ fn a_one_sided_gate_charter_is_refused_at_load() {
 
     let set = routing::declarations().expect("the fixture's declarations load");
     let home = set.iter().find(|l| l.mesh == HOME).expect("home is in the set");
-    let refusal = home.declaration.as_ref().err().expect("home's gate is un-answered");
+    let refusal = home.declaration.as_ref().expect_err("home's gate is un-answered");
     assert_eq!(refusal.reason, routing::ONE_SIDED_GATE, "{refusal}");
     assert!(refusal.detail.contains(AWAY) && refusal.detail.contains("sakaki"), "{refusal}");
     let away = set.iter().find(|l| l.mesh == AWAY).expect("away is in the set");
@@ -541,7 +541,7 @@ fn a_learnt_binding_that_is_not_the_declared_key_is_not_used() {
     let declared = aoide_storage::charter::governing(HOME).unwrap().nodes["chiyo"].age.clone();
     // The stale record's key: a second identity, minted for this test alone.
     let stale_kp = aoide_storage::identity::load_or_mint_seed_file(
-        &std::path::PathBuf::from(aoide_storage::fs::state_dir()).join("stale.key"),
+        &aoide_storage::fs::state_dir().join("stale.key"),
     )
     .unwrap()
     .0;

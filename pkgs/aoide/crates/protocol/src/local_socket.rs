@@ -346,9 +346,9 @@ mod tests {
 
     /// The length handed to `connect(2)` is `offsetof(sun_path)` + the path
     /// + its terminating NUL, and the bytes in the buffer are the caller's
-    /// path followed by zeros — checked both directly and by round-tripping
-    /// the same path through `std`, which reads the buffer back the way the
-    /// kernel does.
+    ///   path followed by zeros — checked both directly and by
+    ///   round-tripping the same path through `std`, which reads the buffer
+    ///   back the way the kernel does.
     #[test]
     // `cfg(unix)`: this reads the UNIX arm's own body
     // (`unix_sockaddr` builds a `libc::sockaddr_un`; the backlog tests
@@ -457,16 +457,15 @@ mod tests {
     }
 
     /// Hand-rolled listener + a single unaccepted connection.
-    /// `UnixListener::bind` hardcodes a backlog of 128, far too large to
-    /// saturate cheaply in a test, so this builds the listener directly with
-    /// `libc::listen(fd, 1)` — the same raw-socket construction
-    /// `connect_bounded`/`unix_sockaddr` already use in production code,
-    /// reused here for the test's own
-    /// setup. Returns the listening fd and the one filler fd occupying
-    /// the single backlog slot; asserts the backlog is GENUINELY
-    /// saturated (a probe connect must observe a real `EAGAIN`) before
-    /// handing control to the caller, so this is never a simulated
-    /// condition.
+    /// `UnixListener::bind` asks for the largest backlog the system allows
+    /// (somaxconn on Linux), far too large to saturate cheaply in a test, so
+    /// this builds the listener directly with `libc::listen(fd, 1)` — the
+    /// same raw-socket construction `connect_bounded`/`unix_sockaddr`
+    /// already use in production code, reused here for the test's own setup.
+    /// Returns the listening fd and the one filler fd occupying the single
+    /// backlog slot; asserts the backlog is GENUINELY saturated (a probe
+    /// connect must observe a real `EAGAIN`) before handing control to the
+    /// caller, so this is never a simulated condition.
     #[cfg(unix)]
     fn saturate_backlog_of_one(sock: &Path) -> (RawFd, Vec<RawFd>) {
         let (addr, addr_len) = unix_sockaddr(sock).unwrap();

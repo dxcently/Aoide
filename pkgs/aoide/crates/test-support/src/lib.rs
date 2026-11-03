@@ -576,60 +576,6 @@ impl Drop for EnvGuard {
     }
 }
 
-#[cfg(test)]
-mod env_guard_tests {
-    use super::*;
-
-    const LEAK: &str = "AOIDE_TEST_SUPPORT_GUARD_LEAK";
-    const RESTORE: &str = "AOIDE_TEST_SUPPORT_GUARD_RESTORE";
-    const OWN_FAILURE: &str = "AOIDE_TEST_SUPPORT_GUARD_OWN_FAILURE";
-
-    fn panic_text(r: Result<(), Box<dyn std::any::Any + Send>>) -> String {
-        let e = r.expect_err("the closure panicked");
-        e.downcast_ref::<String>().cloned().or_else(|| e.downcast_ref::<&str>().map(|s| s.to_string())).unwrap_or_default()
-    }
-
-    /// Removes a probe under the raw env lock. A `GuardedEnvLock` here would
-    /// check the removal as a change; the lock is taken poison-tolerant because
-    /// the guard that set the probe panicked while holding it.
-    fn remove_probe(var: &str) {
-        let _held = env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        std::env::remove_var(var);
-    }
-
-    #[test]
-    fn a_test_that_leaves_an_aoide_variable_set_fails_naming_it() {
-        let text = panic_text(std::panic::catch_unwind(|| {
-            let _g = GuardedEnvLock.lock().unwrap_or_else(|e| e.into_inner());
-            std::env::set_var(LEAK, "leaked");
-        }));
-        remove_probe(LEAK);
-        assert!(text.contains(LEAK) && text.contains("changed"), "{text}");
-    }
-
-    #[test]
-    fn a_test_that_restores_what_it_set_passes() {
-        let _g = GuardedEnvLock.lock().unwrap_or_else(|e| e.into_inner());
-        let before = std::env::var(RESTORE).ok();
-        std::env::set_var(RESTORE, "set");
-        match before {
-            Some(v) => std::env::set_var(RESTORE, v),
-            None => std::env::remove_var(RESTORE),
-        }
-    }
-
-    #[test]
-    fn a_test_that_is_already_failing_keeps_its_own_message() {
-        let text = panic_text(std::panic::catch_unwind(|| {
-            let _g = GuardedEnvLock.lock().unwrap_or_else(|e| e.into_inner());
-            std::env::set_var(OWN_FAILURE, "leaked");
-            panic!("own failure");
-        }));
-        remove_probe(OWN_FAILURE);
-        assert_eq!(text, "own failure");
-    }
-}
-
 /// Install a FAKE `hyprctl` on `PATH` (the established shim technique — this
 /// crate's own `crates/AGENTS.md` note on replacing a real binary) so the
 /// compositor-facing half can be driven end-to-end with no compositor at all.
@@ -692,4 +638,58 @@ fi
 /// An argv: each item as an owned `String`, for the tests that build one.
 pub fn sv(items: &[&str]) -> Vec<String> {
     items.iter().map(|s| s.to_string()).collect()
+}
+
+#[cfg(test)]
+mod env_guard_tests {
+    use super::*;
+
+    const LEAK: &str = "AOIDE_TEST_SUPPORT_GUARD_LEAK";
+    const RESTORE: &str = "AOIDE_TEST_SUPPORT_GUARD_RESTORE";
+    const OWN_FAILURE: &str = "AOIDE_TEST_SUPPORT_GUARD_OWN_FAILURE";
+
+    fn panic_text(r: Result<(), Box<dyn std::any::Any + Send>>) -> String {
+        let e = r.expect_err("the closure panicked");
+        e.downcast_ref::<String>().cloned().or_else(|| e.downcast_ref::<&str>().map(|s| s.to_string())).unwrap_or_default()
+    }
+
+    /// Removes a probe under the raw env lock. A `GuardedEnvLock` here would
+    /// check the removal as a change; the lock is taken poison-tolerant because
+    /// the guard that set the probe panicked while holding it.
+    fn remove_probe(var: &str) {
+        let _held = env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        std::env::remove_var(var);
+    }
+
+    #[test]
+    fn a_test_that_leaves_an_aoide_variable_set_fails_naming_it() {
+        let text = panic_text(std::panic::catch_unwind(|| {
+            let _g = GuardedEnvLock.lock().unwrap_or_else(|e| e.into_inner());
+            std::env::set_var(LEAK, "leaked");
+        }));
+        remove_probe(LEAK);
+        assert!(text.contains(LEAK) && text.contains("changed"), "{text}");
+    }
+
+    #[test]
+    fn a_test_that_restores_what_it_set_passes() {
+        let _g = GuardedEnvLock.lock().unwrap_or_else(|e| e.into_inner());
+        let before = std::env::var(RESTORE).ok();
+        std::env::set_var(RESTORE, "set");
+        match before {
+            Some(v) => std::env::set_var(RESTORE, v),
+            None => std::env::remove_var(RESTORE),
+        }
+    }
+
+    #[test]
+    fn a_test_that_is_already_failing_keeps_its_own_message() {
+        let text = panic_text(std::panic::catch_unwind(|| {
+            let _g = GuardedEnvLock.lock().unwrap_or_else(|e| e.into_inner());
+            std::env::set_var(OWN_FAILURE, "leaked");
+            panic!("own failure");
+        }));
+        remove_probe(OWN_FAILURE);
+        assert_eq!(text, "own failure");
+    }
 }

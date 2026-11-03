@@ -224,16 +224,11 @@
   declared twin, the rice link `rice.conf` and the rice tree's roots are
   `strillix_rice::paths`, and core never names them. The invariants for those
   paths, and for the rice link's own writer, live in `strillix-rice/AGENTS.md`.
-- **`fs::migrate_conducting_stage` is a ONE-SHOT, Once-guarded move, not a
-  sync.** It runs at most once per process, only from
-  `conducting_stage_dir`'s no-override fallback branch (an `$AOIDE_STAGE_DIR`
-  override names the same directory for old and new, so there is nothing to
-  move and that branch never calls it). It moves a file only when it exists
-  at the OLD `$STRILLIX_ROOT/stage/` path and is ABSENT at the new one — never
-  clobbers a fresher `state/stage/` file, never touches a rice file. Don't
-  turn this into a periodic or unconditional re-sync; a second boot with
-  both a old-path leftover and a populated new path should leave the new
-  path exactly as it is.
+- **`conducting_stage_dir` is a path, and nothing more.** It resolves
+  `$AOIDE_STAGE_DIR` or `state/stage/` from the environment and touches no
+  file: nothing is moved, made or read, and no `Once` runs. A pre-split
+  conducting file a host still holds under `$STRILLIX_ROOT/stage/` is never
+  read or moved by core; it stays where it is, unread.
 - **`remoteParent` and `parentSessionId` are two edges, never one field
   (remote sub-agents lane, P-RSA).** `SessionRecord.parent_session_id` is a
   LOCAL id and every reader treats it as one (autogate grant, sibling rule,
@@ -546,9 +541,8 @@
   writes in one process, threads included, never share one of these, so a
   rename never finds another writer's temp already moved. The counter sits
   before `.tmp.`, so the sweep, which reads the pid after the last `.tmp.`,
-  still reads the pid. Two temps do not carry it: `migrate_conducting_stage`'s
-  `.{name}.migrate-tmp` (no pid) at `fs.rs:514`, and `atomic_symlink`'s
-  `.{name}.tmp-{pid}` at `fs.rs:603`. Neither is covered by the counter.
+  still reads the pid. One temp does not carry it: `atomic_symlink`'s
+  `.{name}.tmp-{pid}` at `fs.rs:470`, which the counter does not cover.
   The counter adds `1 + digits(n)` bytes to each temp's name, so a target
   whose name is within that margin of `NAME_MAX` (255 bytes on Linux) now
   fails at create, where the `<stem>.tmp.<pid>` form still fit.
@@ -869,14 +863,12 @@
   records, and `resuming.json`.
 - **`undying`'s legacy-migration check runs on every `load_undying` call,
   not behind a process-wide `Once` — deliberate, not an oversight
-  (command-defrag lane U1, 2026-08-27).** Unlike
-  `fs::migrate_conducting_stage` (six files, hot-path-called, worth a
-  one-time guard), this migration moves ONE small file and its own check is
-  a single `exists()` stat that becomes a guaranteed no-op the instant the
-  legacy `carry.json` is gone — cheap enough to run unconditionally, and
-  simpler to test (no cross-test `Once` state to isolate). Don't add a
-  `Once` guard here "for consistency" with `fs.rs` — that would reintroduce
-  exactly the test-ordering fragility a per-call idempotent check avoids.
+  (command-defrag lane U1, 2026-08-27).** This migration moves ONE small file
+  and its own check is a single `exists()` stat that becomes a guaranteed
+  no-op the instant the legacy `carry.json` is gone — cheap enough to run
+  unconditionally, and simpler to test (no cross-test `Once` state to
+  isolate). Don't add a `Once` guard here: that would reintroduce exactly the
+  test-ordering fragility a per-call idempotent check avoids.
 - **`resuming::load_claims` returns `Ok` with no claims only for an absent
   file (one engine per session).** An unreadable, unparseable or other-version
   file, or a claim whose `at` is not ISO UTC, is `Err`, and conduct's claim

@@ -506,7 +506,7 @@ fn file_report(rec: &SessionRecord, slug: &str, mailbox: &str) -> Result<Option<
     // findable is reported as NO msgid rather than a fabricated one — and the
     // caller treats a missing msgid as "filed, unverified identity", never as
     // proof.
-    let found = aoide_storage::mail::read_box(&mailbox).ok().and_then(|entries| {
+    let found = aoide_storage::mail::read_box(mailbox).ok().and_then(|entries| {
         entries
             .into_iter()
             .rev()
@@ -630,7 +630,7 @@ mod tests {
     /// A finished managed task run, exactly as `conduct`'s exit path leaves
     /// one: done, with the real code and end instant, its transcript and its
     /// instruction sidecar on disk.
-    fn finished_run(root: &PathBuf, id: &str, slug: &str, exit_code: Option<i32>) -> SessionRecord {
+    fn finished_run(root: &std::path::Path, id: &str, slug: &str, exit_code: Option<i32>) -> SessionRecord {
         let log = root.join("state/sessions").join(format!("{id}.log"));
         std::fs::write(&log, "the run's own output\n").unwrap();
         let sidecar = root.join("state/sessions").join(format!("{id}.instructions.md"));
@@ -1034,7 +1034,7 @@ mod tests {
         assert_eq!(out.status, aoide_protocol::output::Status::Ok, "{}", out.message);
         let data = out.data.clone().unwrap();
         assert_eq!(data["task"], "fix-flaky");
-        assert_eq!(data["report"].as_str().is_some(), true, "report line present");
+        assert!(data["report"].as_str().is_some(), "report line present");
         assert!(
             out.message.contains("── 0 unread for fix-flaky"),
             "the child's queue is rendered: {}",

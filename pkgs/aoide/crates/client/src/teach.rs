@@ -97,6 +97,7 @@ fn mcp_call(inv: &Invocation, noun: &str, slot: Slot, with: &str) -> String {
 /// that prints the valid names (the fix when nothing is close, since guessing
 /// a name for a command that changes something would be wrong), and `none_yet`
 /// is the fix when there is nothing to choose from.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn unknown_name(
     inv: &Invocation,
     cmd: &str,

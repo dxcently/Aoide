@@ -222,6 +222,7 @@ pub enum InputKind {
 }
 
 #[derive(Debug, Clone)]
+#[allow(clippy::large_enum_variant)]
 pub enum ContextTarget {
     Session(SessionRecord),
     /// A session on another node, as a Graph host card's row names it: its
@@ -376,6 +377,7 @@ pub const FRESH_TICKS: u8 = 4;
 /// single source of truth for both rendering and key handling, so the cursor
 /// can never point at something the screen isn't showing.
 #[derive(Debug, Clone)]
+#[allow(clippy::large_enum_variant)]
 pub enum DagRow {
     Group {
         name: String,
@@ -394,6 +396,7 @@ pub enum DagRow {
 
 /// Sidebar navigation retains complete records; labels are presentation only.
 #[derive(Debug, Clone)]
+#[allow(clippy::large_enum_variant)]
 pub enum SidebarRow {
     History {
         entry: aoide_storage::ledger::LedgerEntry,
@@ -959,6 +962,8 @@ impl StatusRow {
     }
 }
 
+type MailTargetMenu = (u16, u16, Vec<(String, String)>, usize);
+
 /// The whole conductor state.
 pub struct App {
     pub panel: Panel,
@@ -1019,7 +1024,7 @@ pub struct App {
     pub input: Option<Input>,
     pub context_menu: Option<ContextMenu>,
     pub mail_draft: Option<MailDraft>,
-    pub mail_target_menu: Option<(u16, u16, Vec<(String, String)>, usize)>,
+    pub mail_target_menu: Option<MailTargetMenu>,
     /// Group names currently folded shut in the SESSION panel.
     pub folded: HashSet<String>,
     /// Terminal-watcher: session id → remaining fresh ticks. A session lands
@@ -3878,6 +3883,7 @@ impl App {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn open_context_for_remote(
         &mut self,
         node: String,
@@ -6539,9 +6545,10 @@ mod tests {
 
     // ── Compose: `s` on a ROSTER session row (P-C5) ──────────────────────
 
+    type RecordedCall = (Vec<String>, Vec<String>, BTreeMap<String, String>);
+
     static COMPOSE_TEST_LOCK: Mutex<()> = Mutex::new(());
-    static COMPOSE_CALLS: Mutex<Vec<(Vec<String>, Vec<String>, BTreeMap<String, String>)>> =
-        Mutex::new(Vec::new());
+    static COMPOSE_CALLS: Mutex<Vec<RecordedCall>> = Mutex::new(Vec::new());
 
     fn recording_compose_dispatch(inv: &Invocation) -> Outcome {
         COMPOSE_CALLS
@@ -6619,8 +6626,7 @@ mod tests {
     // ── Projects panel: `r` resurrects the focused project (P-D8) ────────
 
     static PROJECTS_TEST_LOCK: Mutex<()> = Mutex::new(());
-    static RESURRECT_CALLS: Mutex<Vec<(Vec<String>, Vec<String>, BTreeMap<String, String>)>> =
-        Mutex::new(Vec::new());
+    static RESURRECT_CALLS: Mutex<Vec<RecordedCall>> = Mutex::new(Vec::new());
 
     fn recording_resurrect_dispatch(inv: &Invocation) -> Outcome {
         RESURRECT_CALLS.lock().unwrap().push((
@@ -7001,7 +7007,7 @@ mod tests {
             assert!(approvals().is_empty(), "the first key approves nothing");
             let confirm = app.spawn_confirm.as_ref().expect("a confirm view opened");
             assert_eq!(confirm.id, "1");
-            assert_eq!(confirm.text, graph::visible(&command), "it holds the whole command as it replays");
+            assert_eq!(confirm.text, graph::visible(command), "it holds the whole command as it replays");
 
             for key in [KeyCode::Char('a'), KeyCode::Char('A'), KeyCode::Enter, KeyCode::Char('x'), KeyCode::Tab] {
                 app.handle_key(KeyEvent::from(key));

@@ -173,7 +173,7 @@ pub fn hex_encode(bytes: &[u8]) -> String {
 }
 
 fn hex_decode(s: &str) -> Option<Vec<u8>> {
-    if s.len() % 2 != 0 {
+    if !s.len().is_multiple_of(2) {
         return None;
     }
     let b = s.as_bytes();
@@ -1151,6 +1151,7 @@ pub fn seal_envelope(
 ///
 /// `origin_mesh` and `mesh` are both the charter's own mesh at mint — the
 /// charter IS the mesh declaration, so there is no second zone to name.
+#[allow(clippy::too_many_arguments)]
 pub fn seal_charter(
     file_bytes: &[u8],
     sig_bytes: &[u8],
@@ -1564,7 +1565,7 @@ pub fn deposit_container_over(
     // Only one ADDRESSED HERE takes that branch. A charter letter for another
     // node is a letter in transit like any other: this box carries it on below,
     // which is how a `poll` node's charter reaches it through its relay.
-    let declared = crate::routing::own_name_in(&set, request_mesh, &own_key);
+    let declared = crate::routing::own_name_in(set, request_mesh, &own_key);
     let for_here = addressed_here(container, request_mesh, set)?;
     if container.purpose == PURPOSE_CHARTER && for_here {
         return deposit_charter(container, &ctx, &ct, &sig, request_mesh, &own_key);
@@ -1582,7 +1583,7 @@ pub fn deposit_container_over(
     // maps to; the connection-signature ladder that tries every verified
     // key must not be reused here, or a paired node signing as another
     // paired node would file under the wrong name.
-    let Some(recorded) = crate::routing::key_in(&set, &ctx.origin_mesh, &ctx.origin_node) else {
+    let Some(recorded) = crate::routing::key_in(set, &ctx.origin_mesh, &ctx.origin_node) else {
         return Ok(refusal(
             "unverified-origin",
             format!("`{}` has no key on record in mesh `{}`", ctx.origin_node, ctx.origin_mesh),
@@ -1636,10 +1637,10 @@ pub fn deposit_container_over(
         // checked here, without a key — every hop's own entry, every crossing by
         // a declared gate, and the last hop signed in the zone the depositing hop
         // is speaking in.
-        if let Err(refusal) = walk_chain(container, &ctx, request_mesh, &set, &own_key) {
+        if let Err(refusal) = walk_chain(container, &ctx, request_mesh, set, &own_key) {
             return Ok(ContainerOutcome::Refused { reason: refusal.reason, detail: refusal.detail });
         }
-        return match hop_here(container, &ctx, request_mesh, &set, &kp, own_name, digest)? {
+        return match hop_here(container, &ctx, request_mesh, set, &kp, own_name, digest)? {
             HopStep::Hop(hop) => Ok(ContainerOutcome::Hopped(Box::new(hop))),
             HopStep::Refused(refusal) => {
                 Ok(ContainerOutcome::Refused { reason: refusal.reason, detail: refusal.detail })
@@ -1731,11 +1732,11 @@ pub fn deposit_container_over(
         ));
     }
     // 6. The inner envelope's own signature, over the SAME set this deposit read.
-    if !mail::verify_origin_signature_in(&envelope, &set) {
+    if !mail::verify_origin_signature_in(&envelope, set) {
         return Ok(refusal("unverified-origin", "the inner envelope signature does not verify".to_string()));
     }
     // 7. Walk the chain, in the zone the depositing hop signed for.
-    if let Err(refusal) = walk_chain(container, &ctx, request_mesh, &set, &own_key) {
+    if let Err(refusal) = walk_chain(container, &ctx, request_mesh, set, &own_key) {
         return Ok(ContainerOutcome::Refused { reason: refusal.reason, detail: refusal.detail });
     }
     Ok(ContainerOutcome::Opened { envelope: Box::new(envelope), digest })
@@ -1786,7 +1787,7 @@ fn hop_here(
     let looped = container.transit.iter().skip(1).any(|entry| {
         entry.node == own_name
             || mine
-                && crate::routing::key_in(&set, &entry.mesh, &entry.node)
+                && crate::routing::key_in(set, &entry.mesh, &entry.node)
                     .is_some_and(|key| key.eq_ignore_ascii_case(&own_key))
     });
     if looped {
@@ -1795,7 +1796,7 @@ fn hop_here(
             format!("the chain already names this box (`{own_name}`), which carried it once already"),
         )));
     }
-    let route = crate::routing::Letter { from: own_name, to: &container.to.node, mesh }.route(&set);
+    let route = crate::routing::Letter { from: own_name, to: &container.to.node, mesh }.route(set);
     let hop = match route.outcome {
         Ok(hop) => hop,
         Err(refusal) => return Ok(HopStep::Refused(refusal)),
@@ -3522,7 +3523,7 @@ mod review_fix_tests {
         let (kp, _) = identity::load_or_mint().unwrap();
         let me = kp.info().pubkey_hex.clone();
         let record = |node: &str, key: String, mesh: &str| {
-            let row = node_store::Node {
+            node_store::Node {
                 name: node.to_string(),
                 url: "ssh://self".to_string(),
                 token_file: None,
@@ -3534,8 +3535,7 @@ mod review_fix_tests {
                 narrowed: node_store::Grants::new(),
                 via: None,
                 added_at: "2026-09-07T00:00:00Z".to_string(),
-            };
-            row
+            }
         };
         // `origin` holds this process's key in BOTH meshes too, so it can sign
         // the crossing as neither is refused for a missing key: the one thing

@@ -121,7 +121,7 @@ pub(crate) fn draw_overlays(f: &mut Frame, app: &App) {
         lines.push(String::new());
         lines.push("Enter or Esc dismisses and clears the code.".to_string());
         let body = lines.join("\n");
-        let width = area.width.min(72).max(24);
+        let width = area.width.clamp(24, 72);
         let height = area.height.min(lines.len() as u16 + 4).max(6);
         let popup = centered(width, height, area);
         f.render_widget(Clear, popup);

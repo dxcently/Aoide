@@ -487,9 +487,9 @@ mod tests {
         let ring = load_pingback_remote().children.remove("sess-1").unwrap();
         assert_eq!(ring.events.len(), PINGBACK_REMOTE_MAX);
         assert_eq!(ring.last, (PINGBACK_REMOTE_MAX + 4) as u64);
-        assert_eq!(events_for("sess-1", 0).gap, true, "seqs 1..4 were dropped before the cursor at 0");
-        assert_eq!(events_for("sess-1", 4).gap, false, "the cursor at 4 hands over 5 next");
-        assert_eq!(events_for("sess-1", 1).gap, true, "the cursor at 1 lost seqs 2..4");
+        assert!(events_for("sess-1", 0).gap, "seqs 1..4 were dropped before the cursor at 0");
+        assert!(!events_for("sess-1", 4).gap, "the cursor at 4 hands over 5 next");
+        assert!(events_for("sess-1", 1).gap, "the cursor at 1 lost seqs 2..4");
 
         // A missing file, and a corrupt one, both read as empty rather than
         // failing a tick.

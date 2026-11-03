@@ -778,7 +778,7 @@ fn node_pair_approve_on_an_outbound_entry_awaiting_confirm_commits_with_the_repl
     assert_eq!(nodes[0].name, "box-b");
     assert_eq!(nodes[0].url, "http://b/");
     assert_eq!(nodes[0].pubkey.as_deref(), Some("b".repeat(64).as_str()));
-    assert_eq!(nodes[0].verified, true);
+    assert!(nodes[0].verified);
     assert_eq!(nodes[0].via.as_deref(), Some("ssh://khoa@box-b"), "the parked entry's via is committed onto the node record at approve time (P-S4)");
     assert!(aoide_storage::pairing::list_outbound(now_epoch).is_empty(), "committed and removed from the outbound queue");
 

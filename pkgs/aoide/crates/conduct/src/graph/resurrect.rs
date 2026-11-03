@@ -185,19 +185,17 @@
 //! call's refusal; with `--id` or `--all` and no `--project`, the usage error
 //! the call gives; with `--project`, the `dry-run-not-held` refusal, since that
 //! call would hold and show the caller nothing. Nothing is held, spawned or
-//! sent on any door. The handler writes three things and no others: the audit
-//! line (status `dry-run`, at the points the real call audits); the one-time
-//! `carry.json` rename an undying read performs
+//! sent on any door. The handler writes two things and no others: the audit
+//! line (status `dry-run`, at the points the real call audits); and the
+//! one-time `carry.json` rename an undying read performs
 //! (`aoide_storage::undying::load_undying`), on a host that still holds the
-//! legacy file; and the one-time conducting-stage migration a stage read
-//! performs (`aoide_storage::fs::conducting_stage_dir`), on a host that still
-//! holds the legacy stage files. Two writes come with any call, dry or real,
-//! outside the handler: the door's audit line, and the start-up migration both
-//! core binaries run (`aoide_storage::fs::migrate_root_once`). It locks
-//! `state/` owner-only when it exists and renames old peer state files. When
-//! the legacy `~/Aoide` root is not `$AOIDE_ROOT`, it moves that root's state
-//! unless `AOIDE_STATE_DIR` is set, and its log unless `AOIDE_AUDIT_LOG` is set
-//! and not empty.
+//! legacy file. Two writes come with any call, dry or real, outside the
+//! handler: the door's audit line, and the start-up migration both core
+//! binaries run (`aoide_storage::fs::migrate_root_once`). It locks `state/`
+//! owner-only when it exists and renames old peer state files. When the legacy
+//! `~/Aoide` root is not `$AOIDE_ROOT`, it moves that root's state unless
+//! `AOIDE_STATE_DIR` is set, and its log unless `AOIDE_AUDIT_LOG` is set and
+//! not empty.
 
 use super::common::{is_unsafe, require_flag, stage_error, strip_unsafe};
 use super::conduct::{program_is_a_shell, program_is_an_interactive_shell, runs_a_privilege_program};
@@ -391,7 +389,7 @@ fn block_verdict(
         s.state != "done"
             && (s.session_id == entry.session_id
                 || s.resumed_from.as_deref() == Some(entry.session_id.as_str())
-                || log.as_ref().is_some_and(|l| on_journal(l)))
+                || log.as_ref().is_some_and(&on_journal))
     });
     if let Some((s, _)) = live {
         return Some(Blocked::Live { live_id: s.session_id.clone() });
@@ -1397,7 +1395,7 @@ pub(in crate::graph) fn launch_selection(inv: &Invocation, selection: &Selection
     let cmd = "resurrect";
     let name = selection.name.as_str();
     if selection.selected.is_empty() {
-        let bare = inv.flags.get("id").is_none() && !inv.flag_present("all");
+        let bare = !inv.flags.contains_key("id") && !inv.flag_present("all");
         let msg = strip_unsafe(&if bare {
             format!("undying set is empty for project `{name}` — nothing to resurrect")
         } else {
@@ -2263,6 +2261,7 @@ mod tests {
         let sudo = busy_restore(&["sudo", "reboot"]);
         let ok = || Ok(Landed::Typed);
         // (registered, restore, readiness, send result, label, waited, sent)
+        #[allow(clippy::type_complexity)]
         let rows: Vec<(bool, Option<&RestoreSnapshot>, Ready, Result<Landed, String>, &str, bool, bool)> = vec![
             (false, Some(&busy), Ready::Verified, ok(), "skipped-unregistered", false, false),
             (true, Some(&sudo), Ready::Verified, ok(), "refused: a privilege program", false, false),
@@ -5493,8 +5492,8 @@ mod tests {
                 .unwrap()
         };
         let (first, second) = std::thread::scope(|s| {
-            let a = s.spawn(|| run());
-            let b = s.spawn(|| run());
+            let a = s.spawn(run);
+            let b = s.spawn(run);
             (a.join().unwrap(), b.join().unwrap())
         });
 

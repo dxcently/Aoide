@@ -43,12 +43,14 @@ pub enum HookClass {
     Unknown,
 }
 
+type TranscriptCheck = fn(&Path, &str, u32) -> bool;
+
 /// The four checks a hook-named Claude transcript passes, in order. The first
 /// check that fails names the refusal: the transcript must be a regular file
 /// (not a symlink), owned by this user, named `<session_id>.jsonl`, and sit
 /// directly in a bucket under a `projects` directory (`CONTRACTS.md`
 /// `transcriptPath`).
-pub const CLAUDE_TRANSCRIPT_CHECKS: &[(&str, fn(&Path, &str, u32) -> bool)] = &[
+pub const CLAUDE_TRANSCRIPT_CHECKS: &[(&str, TranscriptCheck)] = &[
     ("not-a-regular-file", |p, _, _| {
         std::fs::symlink_metadata(p).is_ok_and(|m| m.file_type().is_file())
     }),
@@ -80,6 +82,8 @@ pub fn transcript_refusal(path: &Path, session_id: &str, uid: u32) -> Option<&'s
 pub fn claude_transcript_refusal(path: &Path, session_id: &str) -> Option<&'static str> {
     transcript_refusal(path, session_id, unsafe { libc::geteuid() } as u32)
 }
+
+type TraceReader = fn(path: &Path) -> Option<Vec<String>>;
 
 /// Locator + extractors for an agent's on-disk transcript (claude: the
 /// per-session JSONL Claude Code writes under `~/.claude/projects/`).
@@ -130,7 +134,7 @@ pub struct TranscriptSpec {
     /// means the path is not a trace at all (the presence stand-in `locate`
     /// falls back to), which a caller must be able to tell apart from a trace
     /// that is merely empty right now.
-    pub trace: Option<fn(path: &Path) -> Option<Vec<String>>>,
+    pub trace: Option<TraceReader>,
 }
 
 /// The on-disk format of an agent's hook-settings file.
@@ -305,6 +309,7 @@ pub struct AgentProfile {
     /// - the child's exit 0 means the message was ACCEPTED (queued or
     ///   delivered), never that the recipient has processed or even seen
     ///   it — there is no synchronous "consumed" signal on this transport.
+    ///
     /// The argv that sends to `to` through the harness's own CLI, with the
     /// text on stdin. `operator` adds `--operator`: the person is the sender.
     pub native_send: Option<fn(to: &str, operator: bool) -> Vec<String>>,
@@ -4345,7 +4350,6 @@ mod tests {
     const TRACE_TOOL_RESULT_ERR: &str = r#"{"id":5,"parent":4,"ts_ms":1789603009300,"kind":{"ToolResult":{"tool_use_id":"call_8vr43zri","content":"qmllint: 3 errors","is_error":true}}}"#;
     const TRACE_SETTLED: &str = r#"{"id":131,"parent":130,"ts_ms":1789606421000,"kind":{"TurnSettled":{"stop_reason":"end_turn","usage":{"input_tokens":9570000,"output_tokens":71900,"cache_creation_input_tokens":0,"cache_read_input_tokens":9430000}}}}"#;
     const TRACE_CANCELLED: &str = r#"{"id":77,"parent":76,"ts_ms":1789626990000,"kind":"Cancelled"}"#;
-    const TRACE_ASK_USER: &str = r#"{"id":40,"parent":39,"ts_ms":1789626500000,"kind":{"AskUser":{"call_id":"call_x","prompt":"Overwrite?","answer":null}}}"#;
     const TRACE_CONTEXT_SIZE: &str = r#"{"id":41,"parent":40,"ts_ms":1789626501000,"kind":{"ContextSize":{"tokens":134700}}}"#;
     /// A record past the settled fixture's id 131 — what an appended journal
     /// adds, and the id a `--after` cursor is expected to carry next.

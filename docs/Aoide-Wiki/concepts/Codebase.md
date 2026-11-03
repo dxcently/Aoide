@@ -42,9 +42,10 @@ Outputs, all tolerant of empty layers so eval stays robust:
   `discovery`, `phantom-commands`, `nix-independence`, `boundary`,
   `portability`, `nix-lint`, `theme-fanout`, `generator-offline`,
   `generator-relocatable`, `bar-ricemode`, `generator-runtime`),
-  one auto-generated `pkg-<name>` per discovered package, plus the `vm-boot`
-  headless boot test (below) and the `vm-lock-greeter` graphical login and
-  lock test (`tests/vm-lock-greeter.nix`).
+  one auto-generated `pkg-<name>` per discovered package, `aoide-clippy`
+  (core's clippy `-D warnings` gate, from `pkgs/aoide/flake.nix`), plus the
+  `vm-boot` headless boot test (below) and the `vm-lock-greeter` graphical
+  login and lock test (`tests/vm-lock-greeter.nix`).
 - `devShells.default` — Rust (cargo/rustc/clippy/rust-analyzer) + nix
   tooling (nixfmt/nil/deadnix/statix).
 - `formatter` — nixfmt.
@@ -323,11 +324,7 @@ Live-side state, all under the runtime root (`$AOIDE_ROOT`, default
   pinned by a serialized precedence test. On first run the core binaries run a
   one-shot root migration (`fs::migrate_root_once()`) moving pre-existing
   `~/Aoide/{state,log}` into the root, each piece gated on its
-  own override being unset. The first no-override resolution
-  of `conducting_stage_dir()` runs a one-shot migration moving any of the
-  six conducting files still sitting at the old `/stage/` location into
-  `state/stage/`, never clobbering a fresher file already there and never
-  touching a rice file.
+  own override being unset.
 
 ## Repo-file roles
 
@@ -363,7 +360,7 @@ workspace-wide run deadlocks on this machine. Each crate carries its own
 validity and exit-code tests, and MCP tool-list-parity tests (core only); the
 conduct crate's graph domain
 (`crates/conduct/src/graph/{model,doc,common,commands,window,session_store,
-conduct,send}.rs`) carries handlers for all 20 commands the bare `graph`
+conduct,send}.rs`) carries handlers for the bare `graph`
 render, `graph link`, the `project`/`session` families, bare `session` (the
 roster — grouped by project, or by host under `--hosts`), and bare `send`/`spawn`/`resurrect` register into: cycle
 rejection, anchoring, a
@@ -388,7 +385,7 @@ append, user gate, default-deny event bus); shellbridge (atomic writer, seeded
 stage files, and a live socket accept loop — `focuswindow`); the melete-adapter skeleton (env-driven
 subscription, metadata-only notification boundary); all four theme emitters; the
 QML shell skeleton; the baked Stylix and compositor fan-outs; and the whole
-graph/session/project surface — 20 commands (bare `graph`, `graph link`,
+graph/session/project surface (bare `graph`, `graph link`,
 `project add/remove/list`, `session start/phase/end/hook/grant/permit/
 pending list/approve/deny/prune/reap`, bare `session` (the roster),
 bare `send`/`spawn`/`resurrect`),

@@ -246,7 +246,7 @@ pub fn by_path(lines: &[EditLine], project: &str) -> Vec<PathSummary> {
             let is_earlier = entry
                 .earliest_pre_at
                 .as_deref()
-                .map_or(true, |cur| line.at.as_str() < cur);
+                .is_none_or(|cur| line.at.as_str() < cur);
             if is_earlier {
                 entry.earliest_pre_at = Some(line.at.clone());
                 entry.made = line.sha.is_none();
@@ -350,7 +350,7 @@ pub fn session_plan(lines: &[EditLine], project: &str, session: &str) -> Vec<Pla
                     let is_earlier = entry
                         .earliest_pre_at
                         .as_deref()
-                        .map_or(true, |cur| line.at.as_str() < cur);
+                        .is_none_or(|cur| line.at.as_str() < cur);
                     if is_earlier {
                         entry.earliest_pre_at = Some(line.at.clone());
                         entry.pre_sha = line.sha.clone();
@@ -360,7 +360,7 @@ pub fn session_plan(lines: &[EditLine], project: &str, session: &str) -> Vec<Pla
                     let is_later = entry
                         .latest_post_at
                         .as_deref()
-                        .map_or(true, |cur| line.at.as_str() > cur);
+                        .is_none_or(|cur| line.at.as_str() > cur);
                     if is_later {
                         entry.latest_post_at = Some(line.at.clone());
                         entry.post_sha = line.sha.clone();

@@ -57,8 +57,8 @@ unit test in `registry.rs` pins the sorted set of every command path, so
 adding, removing, or renaming a leaf shows as a deliberate diff against that
 snapshot.
 
-The command surface holds **64 leaves across the groups this page tracks**;
-`aoide schema --json | jq '.commands | length'` reports 111, since further
+This page tracks some of the command groups; `aoide schema --json` lists every
+command, since further
 commands exist that are not yet covered here: the `mail` group (`mail`,
 `mail send`/`read`/`show`/`mark`/`rm`, `mail outbox`/`outbox rm`/`outbox
 retry`, `mail route`, `mail export`, `mail poll`, `mail serve`, `mail ring` —

@@ -9,6 +9,22 @@
 - An agent drives Strillix through `strx` in a shell.
 - `strx schema --json` shows no `doors` on the commands that used to open MCP.
 
+### nix-independence sees every path crate
+
+- `nix-independence` walks every path crate in core's closure, not only the `aoide-*` lines of `[dependencies]` and `[build-dependencies]`: it reads `[target.<cfg>.dependencies]` tables too, forbids the `crates/strillix-rice`, `crates/screen` and `crates/strillix` directories under any package name, and fails the build, naming the line, on a dependency form it cannot read.
+
+### Core passes clippy
+
+- `cargo clippy --workspace --all-targets --all-features` reports no warning for any core crate, and the `aoide-clippy` flake check holds it there with `-D warnings`; `strillix`, `strillix-rice` and `aoide-screen` are left out by name.
+
+### Core stops moving old stage files
+
+- Core no longer moves conducting stage files from `$STRILLIX_ROOT/stage` (default `~/.strillix/stage`); a host that never ran an aoide from after 2026-08-27 keeps those files there, unread.
+
+### Aoide is Eidolon's front end
+
+- `aoide guide` and the front pages (root AGENTS.md, README.md, the wiki Overview, INSTALL.md) say Aoide is mainly Eidolon's front end, that other harnesses connect to it, drive it and talk through it, and that Strillix is the OS rather than something built on Aoide.
+
 ### Window list and watch
 
 - `strx window list` gives the compositor's windows in its own order, with no class filter: address, class and workspace, and with `--json` also title, pid, mapped and cwd. With no compositor it is a refusal (`no-compositor`), never an empty list.

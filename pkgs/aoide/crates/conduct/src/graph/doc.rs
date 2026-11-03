@@ -541,7 +541,8 @@ pub(crate) fn workspace_block(
     }
     // Spawned ties: (from, to) → every pair that crossed, and the latest
     // activity among them. `by_id` above is the same lookup this walk uses.
-    let mut spawned: BTreeMap<(i64, i64), (BTreeSet<(String, String)>, String)> = BTreeMap::new();
+    type Crossings = (BTreeSet<(String, String)>, String);
+    let mut spawned: BTreeMap<(i64, i64), Crossings> = BTreeMap::new();
     for s in sessions {
         let Some(child_ws) = s.workspace else { continue };
         let Some((parent_ws, parent_id)) = windowed_ancestor(s, &by_id) else {
@@ -982,8 +983,7 @@ pub(crate) fn prune_done_keeping(
         })
         .map(|s| s.session_id.as_str())
         .collect();
-    let dropped = drop_sessions(&sessions, &doomed, hooks);
-    dropped
+    drop_sessions(&sessions, &doomed, hooks)
 }
 
 /// Drop the caller-side ledger rows of every parent in `removed`
@@ -1909,14 +1909,14 @@ mod tests {
             socket: Some(sock.to_string_lossy().into_owned()),
             ..Default::default()
         };
-        let doc = build_graph(&[], &[rec.clone()], &[]);
+        let doc = build_graph(&[], std::slice::from_ref(&rec), &[]);
         let node = doc["nodes"].as_array().unwrap().iter().find(|n| n["id"] == "session:a").unwrap();
         assert_eq!(node["conductable"], json!(true), "an existing socket reports conductable");
 
         // The socket vanishes (a rebuild deleting the runtime dir) — the
         // ORIGINAL record is never touched; only the REPORTED value changes.
         std::fs::remove_file(&sock).unwrap();
-        let doc2 = build_graph(&[], &[rec.clone()], &[]);
+        let doc2 = build_graph(&[], std::slice::from_ref(&rec), &[]);
         let node2 = doc2["nodes"].as_array().unwrap().iter().find(|n| n["id"] == "session:a").unwrap();
         assert_eq!(node2["conductable"], json!(false), "a removed socket reports NOT conductable");
         assert_eq!(rec.conductable, Some(true), "the stored field is never modified by a read");

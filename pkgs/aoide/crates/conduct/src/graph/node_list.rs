@@ -194,7 +194,7 @@ fn assemble_roster(
     // paired row's advertising mark, never touch its addr/verified/paired
     // fields (those come only from the registry and the probe).
     for h in heard {
-        if is_self_target(h, host) || node_names.iter().any(|n| *n == h.advertisement.name) {
+        if is_self_target(h, host) || node_names.contains(&h.advertisement.name) {
             continue;
         }
         rows.push(Row {
@@ -242,9 +242,11 @@ fn render_roster(rows: &[Row]) -> String {
             " ".repeat(addr_w - width(addr)),
             status_text(r),
         ));
-        let as_of = (r.paired && r.presence != "online" && !r.sessions.is_empty())
-            .then(|| format!("  (as of {})", r.last_seen.as_deref().unwrap_or("unknown")))
-            .unwrap_or_default();
+        let as_of = if r.paired && r.presence != "online" && !r.sessions.is_empty() {
+            format!("  (as of {})", r.last_seen.as_deref().unwrap_or("unknown"))
+        } else {
+            String::new()
+        };
         for (i, s) in r.sessions.iter().enumerate() {
             let branch = if i + 1 == r.sessions.len() { "└─" } else { "├─" };
             out.push(format!("   {branch} {}  {}  {}{as_of}", s.agent, s.state, session_ident(s)));
