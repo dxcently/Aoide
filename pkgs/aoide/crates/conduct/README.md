@@ -1377,13 +1377,11 @@ blank one is refused too.
   with `--id` or `--all` and no `--project`, the usage error the call gives;
   with `--project`, the `dry-run-not-held` refusal, since the flag-mode launch
   would hold and show that caller nothing. A dry run holds on no door. Its
-  handler writes three things, and no others: the audit line (status
+  handler writes two things, and no others: the audit line (status
   `dry-run`, at the points the real call audits; none for a usage error or a
-  stage miss); on a host that still holds the legacy file, the one-time
+  stage miss); and, on a host that still holds the legacy file, the one-time
   `carry.json` rename an undying read runs
-  (`aoide_storage::undying::load_undying`); and, on a host that still holds the
-  legacy stage files, the one-time conducting-stage migration a stage read runs
-  (`aoide_storage::fs::conducting_stage_dir`). Two writes come with any call,
+  (`aoide_storage::undying::load_undying`). Two writes come with any call,
   dry or real, outside the handler: the door's audit line, and the start-up
   migration both core binaries run (`aoide_storage::fs::migrate_root_once`).
   It locks `state/` owner-only when it exists and renames old peer state

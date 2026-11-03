@@ -1499,17 +1499,7 @@ same root, as intended; an `$AOIDE_STAGE_DIR` override (every test fixture
 that sets one) still names one directory for both, exactly as it did before
 the split.
 
-**The one-shot migrations — two, composing.** (1) S1 (command-defrag lane):
-the first time a process resolves `state/stage/` under the no-override
-fallback, it moves each of the six conducting files found at the sibling
-`/stage/` location (wherever that currently resolves) into the new one
-— `rename` when possible (same filesystem), copy-then-remove-source
-otherwise — skipping any file already present at the new path (a fresher
-`state/stage/` file is never clobbered) and never touching a rice file
-(`theme.json`, `mode.json`, `grimoire.json`, `wallpaper.json`) even when it
-sits in the same old directory. Guarded to run at most once per process;
-idempotent across repeated boots (`aoide-storage`'s
-`migrate_conducting_stage`, `fs.rs`). (2) L-C2: moves a pre-L-C2 host's
+**The one-shot migration (L-C2).** It moves a pre-L-C2 host's
 `~/Aoide/{state,log}` trees wholesale into the new root's equivalents — each
 piece gated independently on its OWN override (`$AOIDE_STATE_DIR`/
 `$AOIDE_AUDIT_LOG`) being unset, so a host that already relocated one tree
@@ -1521,11 +1511,7 @@ binaries (`aoide`, `aoided`) call it explicitly, once, at process start
 runs in `strillix` when asked, and with an aoide binary installed it refuses while
 core's legacy `state/` is still in `~/Aoide`; see that function's own doc for why
 a path getter is the wrong place to hang a process-wide side effect, the
-kind `with_stage_lock`'s pervasive fan-out makes unsafe there). Composes
-correctly with S1 in either order: whichever migration a given process's
-`main()` runs first, S1 always resolves its OWN old/new dirs dynamically
-via `stage_dir()`/`state_dir()`, so it finds files wherever L-C2 most
-recently left them.
+kind `with_stage_lock`'s pervasive fan-out makes unsafe there).
 
 ### Enduring agent binding and explicit context retrieval
 
@@ -6027,17 +6013,15 @@ entry.
 
 **The one-shot migration.** The first time a process resolves
 `load_undying`, it renames a pre-existing `state/carry.json` onto
-`state/undying.json` when the new path is absent — the same atomic,
-narrated-on-failure, never-clobbers discipline this file's own "one-shot
-migration" note (above, `/stage/`/`state/stage/`) established for the S1
-split, applied to a single small file: a plain `rename` (both paths share
-`state_dir`, so this is always same-filesystem), skipped when a fresher
-`undying.json` already exists (a process that already migrated is never
-overwritten), and narrated rather than panicking on a failed rename. A
-process that never had a `carry.json` (a fresh install, or one that already
-migrated) pays one cheap `exists()` check and nothing else — no process-wide
-guard is needed the way the six-file S1 migration warranted one. A file the
-migration just renamed but that has not yet been re-saved through
+`state/undying.json` when the new path is absent: a plain `rename`, atomic and
+narrated on failure, that never clobbers (both paths share `state_dir`, so this
+is always same-filesystem). It is skipped when a fresher `undying.json` already
+exists (a process that already migrated is never overwritten), and it narrates
+rather than panicking on a failed rename. A process that never had a
+`carry.json` (a fresh install, or one that already migrated) pays one cheap
+`exists()` check and nothing else — no process-wide guard is needed for a
+single small file. A file the migration just renamed but that has not yet been
+re-saved through
 `save_undying` still holds its pre-rename content (keyed `"carried"`, not
 `"undying"`); the read side tolerates that legacy key until the next
 `save_undying` normalizes it.
@@ -6285,11 +6269,10 @@ would hold and show the caller nothing. The handler audits a dry run with
 status `dry-run` (a refusal the same call would give is audited the same
 way), beside the line the door writes for every call: `ok` for a listing,
 `usage` for a usage error. A usage error or a stage-file miss gets no handler
-line, only the door's. The handler writes three things, and no others: its
-audit line (none for a usage error or a stage-file miss); on a host that still
-holds the legacy file, the one-time `carry.json` rename an undying read runs;
-and, on a host that still holds the legacy stage files, the one-time
-conducting-stage migration a stage read runs. Two writes come with any call,
+line, only the door's. The handler writes two things, and no others: its
+audit line (none for a usage error or a stage-file miss); and, on a host that
+still holds the legacy file, the one-time `carry.json` rename an undying read
+runs. Two writes come with any call,
 dry or real, outside the handler: the door's audit line, and the start-up
 migration both core binaries run, `aoide_storage::fs::migrate_root_once`. It
 locks `state/` owner-only when it exists and renames old peer state files.

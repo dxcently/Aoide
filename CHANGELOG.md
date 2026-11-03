@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Core stops moving old stage files
+
+- Core no longer moves conducting stage files from `$STRILLIX_ROOT/stage` (default `~/.strillix/stage`); a host that never ran an aoide from after 2026-08-27 keeps those files there, unread.
+
 ### Window list and watch
 
 - `strx window list` gives the compositor's windows in its own order, with no class filter: address, class and workspace, and with `--json` also title, pid, mapped and cwd. With no compositor it is a refusal (`no-compositor`), never an empty list.
