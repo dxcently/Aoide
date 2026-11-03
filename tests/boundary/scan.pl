@@ -357,6 +357,19 @@ for my $p (sort keys %side) {
     }
 }
 
+# A neutral crate's row fails in either mode, before the golden is read: no
+# golden row allows one.
+my @neutral = grep { $row_side{$_} eq 'neutral' } sort keys %now;
+if (@neutral) {
+    print STDERR "boundary: a neutral crate names a product or depends on one in ", scalar(@neutral),
+      " place(s), and no golden row allows that:\n";
+    print STDERR row($_, $now{$_}), "\n" for @neutral;
+    print STDERR "Take the name or the dependency out of the neutral crate: a test fixture gets a "
+      . "neutral word, and a test helper is written in the crate.\n";
+    print STDERR "tighten refused and wrote nothing.\n" if $mode eq 'tighten';
+    exit 1;
+}
+
 # ── Golden ───────────────────────────────────────────────────────────────────
 sub row { my ($key, $count) = @_; return $key =~ /^name / ? "$key $count" : $key }
 
@@ -369,7 +382,7 @@ sub read_golden {
         chomp $line;
         next if $line =~ /^#/ || $line !~ /\S/;
         my ($key, $count);
-        if    ($line =~ /^(name (?:aoide|strillix|neutral) .+) (\d+)$/) { ($key, $count) = ($1, $2) }
+        if    ($line =~ /^(name (?:aoide|strillix) .+) (\d+)$/) { ($key, $count) = ($1, $2) }
         elsif ($line =~ /^(dep \S+ \S+ .+)$/)                  { ($key, $count) = ($1, 1) }
         else { die "boundary: $golden_file:$.: not a row: $line\n" }
         die "boundary: $golden_file:$.: a second row for: $key\n" if exists $gold{$key};
@@ -429,4 +442,4 @@ if (@stale) {
 my %tally;
 $tally{ (/^(\w+)/)[0] . " $row_side{$_}" }++ for keys %now;
 printf "aoide check boundary: ok (%s)\n",
-  join ', ', map { "$_ " . ($tally{$_} // 0) } ('name aoide', 'name strillix', 'name neutral', 'dep aoide', 'dep strillix', 'dep neutral');
+  join ', ', map { "$_ " . ($tally{$_} // 0) } ('name aoide', 'name strillix', 'dep aoide', 'dep strillix');

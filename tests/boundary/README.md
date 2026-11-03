@@ -63,7 +63,8 @@ and their target-specific forms. Crates are named by their `[package]` names.
 - **A neutral row.** `name neutral <path>`, or a `dep` row whose
   `<from-crate>` is a neutral crate. Take the product's name or the dependency
   out of the neutral crate (a test fixture gets a neutral word, a test helper
-  is written in the crate). Never add the row.
+  is written in the crate). No golden row allows it: the check fails on it
+  before it reads the golden, and the golden cannot hold a `name neutral` row.
 - **A stale golden.** A golden row's crossing is gone, or fewer lines name the
   other product than before. The check prints the complete tightened golden,
   ready to paste, and only when no crossing is unlisted; run `tighten`
