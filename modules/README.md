@@ -13,12 +13,13 @@ the catalogue that names what can be selected.
 - `modules/default.nix` — the catalogue. Plain data, not a module:
   `catalogue` names every dendrite once, by the name a host selects it with,
   and points at the file (or directory) that answers it, or, for a component
-  slot, holds the provider set inline. It is the ONE place a
-  dendrite file is named. `aggregations` and `overrides` are the sibling
-  discovery records, read one level deep beside it — names and paths only, no
-  body imported at catalogue time. Habit's composition
-  reads this record before any module graph exists and imports only what
-  selection kept.
+  slot, holds the provider set inline, or, for a dendrite written as a NixOS
+  module and a Home Manager module, holds a `{ byClass = …; }` marker
+  (below). It is the ONE place a dendrite file is named. `aggregations` and
+  `overrides` are the sibling discovery records, read one level deep beside
+  it — names and paths only, no body imported at catalogue time. Habit's
+  composition reads this record before any module graph exists and imports
+  only what selection kept.
 - `nucleus/default.nix` — the option contract's aggregate. It names only the
   files inside its own directory, and has no catalogue name to be found by.
   `lib/strillix.nix` hands it to the constructor as an `extraModules` entry, and
@@ -29,7 +30,8 @@ the catalogue that names what can be selected.
 - A dendrite file is a plain module (CONTRACTS.md §2): the `aoide.<name>.*`
   options its body reads, its unconditional body, and its Home Manager half under
   `habit.home`. The constructor imports the file only for a
-  host that selected it.
+  host that selected it. A dendrite may instead be a NixOS module and a Home Manager
+  module written together, named by a `{ byClass = …; }` marker (below).
 
 ## How the layers compose
 
@@ -58,6 +60,32 @@ position in the host's module list.
 its own — a committed rice is found by `lib/rices.nix`'s own typed scan
 (`rices/<rice>/rice.nix`), the one exception house rule 1 already
 draws around `rice/`.
+
+## The byClass marker
+
+A dendrite may be written as a NixOS module and a Home Manager module in one place:
+`{ byClass = X; }`, where X is a file (or a directory's `default.nix`), or the record
+inline. The record is `{ nixos = <module>; homeManager = <module>; }`, with at least one
+of the two keys and no other. The NixOS module applies where the host is built, and the
+Home Manager module goes to each user's Home Manager. The marker stays data in the
+catalogue, and `lib/by-class.nix` renders it before habit reads the registry. The
+rendered entry is a function that imports X only when a host selects the entry, so an
+unselected one is never read.
+
+The record shape exists so a dendrite file works without habit: a flake without habit
+imports `X.nixos` or `X.homeManager` directly. The marker is how a habit registry tells
+the shape apart without reading the file.
+
+A marker stands in two places, and only in these: a catalogue line
+(`name = { byClass = X; };`), or the target of an inline provider set
+(`name = { providers.<p> = { byClass = X; }; };`). A provider set written as a file, a
+directory whose `default.nix` is `{ providers = …; }`, holds none: a marker inside it
+is not rendered, because rendering it would import that file for every host. A
+provider set whose target needs a marker is written inline on the registry line.
+
+The inventory names a marker's value as `<value '<name>'>`, not as its file. A refusal
+of the value (a file that is not `{ nixos; homeManager; }`) names the file, or the inline
+catalogue entry.
 
 ## What it consumes
 

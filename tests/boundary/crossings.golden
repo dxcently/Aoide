@@ -65,7 +65,7 @@ name strillix modules/default.nix 5
 name strillix modules/dendrites/bash.nix 2
 name strillix modules/dendrites/clipboard.nix 3
 name strillix modules/dendrites/compositor/hyprland/behaviour.nix 4
-name strillix modules/dendrites/compositor/hyprland/default.nix 10
+name strillix modules/dendrites/compositor/hyprland/default.nix 11
 name strillix modules/dendrites/dunst.nix 2
 name strillix modules/dendrites/git.nix 1
 name strillix modules/dendrites/greeter.nix 12
@@ -209,7 +209,7 @@ name strillix rices/barcarolle/design/mock.html 4
 name strillix rices/barcarolle/widgets/Declare.qml 1
 name strillix rices/barcarolle/widgets/DesktopGadgets.qml 1
 name strillix rices/barcarolle/widgets/LockPreview.qml 3
-name strillix rices/barcarolle/widgets/bar.qml 8
+name strillix rices/barcarolle/widgets/bar.qml 9
 name strillix rices/barcarolle/widgets/calendar.qml 1
 name strillix rices/barcarolle/widgets/dock.qml 4
 name strillix rices/barcarolle/widgets/launcher.qml 8

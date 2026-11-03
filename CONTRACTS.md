@@ -430,8 +430,14 @@ A dendrite is one file (or a directory with `default.nix`) at
 composition splits a selected one into two halves when it wraps it. The
 module's own settings are its system half; what it sets under `habit.home` is
 its home half, a Home Manager module handed to each user the dendrite reaches.
-This repo is the shape's only consumer, and dxflake pins its own revision
-rather than following this one.
+The other form is a **byClass record**, `{ nixos = …; homeManager = …; }`: a NixOS
+module and a Home Manager module, with at least one of the two. It is data, not a
+module: its catalogue line names it as `{ byClass = <file>; }` (or the record inline),
+and `lib/by-class.nix` renders that marker into the plain module habit reads, which
+imports the `nixos` module and sets `habit.home` to the `homeManager` module. The
+constructor renders it lazily, so a record's file is read only when a host selects the
+entry, and a file that is not a record is refused by name. This repo is the shape's
+only consumer, and dxflake pins its own revision rather than following this one.
 
 ```nix
 # modules/dendrites/<name>.nix
@@ -467,7 +473,10 @@ Rules:
   (the component slots: `bar = { providers.strillix = ./dendrites/strillix/bar.nix;
   };`). Either way a provider file is named once, by the set, and the host
   picks one by name (`habit.dendrites.<slot>.provider`); a slot enabled with
-  no provider fails eval naming the ones it has.
+  no provider fails eval naming the ones it has. An inline provider target may be
+  a byClass record, `{ byClass = …; }`. A set held in a file may not: rendering a
+  marker there would import that file for every host, so habit reads the marker
+  as a module and refuses it.
 - **A dendrite never reads another module** — only `config.aoide.*` options it
   declares itself, plus stock NixOS options.
 - **Growth is additive**: a new dendrite is a new file plus one catalogue line,
@@ -2066,7 +2075,7 @@ Writers, and the exact shape each leaves:
 | `strx rice back <entry>` | the target entry's wallpaper value VERBATIM — an entry minted while a pick stood restores it as a pick, `rice`, `position` and `tile` and all; an entry with no wallpaper removes whatever stands |
 | `strx rice draft save <name>` | a verbatim copy into `rices/<rice>/drafts/<name>/wallpaper.json` (§4's drafts entry; never a routing target) |
 | the strillix lane's `home.activation.aoideSeedStage` | when the declared rice sets `strillix.theme.wallpaper`, `{"path": <that store path>, "rice": <declared>}` — the declared rice's own picture as the default — unless `wallpaper.json` already holds a pick for any rice, which is left byte-identical (`lib/wallpaper-seed.sh`, proved by `tests/wallpaper-seed/run.sh`). With no `strillix.theme.wallpaper` it writes NOTHING; the read-side rule above is what keeps a pick off another rice |
-| the greeter tree build (`modules/dendrites/greeter.nix`) | inside the tree only, `{"path": <tree>/rices/<owner>/wallpaper/<owner>-logon.{webp,png,jpg,jpeg}, "rice": <declared>}` when the face's rice ships a logon picture (`wallpaper/<owner>-logon.<ext>`, first match in that order). The greeter's `LockPreview` draws it as the logon background; the tree's `wallpaper/` folder rides along whole |
+| the greeter tree build (`modules/dendrites/greeter.nix`) | inside the tree only, `{"path": <tree>/rices/<owner>/wallpaper/<owner>-logon.{webp,png,jpg,jpeg}, "rice": <declared>}` when the face's rice ships a logon picture (`wallpaper/<owner>-logon.<ext>`, first match in that order); otherwise `{"path": <tree>/rices/<owner>/wallpaper/<basename of strillix.theme.wallpaper>, "rice": <declared>}` when the declared rice sets `strillix.theme.wallpaper` (copied into the tree when the face's `wallpaper/` folder lacks it); with neither, no file. The greeter's `LockPreview` draws it as the logon background; the tree's `wallpaper/` folder rides along whole |
 
 `stage_for_rice` — the one implementation of the stage half, shared by
 `rice stage` and the mode re-pins — keeps a standing pick iff

@@ -553,8 +553,8 @@ flake.nix
 ├── lib.rices.merge         several rices DIRECTORIES as one, a function of
 │                             `{ lib, pkgs, books }`: the `registry`, the merged
 │                             `dir` and the `lib.rices` record, from one call
-├── lib.catalogue             the whole catalogue as DATA — the bulk form of
-│                             `nixosModules.<name>`
+├── lib.catalogue             the whole catalogue, with its `{ byClass = …; }` lines
+│                             rendered: the bulk form of `nixosModules.<name>`
 ├── ricesRoot              Aoide's own rices DIRECTORY (`rices`),
 │                             the value `lib/strillix.nix` builds this flake's
 │                             hosts from — a PATH, not a function
@@ -564,7 +564,13 @@ flake.nix
 │                             PATH; a consumer's own slot names one beside its own
 ├── rices.<rice>              every committed rice with a `rice.nix`, name → that
 │                             file, the aggregation body the rice hook registers
-├── inventory / nixosConfigurations   (a consumer builds its own; see below)
+├── lib.mkFlake               the constructor a flake calls, a function of
+│                             `{ root, registries?, extraModules?, overlays?,
+│                             specialArgs?, system? }`: `root` is the flake's own
+│                             tree, read by convention, and the result is that
+│                             flake's `{ nixosConfigurations, inventory }`
+│                             (see "`lib.mkFlake`" below)
+├── inventory / nixosConfigurations   (a flake's own, from `lib.mkFlake`)
 └── overlays.default          every `pkgs/<name>` this tree discovers plus
                               `aoide` (never `strillix`: nixpkgs owns that name)
 ```
@@ -585,11 +591,15 @@ What a consumer's flake writes, in the shapes the outputs are:
 The stability contract:
 
 - `nixosModules.nucleus` is a module a NixOS host imports; `nixosModules.<name>`
-  is a PATH a consumer's own `registry.catalogue` takes unchanged, because a
-  catalogue's values ARE paths (habit's composition imports them).
+  is the value a consumer's own `registry.catalogue` takes unchanged: a path, a
+  provider set, or the module a `{ byClass = …; }` line renders to (habit's
+  composition imports each).
 - `lib.*` are their files' own functions, still UNAPPLIED: a consumer applies
   them with ITS lib (and the rices its host performs from), so selection runs
-  on the consumer's evaluation and not on this flake's.
+  on the consumer's evaluation and not on this flake's. `lib.mkFlake` is the one
+  exception: it is applied to this flake's own inputs, because the machines it
+  builds are Strillix's, and a consumer chooses which nixpkgs and home-manager
+  those are through its `follows`.
 - `ricesRoot` is a PATH, the same value this flake's own hosts are built
   from, a top-level output beside `ricesManifest`. `lib.rices`'s own
   default is not a substitute: a consumer needs the directory itself to hand the
@@ -598,6 +608,47 @@ The stability contract:
   walker also supplies stands only for a name listed in `lib/pkgs.nix`'s
   `intentionalOverrides`; any other replacement is an evaluation error naming
   the package.
+
+### `lib.mkFlake` — a flake's machines, from its root
+
+`lib.mkFlake { root, registries ? [ ], extraModules ? [ ], overlays ? [ ],
+specialArgs ? { }, system ? "x86_64-linux" }` returns `{ nixosConfigurations,
+inventory }`. A thin flake is the whole consumer:
+
+```nix
+outputs = { aoide, ... }: aoide.lib.mkFlake { root = ./.; };
+```
+
+- **`root`** is the flake's own tree, a path. Strillix's own flake passes `./.`,
+  and that tree is the base already, so it is not added a second time. Any other
+  root gets Strillix's catalogue, rices and nucleus beside its own.
+- **The root's layout** is read by convention, and each part is optional.
+  `hosts/<name>/default.nix` is a machine (a `_`-prefixed directory is shelved).
+  `modules/default.nix` is a registry, merged after Strillix's own catalogue: a
+  name two sources define is refused, naming both, and a file that is a function
+  of `{ }` is called once. `rices/` is a rices book, read beside Strillix's: one
+  book is the rice hook's value, and several are merged, so a rice may borrow
+  across them.
+- **The rest of the arguments.** `registries` are more registry sources, merged
+  after the root's. A source may not be named `strillix` (always taken) or `root`
+  (taken when the root has a `modules/default.nix`): habit refuses the repeated
+  name. `extraModules` are added to every host after the nucleus
+  module, and `overlays` after Strillix's base overlay. `specialArgs` are every
+  host's module arguments, and `system` is the platform the base overlay is built
+  for.
+- **What a consumer's host sets.** A host built from a tree that is not Strillix's
+  own sets `strillix.hostConfig` to the path of its file in the consumer's checkout.
+  Strillix has no default for it there: reading it unset fails by name, and
+  `strillix rice declare --host` rewrites that file's `habit.rice.declared` line.
+- **What it returns** is one NixOS host per discovered machine, each built lazily
+  by habit's composition, so one host's output never forces another. `inventory`
+  reports what each host resolved, as `nixosConfigurations` holds what it builds.
+- **A registry may mark `{ byClass = …; }` entries.** A marker is one dendrite
+  written as a NixOS module and a Home Manager module,
+  `{ nixos = <module>; homeManager = <module>; }`, in a file or inline. The
+  constructor renders it (`lib/by-class.nix`), so habit reads it only when a host
+  selects it. A marker stands on a catalogue line or as an inline provider target,
+  and never inside a provider-set file; `modules/README.md` states the rule.
 
 ### `aoideInputs` — the three doors, and which moment each answers
 
@@ -621,8 +672,9 @@ evaluation, not a style choice:
   "argument `x` is not externally provided, so querying `_module.args` instead,
   requiring `config`". A lexical value in the file that does the importing costs
   no argument at all.
-- **inside a Home Manager evaluation** — `home-manager.extraSpecialArgs.aoideInputs`,
-  guarded on `options ? home-manager` (asked inside `config`, for the reason
+- **inside a Home Manager evaluation** — `home-manager.extraSpecialArgs.aoideInputs`
+  and `.ricesRoot` (the rices directory the system half reads: the merged book of a
+  host with several), guarded on `options ? home-manager` (asked inside `config`, for the reason
   above). Home Manager runs its own module system, where `extraSpecialArgs` IS
   its specialArgs — external, therefore available while its own module
   collection runs, which is what the neovim dendrite's

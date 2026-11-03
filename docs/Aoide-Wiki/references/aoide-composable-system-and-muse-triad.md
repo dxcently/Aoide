@@ -213,7 +213,7 @@ Claude's initial assignment is read-only readiness and review of mail/control li
 
 ## Source anchors
 
-- [Current assembly and global walk](../../../lib/mkHost.nix), [module conventions](../../../modules/AGENTS.md).
+- [Current assembly and global walk (`mkFlake`)](../../../lib/strillix.nix), [module conventions](../../../modules/AGENTS.md).
 - [Current declare copy](../../../pkgs/aoide/crates/strillix/src/commands/stubs.rs), [mode-aware reload](../../../pkgs/aoide/crates/strillix-rice/src/commands/reload.rs).
 - [Widget composition](../../../lib/song.nix), [rices generation](../../../lib/rices.nix), [Quickshell deployment](../../../modules/facets/quickshell/default.nix).
 - [Current Melete deployment](../../../modules/dendrites/melete.nix), [launcher package](../../../pkgs/melete/default.nix), [Melete client](../../../pkgs/aoide/crates/client/src/mcp_client.rs), [adapter skeleton](../../../pkgs/aoide/crates/client/src/adapter.rs).

@@ -2,9 +2,11 @@
 // surface of its own, summoned by the bar's clock through the bridge
 // (`strillix component calendar toggle <screen>`).
 //
-// The clock measures its cell into shared.calendarAnchor (screen coordinates)
-// before it asks, and this window pins under it. The body is CalendarBody.qml.
-// The open state goes back out on shared.calendarOpen.
+// The clock measures its top-right corner into shared.calendarAnchor (screen
+// coordinates) before it asks. The calendar opens above that corner: its
+// bottom-right corner sits on the anchor, so its right edge is the clock's right
+// edge and its bottom is flush on the bar. The body is CalendarBody.qml. The open
+// state goes back out on shared.calendarOpen.
 
 import QtQuick
 import Quickshell
@@ -35,8 +37,8 @@ PanelWindow {
     WlrLayershell.namespace: "aoide-calendar"
     exclusionMode: ExclusionMode.Ignore
     anchors { top: true; left: true }
-    margins.left: root.shared ? Math.round(root.shared.calendarAnchor.x) : 0
-    margins.top: root.shared ? Math.round(root.shared.calendarAnchor.y) : 0
+    margins.left: root.shared ? Math.max(0, Math.round(root.shared.calendarAnchor.x - root.implicitWidth)) : 0
+    margins.top: root.shared ? Math.max(0, Math.round(root.shared.calendarAnchor.y - root.implicitHeight)) : 0
     implicitWidth: body.implicitWidth
     implicitHeight: body.implicitHeight
     onShownChanged: if (root.shared) root.shared.calendarOpen = root.shown

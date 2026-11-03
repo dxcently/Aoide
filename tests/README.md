@@ -95,7 +95,10 @@ what those checks actually test.
   `ricesRoot` export, the built-in rice with a Quickshell greeter face: cage
   runs `-m last` with the output unset, and `-m extend` with
   `strillix.greeter.output = "DP-1"`, whose script is then read for its
-  wlr-randr off-loop.
+  wlr-randr off-loop. The tree behind the script is read for the login
+  screen's picture: barcarolle ships no logon picture, so its
+  `stage/wallpaper.json` names the desktop picture, which the tree holds, and
+  no logon picture is in the tree.
   The value-slot proof: the consumer's own `bar`, `dock` and `lock` slots each
   name a provider of its own beside Aoide's `parts`. The `stubbed` host mixes
   its `bar` (a stub that brings no runtime) with Aoide's `dock`, and must give
@@ -105,9 +108,24 @@ what those checks actually test.
   fails the consumer eval). The `front` checks read `parts` (ten, each a file),
   `rices`, and prove that a rice merged into its own hook is refused as a
   collision.
+- `thin-flake/` — `tests/thin-flake/run.sh <aoide flake ref>`, the thin-flake fixture: a
+  consumer whose whole flake is `aoide.lib.mkFlake`, with its own `hosts/`,
+  `modules/default.nix` and `rices/`, and one each of its other arguments (`registries`,
+  `extraModules`, `overlays`). Each `{ byClass = …; }` form is checked where habit puts each
+  module: a file with both, a record that names one key, and an inline provider target. A
+  file that is not a byClass record is refused by name, and a raw marker inside a
+  provider-set file is refused too, because mkFlake renders no marker there. `never` (a
+  catalogue line) and `trap` (a provider set) are selected by no host and throw if read,
+  so the thin host evaluating is the proof neither was. An inline record with no keys,
+  one that is not an attrset, and one with a key other than `nixos` or `homeManager`
+  are each refused by name. A provider set whose
+  `providers` is a path is refused by habit's own message. `thin` sets
+  `strillix.hostConfig`, which run.sh reads back, and a host that leaves it unset is
+  refused by name. The thin host's home half reads the merged book of its own `rices/` and
+  Strillix's, the same directory its system half reads.
 
-`selection/`, `templates/` and `quickshell-seam/` shell out to `nix eval` (and
-`getFlake` a nixpkgs rev), so they run where an evaluation can: a developer's
+`selection/`, `templates/`, `quickshell-seam/` and `thin-flake/` shell out to `nix eval`
+(and `getFlake` a nixpkgs rev), so they run where an evaluation can: a developer's
 shell, and
 each phase-5 slice's gate. They are deliberately NOT `checks.*` — a check is a
 build, and a build sandbox has no nix daemon and no network (`nix eval` inside
