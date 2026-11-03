@@ -582,6 +582,7 @@ mod tests {
         std::env::set_var("HOME", root.join("home"));
         std::env::remove_var("AOIDE_SESSION_ID");
 
+        #[allow(clippy::type_complexity)]
         let cases: [(&[&str], &[&str], &[(&str, &str)]); 7] = [
             (&["mesh", "join"], &["home"], &[("operator", "ed25519:00"), ("replace", "true")]),
             (&["node", "allow"], &["peer"], &[]),
