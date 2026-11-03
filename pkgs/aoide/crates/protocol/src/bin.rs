@@ -596,6 +596,58 @@ mod tests {
         }
     }
 
+    /// `core_present` reads the `AOIDE_CORE_BIN` override first and asks
+    /// `PATH` only when the override is unset. The assertions run under
+    /// `catch_unwind`, so both variables are put back and the lock is released
+    /// unpoisoned before a failure is re-raised: a red run cannot cascade into
+    /// the tests that share the lock.
+    #[cfg(unix)]
+    #[test]
+    fn core_present_asks_the_override_first_and_path_only_when_it_is_unset() {
+        let _guard = path_test_lock().lock().unwrap();
+        let saved = [
+            ("AOIDE_CORE_BIN", std::env::var_os("AOIDE_CORE_BIN")),
+            ("PATH", std::env::var_os("PATH")),
+        ];
+        let dir = std::env::temp_dir().join(format!("aoide_bin_core_present_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let with_aoide = dir.join("with-aoide");
+        let without = dir.join("without-aoide");
+        std::fs::create_dir_all(&with_aoide).unwrap();
+        std::fs::create_dir_all(&without).unwrap();
+        std::fs::write(with_aoide.join("aoide"), "").unwrap();
+        mark_executable(&with_aoide.join("aoide"));
+
+        let checks = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            std::env::set_var("PATH", &with_aoide);
+            std::env::set_var("AOIDE_CORE_BIN", without.join("aoide"));
+            assert!(!core_present(), "an override naming no file is absent even with aoide on PATH");
+
+            std::env::set_var("PATH", &without);
+            std::env::set_var("AOIDE_CORE_BIN", with_aoide.join("aoide"));
+            assert!(core_present(), "an override naming a real file is present");
+
+            std::env::remove_var("AOIDE_CORE_BIN");
+            std::env::set_var("PATH", &with_aoide);
+            assert!(core_present(), "unset, an aoide on a private PATH is present");
+
+            std::env::set_var("PATH", &without);
+            assert!(!core_present(), "unset, a PATH with no aoide in it is absent");
+        }));
+
+        for (name, value) in saved {
+            match value {
+                Some(value) => std::env::set_var(name, value),
+                None => std::env::remove_var(name),
+            }
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+        drop(_guard);
+        if let Err(failure) = checks {
+            std::panic::resume_unwind(failure);
+        }
+    }
+
     /// unix-only: the executable BIT is the predicate, which is exactly what
     /// Windows replaces with a suffix.
     #[cfg(unix)]
