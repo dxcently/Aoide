@@ -21,7 +21,8 @@
 //! scaffolding notes store). I1 added `icon.collections`, `icon.list`,
 //! `icon.resolve` (the pinned icon collections, resolved into the lane's own
 //! SVG tree). `clipboard.delete`, `clipboard.clear` remove cliphist
-//! history. See `commands/mod.rs::all()` for the assembly order.
+//! history. `window.list` and `window.watch` read the compositor's windows (`hypr/`).
+//! See `commands/mod.rs::all()` for the assembly order.
 
 pub use aoide_protocol::registry::*;
 
@@ -154,6 +155,8 @@ mod tests {
             "component",
             "wallpaper.set",
             "wallpaper.sync",
+            "window.list",
+            "window.watch",
             "element.seed",
             "focus.session",
             "guide",

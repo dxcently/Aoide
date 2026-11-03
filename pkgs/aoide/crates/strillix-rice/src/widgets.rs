@@ -131,8 +131,10 @@ pub struct RegistrySyncOk {
 /// them: hermetic, and no longer coupled to a rices's current slot counts.
 /// Tests that deliberately assert the REAL behaviour (the §7.5 cases and the
 /// generator's argv, `commands/rice.rs`'s own gate tests) unset this and drive
-/// the real path, and the two nix CHECKS (`checks.generator-offline`,
-/// `checks.generator-relocatable`) cover the generator itself.
+/// the real path. Three nix CHECKS cover the generator and its caller:
+/// `checks.generator-offline` and `checks.generator-relocatable` cover the
+/// generator itself, and `checks.generator-runtime` covers the call this crate
+/// makes to it.
 ///
 /// Opt-in only, read once per call, and validated exactly like the generator's
 /// own payload (never a default/empty value on missing/malformed input) — this
@@ -246,17 +248,26 @@ pub fn plan_stage(name: &str) -> Result<StageRices, WidgetSyncErr> {
     }
 
     // The shipped baseline carries the BUILT-IN rices' entries (`manifest.json`
-    // baked over exactly the shipped set); this system's own generated answer
-    // overwrites it for every rice the machine's rices holds. A rice in
-    // neither is simply absent — the prune is automatic, never an immortal
-    // stale key.
+    // baked over exactly the shipped set). The generated answer decides every
+    // rice in the generated registry: its manifest entry replaces the baked one,
+    // and a rice the generated manifest gives no slot loses its baked key, so a
+    // slot owner its machine copy no longer declares cannot outlive that copy.
     let mut manifest = read_baked(&templates, "manifest.json")?;
     let mut registry = read_baked(&templates, "registry.json")?;
-    if let (Some(manifest_obj), Some(gen_obj)) =
-        (manifest.as_object_mut(), generated.manifest.as_object())
-    {
-        for (rice, entry) in gen_obj {
-            manifest_obj.insert(rice.clone(), entry.clone());
+    if let (Some(manifest_obj), Some(gen_manifest), Some(gen_registry)) = (
+        manifest.as_object_mut(),
+        generated.manifest.as_object(),
+        generated.registry.as_object(),
+    ) {
+        for rice in gen_registry.keys() {
+            match gen_manifest.get(rice) {
+                Some(entry) => {
+                    manifest_obj.insert(rice.clone(), entry.clone());
+                }
+                None => {
+                    manifest_obj.remove(rice);
+                }
+            }
         }
     }
     if let (Some(registry_obj), Some(gen_obj)) =
@@ -274,9 +285,9 @@ pub fn plan_stage(name: &str) -> Result<StageRices, WidgetSyncErr> {
 ///
 /// `--strict` because a shelf's `composeRice` guards `throw`: without forcing
 /// the whole tree an unevaluated rice would serialize as garbage instead of
-/// failing. The generator path and the rices argument both come from
-/// [`aoide_storage::fs`] — the templates dir this binary resolves, and
-/// `$STRILLIX_ROOT/rices` — so nothing here can name a checkout path.
+/// failing. The generator is `nix/manifest.nix` beside the templates dir this
+/// binary resolves ([`crate::paths::rice_templates_dir`]), and `ricesRoot` is
+/// [`crate::paths::rices_root`] — so nothing here can name a checkout path.
 ///
 /// The spawn error IS the no-nix answer: `ErrorKind::NotFound` becomes
 /// [`refusal_no_nix`], every other spawn failure its own message. A non-zero
@@ -285,11 +296,11 @@ pub fn plan_stage(name: &str) -> Result<StageRices, WidgetSyncErr> {
 /// "the rices is genuinely empty" and write out.
 fn eval_generator(name: &str, templates: &Path) -> Result<Generated, WidgetSyncErr> {
     let manifest_nix = templates.join("..").join("nix").join("manifest.nix");
-    let rices = crate::paths::rices_root();
+    let rices_root = crate::paths::rices_root();
     let expr = format!(
-        "import {} {{ rices = {}; }}",
+        "import {} {{ ricesRoot = {}; }}",
         nix_string(&manifest_nix.to_string_lossy()),
-        nix_string(&rices.to_string_lossy()),
+        nix_string(&rices_root.to_string_lossy()),
     );
     let target = manifest_nix.to_string_lossy().into_owned();
 
@@ -318,7 +329,7 @@ fn eval_generator(name: &str, templates: &Path) -> Result<Generated, WidgetSyncE
             error: format!(
                 "the shipped rices generator failed over {} — no manifest.json/registry.json \
                  written:\n{}",
-                rices.display(),
+                rices_root.display(),
                 stderr.trim()
             ),
             target,
@@ -1199,6 +1210,15 @@ mod tests {
     fn write(path: &Path, body: &str) {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(path, body).unwrap();
+    }
+
+    #[test]
+    fn nix_string_escapes_only_the_sequences_that_break_the_literal() {
+        assert_eq!(nix_string("a\"b"), "\"a\\\"b\"");
+        assert_eq!(nix_string("a\\b"), "\"a\\\\b\"");
+        assert_eq!(nix_string("a${b}"), "\"a\\${b}\"");
+        assert_eq!(nix_string("a$b"), "\"a$b\"");
+        assert_eq!(nix_string("a\nb"), "\"a\nb\"");
     }
 
     #[test]

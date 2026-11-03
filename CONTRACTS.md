@@ -513,8 +513,9 @@ Rules:
   and names its own slot's providers beside them. It never takes Aoide's
   catalogue wholesale for a slot name it defines itself, because one name from
   two catalogues is a collision. A part needs the nucleus module, the overlay
-  and the rice hook's `rice`/`borrow`/`rices` arguments, and value slots need
-  habit >= 0.4.0 (PACKAGE-LAYOUT's "Parts and rices, from a consumer's side").
+  and the rice hook's `rice`/`borrow`/`ricesRoot`/`riceDirs` arguments, and
+  value slots need habit >= 0.4.0 (PACKAGE-LAYOUT's "Parts and rices, from a
+  consumer's side").
   Additive: no version bump.
 
 A paint dendrite is a plain module like any other, and the ones whose fact
@@ -1186,7 +1187,8 @@ count.
   docs/architecture/ELEMENTS.md) renders a rice's committed
   `elements/*/element.json` — non-QML rice targets (waybar, dunst, anything
   with a config file) — into `run/elements/`. Strillix alone may shell out to
-  nix (`rice/widgets.rs`, and `onboard`'s own `nix eval`/`nix-instantiate`).
+  nix (`pkgs/aoide/crates/strillix-rice/src/widgets.rs`, the one product spawn
+  of `nix-instantiate`).
 
 A consumer wanting the whole desktop's capability inventory reads both.
 This was never a version bump: `schemaVersion` stays `"0"` on both —
@@ -7488,10 +7490,13 @@ and the choice of who plays each part.**
 A host names its rices in its own module, under two `habit.rice` keys. The
 constructor reads them in the gate pass, before any module graph exists, and
 `lib/rices.nix`'s `hook` answers habit's three rice hooks from them. The
-flake exports that file as `lib.rices`, a function of `{ lib, rices }`, and
-a consumer takes its hook: `(lib.rices { inherit lib; rices = dir; }).hook
-{ registry }`. The earlier exports `selectionModule`, `check` and `riceModules`
-are gone with no compatibility shim.
+flake exports that file as `lib.rices`, a function of `{ lib, ricesRoot,
+discovered }`, where `ricesRoot` defaults to Aoide's own rices and
+`discovered` (name to directory, `null` by default) takes rices already found:
+the merge's registry, or a consumer's `riceDirs`. A consumer takes its hook:
+`(lib.rices { inherit lib; ricesRoot = dir; }).hook { registry }`. The earlier
+exports `selectionModule`, `check` and `riceModules` are gone with no
+compatibility shim.
 
 A host whose rices come from SEVERAL directories — Aoide's and its own — takes
 them as one: `lib.rices.merge { inherit lib pkgs; books = [ aoide.ricesRoot
@@ -7515,7 +7520,8 @@ hosts/<host>/default.nix                      lib/rices.nix  hook { registry }
 habit.rice.declared = "sonata";   ──┬──────►  aggregations.<rice> = rices/<rice>/rice.nix
 habit.rice.available = [ ];       ──┼──────►  built-in set (declared ∪ available, closed under borrows)
                                   ──┴──────►  habit.aggregation.<declared>.enable   (host only)
-                                  ──────────►  extraModulesFor: checks, then rice/borrow/rices,
+                                  ──────────►  extraModulesFor: checks, then
+                                               rice/borrow/ricesRoot/riceDirs,
                                                strillix.rice, strillix.rices.{builtIn,greeter}
 ```
 

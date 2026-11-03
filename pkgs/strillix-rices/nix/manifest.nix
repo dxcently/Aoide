@@ -5,7 +5,7 @@
 # `nix-instantiate --eval --strict --json` over a FILE:
 #
 #   nix-instantiate --eval --strict --json --expr \
-#     'import <templates>/../nix/manifest.nix { rices = <AOIDE_ROOT>/rices; }'
+#     'import <templates>/../nix/manifest.nix { ricesRoot = <STRILLIX_ROOT>/rices; }'
 #
 # No flake, no network, no checkout, no `--impure`. What a repo-less machine
 # regenerating its OWN rices needs, and all it needs.

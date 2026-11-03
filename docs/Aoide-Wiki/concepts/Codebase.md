@@ -41,7 +41,7 @@ Outputs, all tolerant of empty layers so eval stays robust:
   (`surface-ownership`, `rice-runtime-untracked`, `rice-shape`, `fmt`,
   `discovery`, `phantom-commands`, `nix-independence`, `boundary`,
   `portability`, `nix-lint`, `theme-fanout`, `generator-offline`,
-  `generator-relocatable`),
+  `generator-relocatable`, `bar-ricemode`, `generator-runtime`),
   one auto-generated `pkg-<name>` per discovered package, plus the `vm-boot`
   headless boot test (below) and the `vm-lock-greeter` graphical login and
   lock test (`tests/vm-lock-greeter.nix`).
