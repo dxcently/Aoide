@@ -81,10 +81,11 @@ overlays listed in `intentionalOverrides` (the strillix lane replacing
 non-standard build arg goes through a documented
 `//` escape hatch (kept in this file to preserve the single source).
 
-**`lib/strillix.nix`** is the host constructor: `hostNames` is discovered from
-`hosts/` (every immediate child with a `default.nix`, minus the `_`-prefixed
-templates), and `mkHost name` assembles that host's outputs — its
-`nixosSystem`, its `inventory`, and the module values a consumer may want.
+**`lib/strillix.nix`** is the host constructor, `mkFlake`: a flake calls it with its
+`root`, and it reads that root's `hosts/` (every immediate child with a `default.nix`,
+minus the `_`-prefixed templates), `modules/default.nix` and `rices/` by convention.
+Each host it finds becomes a `nixosSystem` and an `inventory` entry, and the module
+values a consumer may want are exported beside it.
 Nothing in it names a machine or imports a dendrite file. It closes over
 Aoide's own flake inputs once, in `nucleusModule` (the same value exported as
 `nixosModules.nucleus` and passed as `_module.args.aoideInputs`), appends the

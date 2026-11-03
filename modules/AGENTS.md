@@ -12,8 +12,10 @@ a plugin).
 
 `modules/default.nix` is the catalogue — plain data, never a module.
 `catalogue` holds one line per dendrite — `name = path;`, or `name = {
-providers.<p> = path; };` for a component slot written inline — and that name is how a
-host, a user and an aggregation reach it. It is the ONE place a dendrite file is
+providers.<p> = path; };` for a component slot written inline, or `name = { byClass = X;
+};` for a dendrite written as a NixOS module and a Home Manager module (see *The byClass
+marker*) — and that name is how a host, a user and an aggregation reach it. It is the ONE
+place a dendrite file is
 named. `aggregations` and `overrides` are the records read one level deep beside
 it — by their own directories' discovery files, names and paths only, never a
 body at catalogue time. A
@@ -26,6 +28,22 @@ A dendrite file is an ordinary NixOS module (CONTRACTS.md §2). It declares
 `aoide.<name>.*` options its body reads, and its body is unconditional; what it
 sets under `habit.home` is its home half. The
 constructor imports the files of what a host selected, and only those.
+
+## The byClass marker
+
+- The marker is `{ byClass = X; }` and nothing else. An attribute beside `byClass`
+  leaves the entry unrendered, so the NixOS module system refuses that attribute
+  by name.
+- It stands on a catalogue line or as an inline provider target, and nowhere else.
+  Never put one inside a provider-set FILE: mkFlake renders no marker there, since
+  rendering would import that file for every host, and habit refuses a raw one as an
+  unknown `byClass` option. A provider set whose target needs a marker is written
+  inline on the registry line.
+- `lib/by-class.nix` is the only renderer, and a rendered entry stays a function.
+  Registry code never imports or reads a marked entry to inspect it: an unselected
+  entry is never read.
+- X's value is a record of `nixos` and/or `homeManager`, with at least one of the two
+  and nothing else. A value that is not one is refused by name when a host selects it.
 
 ## Selection is the switch
 
@@ -78,5 +96,8 @@ this is a code-review discipline, not a build failure.
   lands, an option's default changes, a dendrite's shape changes, or a
   read-whitelist entry is added.
 - `CONTRACTS.md` §2 when the dendrite shape itself moves.
+- `modules/README.md`'s byClass section, `lib/by-class.nix`'s header and
+  `docs/architecture/PACKAGE-LAYOUT.md`'s `lib.mkFlake` section, together, when the
+  marker's shape or the root layout `mkFlake` reads moves.
 - Root `AGENTS.md` house rule 5 if the whitelist itself grows — that's the
   one repo-wide invariant this file only restates.

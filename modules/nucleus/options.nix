@@ -459,19 +459,21 @@ in
       '';
     };
 
-    # No default here: the NixOS system half (lib/strillix.nix) sets the value, and
-    # a standalone home sets its own. `defaultText` documents that NixOS default.
+    # No default here: the NixOS system half (lib/strillix.nix) sets the value for
+    # Strillix's own hosts, a host built by mkFlake from another tree sets its own, and a
+    # standalone home sets its own. `defaultText` documents the NixOS default.
     hostConfig = mkOption {
       type = types.str;
-      defaultText = literalExpression ''"''${config.aoide.checkout}/hosts/''${config.networking.hostName}/default.nix"'';
+      defaultText = literalExpression ''"''${config.aoide.checkout}/hosts/''${config.networking.hostName}/default.nix" (Strillix's own hosts; a host built by mkFlake from another tree sets it)'';
       description = ''
         This machine's host config file — the module holding its one
         `habit.rice.declared = "<rice>";` line, which `strillix rice declare
         <rice> --host` rewrites so the next rebuild performs that rice.
         Exported as `STRILLIX_HOST_CONFIG` on the strillix units, and in
-        `aoide.user`'s own login shells. A consumer whose hosts live elsewhere
-        sets its own path. Code default, matching this option's own default
-        exactly: `<checkout>/hosts/<hostname>/default.nix`.
+        `aoide.user`'s own login shells. Strillix's own hosts default to
+        `<checkout>/hosts/<hostname>/default.nix`. A host built by mkFlake from
+        another tree has no default: it sets its own path, and reading the option
+        unset fails by name.
       '';
     };
 

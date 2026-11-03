@@ -40,7 +40,7 @@ name aoide pkgs/aoide/crates/conduct/src/commands/hooks.rs 5
 name aoide pkgs/aoide/crates/conduct/src/graph/grant.rs 1
 name aoide pkgs/aoide/crates/conduct/src/graph/send.rs 3
 name aoide pkgs/aoide/crates/conduct/src/shellbridge.rs 4
-name aoide pkgs/aoide/crates/protocol/src/door.rs 22
+name aoide pkgs/aoide/crates/protocol/src/door.rs 12
 name aoide pkgs/aoide/crates/protocol/tests/no_hand_enforcement.rs 9
 name aoide pkgs/aoide/crates/server/src/a2a.rs 12
 name aoide pkgs/aoide/crates/storage/src/charter.rs 2
@@ -65,7 +65,7 @@ name strillix modules/default.nix 5
 name strillix modules/dendrites/bash.nix 2
 name strillix modules/dendrites/clipboard.nix 3
 name strillix modules/dendrites/compositor/hyprland/behaviour.nix 4
-name strillix modules/dendrites/compositor/hyprland/default.nix 10
+name strillix modules/dendrites/compositor/hyprland/default.nix 11
 name strillix modules/dendrites/dunst.nix 2
 name strillix modules/dendrites/git.nix 1
 name strillix modules/dendrites/greeter.nix 12
@@ -166,7 +166,7 @@ name strillix pkgs/aoide/crates/strillix/src/hypr/tests.rs 102
 name strillix pkgs/aoide/crates/strillix/src/hypr/testutil.rs 12
 name strillix pkgs/aoide/crates/strillix/src/lib.rs 3
 name strillix pkgs/aoide/crates/strillix/src/output.rs 1
-name strillix pkgs/aoide/crates/strillix/src/registry.rs 19
+name strillix pkgs/aoide/crates/strillix/src/registry.rs 17
 name strillix pkgs/aoide/crates/strillix/src/xdg/mod.rs 3
 name strillix pkgs/aoide/crates/strillix/tests/boot.rs 6
 name strillix pkgs/aoide/crates/strillix/tests/core_state.rs 17
@@ -208,7 +208,7 @@ name strillix rices/barcarolle/design/mock.html 4
 name strillix rices/barcarolle/widgets/Declare.qml 1
 name strillix rices/barcarolle/widgets/DesktopGadgets.qml 1
 name strillix rices/barcarolle/widgets/LockPreview.qml 3
-name strillix rices/barcarolle/widgets/bar.qml 8
+name strillix rices/barcarolle/widgets/bar.qml 9
 name strillix rices/barcarolle/widgets/calendar.qml 1
 name strillix rices/barcarolle/widgets/dock.qml 4
 name strillix rices/barcarolle/widgets/launcher.qml 8

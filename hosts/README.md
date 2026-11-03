@@ -7,9 +7,10 @@ a scan has been committed.
 
 ## Discovery, not registration
 
-`flake.nix` reads this directory one level deep: every immediate child holding a
-`default.nix`, minus the `_`-prefixed shelved ones. Adding a machine is a new
-directory and nothing else — no list in `flake.nix`, no line in `lib/strillix.nix`.
+`mkFlake` (`lib/strillix.nix`) reads this directory one level deep, for the flake whose
+root holds it: every immediate child holding a `default.nix`, minus the `_`-prefixed
+shelved ones. Adding a machine is a new directory and nothing else — no list in
+`flake.nix`, no line in `lib/strillix.nix`.
 A name with no directory is unreachable, which is what shelving means here.
 
 `_desktop`, `_laptop` and `_server` are templates to copy (`cp -r hosts/_desktop

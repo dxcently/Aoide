@@ -378,9 +378,11 @@ printf '%-52s %s\n' "merged toplevel drvPath" "$(o .merged.drv)"
 # `strillix.greeter.output` moves cage from `-m last` to `-m extend`, and its
 # greeter script turns the other outputs off. The scripts are realised (as the
 # strillix build above is) and read: the named one for its off-loop, the default
-# one for no wlr-randr at all. A full revert of greeter.nix shows up as the eval
-# failing: `strillix.greeter.output` is then an unknown option on greeter-output,
-# so the consumer expression fails before any check here runs.
+# one for no wlr-randr at all. The tree they run over is read for the login
+# screen's picture: the desktop picture, present in the tree, and no logon
+# picture. A full revert of greeter.nix shows up as the eval failing:
+# `strillix.greeter.output` is then an unknown option on greeter-output, so the
+# consumer expression fails before any check here runs.
 check "greeter: no output keeps cage on the last output" "true" \
   "$(o '.greeter.plain | contains("cage -s -m last -- ")')"
 check "greeter: a named output extends cage"              "true" \
@@ -395,6 +397,13 @@ check "greeter: its off-loop skips the named output"      "true" \
   "$(grep -qF '[ "$name" != DP-1 ]' "$greeter_script" 2>/dev/null && echo true || echo false)"
 check "greeter: its off-loop turns other outputs off"     "true" \
   "$(grep -qF 'wlr-randr --output "$name" --off' "$greeter_script" 2>/dev/null && echo true || echo false)"
+# The login screen's picture: barcarolle ships no logon picture, so the tree the
+# script runs over names the desktop picture, and no logon picture is in it.
+# The tree is the script's own input, found among its references and realised.
+greeter_tree_drv=$(nix-store -q --references "$(o .greeter.plainDrv)" | grep -- '-aoide-greeter-tree[.]drv$')
+greeter_tree=$([ -n "$greeter_tree_drv" ] && nix build --no-link --print-out-paths "$greeter_tree_drv^out" 2>"$tmp/greeter-tree.err") || greeter_tree=""
+check "greeter: login screen is the desktop picture"      "true" \
+  "$([ -n "$greeter_tree" ] && jq -e '.rice == "barcarolle" and (.path | endswith("/rices/barcarolle/wallpaper/barcarolle-desktop.jpg"))' "$greeter_tree/stage/wallpaper.json" >/dev/null 2>&1 && [ -f "$(jq -r .path "$greeter_tree/stage/wallpaper.json")" ] && [ -z "$(find "$greeter_tree" -name 'barcarolle-logon.*')" ] && echo true || echo false)"
 
 # ── 4. Strillix with Aoide off ──────────────────────────────────────────────
 # The desktop aggregation alone, with no core under it: the strillix lane

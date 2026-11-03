@@ -8,6 +8,7 @@ import Quickshell.Hyprland
 import Quickshell.Networking
 import Quickshell.Services.Pipewire
 import Quickshell.Services.SystemTray
+import Quickshell.Services.UPower
 import "../.."
 import "Kit.js" as Kit
 import "Rice.js" as Rice
@@ -230,12 +231,17 @@ Item {
     }
     Component.onCompleted: root.recountTray()
 
-    // The calendar is its own surface: the clock measures its cell into
-    // shared.calendarAnchor (screen coordinates), then the bridge toggles it on
-    // this bar's screen.
+    // The calendar's anchor is the clock's top-right corner in screen coordinates
+    // (shared.calendarAnchor). mapToItem gives that corner in this window's
+    // coordinates, counted from the window's top. The bar sits at the bottom of its
+    // screen, so the window's top is at screen y = screen.height - win.height, and
+    // that offset is added. The window spans the screen's width from x 0, so x
+    // needs none. The bridge then toggles the calendar on this bar's screen.
     function toggleCalendar(cell) {
-        if (root.shared) root.shared.calendarAnchor = cell.mapToItem(null, 0, cell.height)
-        root.bridge.component("calendar", "toggle", win.screen ? win.screen.name : "")
+        if (!win.screen) return
+        var p = cell.mapToItem(null, cell.width, 0)
+        if (root.shared) root.shared.calendarAnchor = Qt.point(p.x, win.screen.height - win.height + p.y)
+        root.bridge.component("calendar", "toggle", win.screen.name)
     }
     function toggleFlyout(name) {
         if (root.flyout === name) { root.flyout = ""; return }
@@ -958,9 +964,8 @@ Item {
     component PowerRow: Item {
         id: pw
         property string action: ""
-        property string label: Power.find(pw.action) ? Power.find(pw.action).name + (pw.more ? "\u2026" : "") : ""
+        property string label: Power.find(pw.action) ? Power.find(pw.action).name : ""
         property string pic: pw.action
-        property bool more: false
         signal activated()
         width: parent ? parent.width : 218
         height: 30
@@ -1769,9 +1774,27 @@ Item {
             onClicked: root.toggleFlyout("network")
             Icon { x: 4; y: 12; width: 16; height: 16; src: root.trayDir + (root.netUp ? "tray-net-up.svg" : "tray-net-down.svg") }
         }
+        Item {
+            id: bat
+            width: 24
+            height: Kit.barHeight
+            readonly property var rig: (Quickshell.env("AOIDE_RIG_BATTERY") || "").split(":")
+            readonly property bool forced: rig[0] !== ""
+            readonly property var dev: UPower.displayDevice
+            readonly property bool present: forced || (!!dev && dev.isLaptopBattery && dev.isPresent)
+            readonly property real pct: forced ? parseFloat(rig[0]) : (dev ? dev.percentage * 100 : 0)
+            readonly property real level: Math.max(0, Math.min(100, pct || 0)) / 100
+            readonly property bool charging: forced ? rig[1] === "charging" : (!!dev && dev.state === UPowerDeviceState.Charging)
+            visible: present
+            anchors.right: net.left
+            Svg { x: 4; y: 12; d: "M2.5 3.5 H11.5 a1 1 0 0 1 1 1 V11.5 a1 1 0 0 1 -1 1 H2.5 a1 1 0 0 1 -1 -1 V4.5 a1 1 0 0 1 1 -1 Z"; stroke: root.kit.text; sw: 1 }
+            Svg { x: 4; y: 12; d: "M13 6.5 H14.5 V9.5 H13 Z"; fill: root.kit.text }
+            Svg { x: 4; y: 12; d: "M3 5 H" + (3 + Math.max(bat.level > 0 ? 1 : 0, 8 * bat.level)) + " V11 H3 Z"; fill: bat.pct < 15 ? root.kit.urgent : root.kit.text }
+            Svg { visible: bat.charging; x: 4; y: 12; d: "M8.8 4.2 L6.2 8.6 H7.9 L7.1 11.8 L9.8 7.4 H8.1 Z"; fill: root.kit.working; stroke: Kit.ink; sw: 0.6 }
+        }
         Cell {
             id: flag
-            anchors.right: net.left
+            anchors.right: bat.visible ? bat.left : net.left
             lit: root.flyout === "action"
             onClicked: root.toggleFlyout("action")
             Icon { x: 4; y: 12; width: 16; height: 16; src: root.trayDir + "tray-flag.svg" }
@@ -2388,10 +2411,6 @@ Item {
                         root.bridge.sendCommand({ cmd: "power", action: action })
                         root.flyout = ""
                     }
-                    function shutdownDialog(action) {
-                        root.flyout = ""
-                        root.bridge.component("powermenu", "show", action)
-                    }
 
                     property bool stageOpen: false
                     property var riceAnswer: null
@@ -2760,11 +2779,11 @@ Item {
                             id: powCol
                             x: 1; y: 5; width: parent.width - 2
                             PowerRow { label: "Switch user"; pic: "switch-user"; enabled: false }
-                            PowerRow { action: "logout"; onActivated: sm.shutdownDialog("logout") }
+                            PowerRow { action: "logout"; onActivated: sm.power("logout") }
                             PowerRow { action: "suspend"; onActivated: sm.power("suspend") }
                             PowerRow { action: "hibernate"; onActivated: sm.power("hibernate") }
-                            PowerRow { action: "reboot"; onActivated: sm.shutdownDialog("reboot") }
-                            PowerRow { action: "shutdown"; more: true; onActivated: sm.shutdownDialog() }
+                            PowerRow { action: "reboot"; onActivated: sm.power("reboot") }
+                            PowerRow { action: "shutdown"; onActivated: sm.power("shutdown") }
                         }
                     }
 

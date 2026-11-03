@@ -65,9 +65,8 @@
 let
   # The constructor, exactly as a real host reaches it: the same module-list
   # assembly `lib/strillix.nix` drives, with the VM's own record in place of
-  # `hosts/<name>/`. `lib/mkHost.nix` used to hand-assemble this list; that file
-  # is gone, so the test that exists to exercise the real assembly goes through
-  # the real assembly.
+  # `hosts/<name>/`. The test exists to exercise the real assembly, so it goes
+  # through the real assembly.
   composition = inputs.habit.lib.composition { inherit lib; };
 
   # The pkgs overlay injecting the discovered packages — literally the same
@@ -86,10 +85,7 @@ let
   # value the flake exports as `nixosModules.nucleus`, and the ONE module that
   # sets `_module.args.aoideInputs` (which is how every dendrite reaches Aoide's
   # own inputs now; nothing threads them through specialArgs).
-  strillix = import ../lib/strillix.nix {
-    inherit inputs lib system;
-    username = "khoa";
-  };
+  strillix = import ../lib/strillix.nix { inherit inputs lib; };
 
   # The VM's host module — the same interface `hosts/<name>/default.nix`
   # answers, inline because this machine exists only for the test.
@@ -138,7 +134,7 @@ let
     extraModules = [ strillix.nucleusModule ];
     homeManagerModule = inputs.home-manager.nixosModules.home-manager;
     overlays = [ overlay ];
-    # specialArgs mirror what lib/strillix.nix passes: `username`, and NOT
+    # specialArgs: `username` is set here, since the constructor passes none, and NOT
     # `inputs` — the dendrites reach Aoide's own inputs as `aoideInputs`, which the
     # nucleus module above defines once. The node is named "vm-test".
     specialArgs = {

@@ -2,6 +2,38 @@
 
 ## Unreleased
 
+### Thin flakes: `lib.mkFlake`
+
+- A flake builds its machines with `aoide.lib.mkFlake { root = ./.; }`: its own `hosts/`, `modules/default.nix` and `rices/` are read by convention and come back as `nixosConfigurations` and `inventory`, so a consumer's flake needs no host loop of its own.
+- `lib/strillix.nix` takes `{ inputs, lib }` and returns `mkFlake`, `ricesRoot`, `nucleusModule`, `homeNucleus` and `standaloneNucleus`. `mkHost`, `hostNames` and the file's `system` and `username` arguments are gone: a caller that imports the file by path passes `system` to `mkFlake`, and `username` through `mkFlake`'s `specialArgs`.
+- A host that `mkFlake` builds from a tree other than Strillix's own sets `strillix.hostConfig` itself. It has no default there, and reading it unset fails by name.
+- A catalogue line, or the target of an inline provider set, may be `{ byClass = X; }`. X is a NixOS module and a Home Manager module written together, `{ nixos = …; homeManager = …; }`, with at least one of the two and no other key. `mkFlake` renders the marker in the registry before habit reads it, and a flake without habit imports `X.nixos` or `X.homeManager` directly.
+
+### Home half reads the host's own rices book
+
+- The home half reads the rices directory its system half reads: the host's own book when it has one, and Strillix's otherwise. Before, the home half always read Strillix's book, so a host's own rices reached its system half and not its home.
+
+### barcarolle's calendar opens above the clock
+
+- The calendar sat near the top edge of every screen and ran off its right edge, because the clock stored its cell's corner in the bar window's coordinates, not the screen's, and the bar sits at the bottom. Opened from the clock, it now sits above it, its right edge on the clock's right edge and its bottom flush on the bar.
+
+### Battery in the notification area
+
+- barcarolle's notification area shows a battery cell on a laptop, between the Action Center flag and the network icon: the charge as a glyph, urgent orange below 15%, with a bolt while charging. A machine with no battery gets no cell, and the other icons do not move. The cell is not a button: no hover box, and a click does nothing.
+
+### Start menu power rows act directly
+
+- barcarolle's Start menu power rows (Log off, Restart, Shut down) send their power action at once, like Sleep and Hibernate; the separate Shut Down dialog is no longer opened from the Start menu, and the `Shut down…` ellipsis is gone.
+
+### Login screen shows the desktop picture
+
+- The greeter's login screen falls back to the rice's desktop picture (`strillix.theme.wallpaper`) when the face ships no logon picture. barcarolle's `barcarolle-logon.jpg`, with its painted person tile, is removed; the login screen shows `barcarolle-desktop.jpg`.
+- `tests/consumer` checks that barcarolle's login-screen tree names the desktop picture and holds no logon picture.
+
+### Bar popups do not blur their transparent regions
+
+- The compositor sets `ignore_alpha 0.05` on the `aoide-bar` layer beside its `blur_popups` rule, so a popup's transparent area no longer renders as a dark blurred block.
+
 ### The bridge socket loop lives in aoide-protocol
 
 - The shellbridge socket loop (the accept, the cross-uid floor, the line routing and the drop) moves from `aoide-conduct` to `aoide-protocol::shellbridge`, and peer credentials move to `aoide-protocol::peercred` (one copy, shared with `aoide-secrets`). Core's commands stay in conduct as the core socket's `front` hook. Wire behaviour, reply bytes and audit records are unchanged.
