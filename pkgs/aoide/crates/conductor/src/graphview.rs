@@ -2279,7 +2279,7 @@ mod tests {
 
         let ghost = node(&m, "node:ghost");
         assert_eq!(ghost.title, "");
-        assert!(m.children.get("node:ghost").is_none(), "nothing hangs off a node never pulled");
+        assert!(!m.children.contains_key("node:ghost"), "nothing hangs off a node never pulled");
 
         // Local forest first, nodes after — the gathering root precedes every host.
         let unanchored = m.nodes.iter().position(|n| n.id == UNANCHORED_ID).unwrap();
@@ -2411,7 +2411,7 @@ mod tests {
         app.sync_graph_scene();
         let m = build_model(&app);
         assert!(
-            m.children.get("session:ghost").is_some(),
+            m.children.contains_key("session:ghost"),
             "the fixture really carries the ghost edge: {:?}",
             m.children.keys().collect::<Vec<_>>()
         );
@@ -3587,8 +3587,7 @@ mod tests {
         }
         let (took, nodes) = aoide_test_support::finishes_within(Duration::from_secs(20), move || {
             let app = far_app(sessions);
-            let n = build_model(&app).nodes.len();
-            n
+            build_model(&app).nodes.len()
         })
         .expect("a ladder of duplicate ids is laid in moments, not in 2^40 paths");
         assert_eq!(nodes, 2 * (RUNGS + 1) + 1, "one card per id, and the node");

@@ -1076,6 +1076,494 @@ pub fn hit(area: Rect, app: &App, x: u16, y: u16) -> Hit {
     Hit::None
 }
 
+fn addresses(items: &[aoide_storage::mail::Address]) -> String {
+    if items.is_empty() {
+        return "—".into();
+    }
+    items
+        .iter()
+        .map(|a| format!("{}/{}", a.node, a.name))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+pub struct ComposerGeometry {
+    pub area: Rect,
+    pub tree: Rect,
+    pub to_picker: Rect,
+    pub cc_picker: Rect,
+    pub from: Rect,
+    pub fields: Vec<(Rect, crate::app::MailField)>,
+    pub original: Rect,
+    pub send: Rect,
+    pub cancel: Rect,
+    pub hint: Rect,
+}
+pub fn composer_geometry(area: Rect) -> ComposerGeometry {
+    use crate::app::MailField;
+    let outer = area.inner(ratatui::layout::Margin::new(1, 1));
+    let panels = if outer.width >= 45 {
+        Layout::horizontal([
+            Constraint::Length((outer.width / 3).clamp(16, 30)),
+            Constraint::Min(0),
+        ])
+        .split(outer)
+    } else {
+        Layout::vertical([
+            Constraint::Length((outer.height / 4).min(6)),
+            Constraint::Min(0),
+        ])
+        .split(outer)
+    };
+    let left = Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).split(panels[0]);
+    let pickers =
+        Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)]).split(left[0]);
+    let a = panels[1];
+    let i = inner(a);
+    let rows = Layout::vertical([
+        Constraint::Length(1),
+        Constraint::Length(2),
+        Constraint::Length(2),
+        Constraint::Length(2),
+        Constraint::Length(3),
+        Constraint::Min(1),
+        Constraint::Length(1),
+        Constraint::Length(2),
+    ])
+    .split(i);
+    let actions = Layout::horizontal([
+        Constraint::Length(20),
+        Constraint::Length(18),
+        Constraint::Min(0),
+    ])
+    .split(rows[6]);
+    ComposerGeometry {
+        area: a,
+        tree: left[1],
+        to_picker: pickers[0],
+        cc_picker: pickers[1],
+        from: rows[0],
+        fields: vec![
+            (rows[1], MailField::To),
+            (rows[2], MailField::Cc),
+            (rows[3], MailField::Subject),
+            (rows[5], MailField::Body),
+        ],
+        original: rows[4],
+        send: actions[0],
+        cancel: actions[1],
+        hint: rows[7],
+    }
+}
+fn draw_mail_draft(f: &mut Frame, app: &App) {
+    use crate::app::{MailField, MailMode};
+    let Some(d) = &app.mail_draft else {
+        return;
+    };
+    let g = composer_geometry(f.area());
+    f.render_widget(ratatui::widgets::Clear, g.tree);
+    draw_tree(f, g.tree, app);
+    for (rect, field, label) in [
+        (g.to_picker, MailField::To, "[+ To]"),
+        (g.cc_picker, MailField::Cc, "[+ Cc]"),
+    ] {
+        f.render_widget(
+            Paragraph::new(label).style(if d.recipient_field == field {
+                Style::default().add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
+            } else {
+                Style::default()
+            }),
+            rect,
+        );
+    }
+    f.render_widget(ratatui::widgets::Clear, g.area);
+    let title = match d.mode {
+        MailMode::New => " NEW LETTER ",
+        MailMode::Reply => " REPLY ",
+        MailMode::ReplyAll => " REPLY ALL ",
+        MailMode::Forward => " FORWARD ",
+    };
+    f.render_widget(frame(title), g.area);
+    f.render_widget(Paragraph::new(format!("From: {}  (you)", d.from)), g.from);
+    for &(r, field) in &g.fields {
+        let (label, value) = match field {
+            MailField::To => ("To", &d.to),
+            MailField::Cc => ("Cc", &d.cc),
+            MailField::Subject => ("Subject", &d.subject),
+            MailField::Body => ("Message", &d.body),
+        };
+        let active = field == d.focus && !app.sidebar_focused;
+        let label = format!("{} {} ", if active { ">" } else { " " }, label);
+        let block = Block::default()
+            .borders(Borders::TOP)
+            .title(label)
+            .border_style(Style::default());
+        let content = block.inner(r);
+        f.render_widget(
+            block,
+            r,
+        );
+        let display = if value.is_empty() {
+            match field {
+                MailField::To => "node/mailbox, ...",
+                MailField::Cc => "Optional copy recipients",
+                MailField::Subject => "What is this letter about?",
+                MailField::Body => "Write your message...",
+            }
+            .to_string()
+        } else {
+            value.clone()
+        };
+        if field == MailField::Body && d.submitted {
+            f.render_widget(
+                Paragraph::new(
+                    d.error
+                        .as_deref()
+                        .unwrap_or("Inspect delivery results before sending another letter."),
+                )
+                .wrap(Wrap { trim: false }),
+                content,
+            );
+            continue;
+        }
+        if value.is_empty() {
+            f.render_widget(Paragraph::new(display), content);
+        }
+        let lines = field_lines(value, content.width);
+        let cursor_row = lines
+            .iter()
+            .rposition(|(start, _)| *start <= d.cursor)
+            .unwrap_or(0);
+        let offset = if active {
+            cursor_row.saturating_sub(content.height.saturating_sub(1) as usize)
+        } else {
+            0
+        };
+        for (row, &(start, end)) in lines
+            .iter()
+            .enumerate()
+            .skip(offset)
+            .take(content.height as usize)
+        {
+            if value.is_empty() {
+                break;
+            }
+            f.render_widget(
+                Paragraph::new(&value[start..end]),
+                Rect::new(
+                    content.x,
+                    content.y + (row - offset) as u16,
+                    content.width,
+                    1,
+                ),
+            );
+        }
+        if active && content.width > 0 && content.height > 0 {
+            let start = lines.get(cursor_row).map(|l| l.0).unwrap_or(0);
+            let col =
+                ratatui::text::Span::raw(&value[start..d.cursor.min(value.len())]).width() as u16;
+            f.set_cursor_position((
+                content.x + col.min(content.width - 1),
+                content.y
+                    + (cursor_row - offset).min(content.height.saturating_sub(1) as usize) as u16,
+            ));
+        }
+    }
+    let original = if let Some(m) = &d.original {
+        format!(
+            "Regarding: {}\nFrom {} · {}\n{}",
+            m.subject().unwrap_or_else(|| "(no subject)".into()),
+            m.from,
+            m.minted_at,
+            abbreviated(&m.body().replace('\n', " "), g.original.width as usize)
+        )
+    } else {
+        "Recipients see To and Cc. Sending files or queues mail; it does not confirm reading."
+            .into()
+    };
+    f.render_widget(
+        Paragraph::new(original)
+            .wrap(Wrap { trim: false }),
+        g.original,
+    );
+    f.render_widget(
+        Paragraph::new(if d.submitted {
+            "[ Submitted ]"
+        } else {
+            "[> Send ^S]"
+        })
+        .style(Style::default().add_modifier(Modifier::BOLD)),
+        g.send,
+    );
+    f.render_widget(Paragraph::new("[x Cancel Esc]"), g.cancel);
+    let hint=d.error.clone().unwrap_or_else(||"Tab / Shift-Tab fields | Ctrl-S send | Esc cancel\n+ To / + Cc selects where tree clicks add recipients".into());
+    f.render_widget(Paragraph::new(hint).wrap(Wrap { trim: false }), g.hint);
+}
+/// A popup box sized to its own content, never a fixed guess: `content_w`
+/// is the widest line the caller will actually render (measured in cells),
+/// and the border adds two. `MIN_MENU_W` keeps a one-word menu from
+/// shrinking to a sliver; the frame's width is still the hard ceiling.
+const MIN_MENU_W: u16 = 14;
+pub fn target_menu_area(area: Rect, x: u16, y: u16, count: usize, content_w: u16) -> Rect {
+    let w = (content_w + 2).max(MIN_MENU_W).min(area.width);
+    let h = area.height.min(count as u16 + 2);
+    Rect::new(
+        x.min(area.right().saturating_sub(w)),
+        y.min(area.bottom().saturating_sub(h)),
+        w,
+        h,
+    )
+}
+
+const WRITE_LETTER_TITLE: &str = " WRITE LETTER TO · Esc close ";
+
+/// The widest line the mail recipient chooser renders: its fixed title or
+/// one `label · address` choice.
+pub(crate) fn target_menu_content_width(choices: &[(String, String)]) -> u16 {
+    std::iter::once(cells(WRITE_LETTER_TITLE))
+        .chain(
+            choices
+                .iter()
+                .map(|(label, address)| cells(&format!("{label} · {address}"))),
+        )
+        .max()
+        .unwrap_or(0)
+}
+fn draw_target_menu(f: &mut Frame, app: &App) {
+    let Some((x, y, choices, index)) = &app.mail_target_menu else {
+        return;
+    };
+    let a = target_menu_area(
+        f.area(),
+        *x,
+        *y,
+        choices.len(),
+        target_menu_content_width(choices),
+    );
+    f.render_widget(ratatui::widgets::Clear, a);
+    f.render_widget(
+        frame(WRITE_LETTER_TITLE),
+        a,
+    );
+    let offset = index.saturating_sub(inner(a).height.saturating_sub(1) as usize);
+    for (i, (label, address)) in choices
+        .iter()
+        .enumerate()
+        .skip(offset)
+        .take(inner(a).height as usize)
+    {
+        let r = Rect::new(
+            a.x + 1,
+            a.y + 1 + (i - offset) as u16,
+            a.width.saturating_sub(2),
+            1,
+        );
+        f.render_widget(
+            Paragraph::new(format!("{label} · {address}")).style(if i == *index {
+                selected()
+            } else {
+                Style::default()
+            }),
+            r,
+        );
+    }
+}
+
+pub fn field_lines(text: &str, width: u16) -> Vec<(usize, usize)> {
+    let width = usize::from(width.max(1));
+    let mut rows = Vec::new();
+    let mut start = 0;
+    let mut used = 0;
+    for (i, c) in text.char_indices() {
+        if c == '\n' {
+            rows.push((start, i));
+            start = i + 1;
+            used = 0;
+            continue;
+        }
+        let w = ratatui::text::Span::raw(c.to_string()).width();
+        if used + w > width {
+            rows.push((start, i));
+            start = i;
+            used = 0;
+        }
+        used += w;
+    }
+    rows.push((start, text.len()));
+    rows
+}
+pub fn field_click(
+    d: &crate::app::MailDraft,
+    field: crate::app::MailField,
+    rect: Rect,
+    x: u16,
+    y: u16,
+) -> usize {
+    let content = Block::default().borders(Borders::TOP).inner(rect);
+    let text = d.field(field);
+    let rows = field_lines(text, content.width);
+    let selected = rows
+        .iter()
+        .rposition(|(start, _)| *start <= d.cursor)
+        .unwrap_or(0);
+    let offset = if field == d.focus {
+        selected.saturating_sub(content.height.saturating_sub(1) as usize)
+    } else {
+        0
+    };
+    let row = (y.saturating_sub(content.y) as usize + offset).min(rows.len() - 1);
+    let (start, end) = rows[row];
+    let mut col = 0;
+    for (i, c) in text[start..end].char_indices() {
+        let w = ratatui::text::Span::raw(c.to_string()).width();
+        if col + w > x.saturating_sub(content.x) as usize {
+            return start + i;
+        }
+        col += w;
+    }
+    end
+}
+
+/// The identity mark beside a context-menu action row -- the one source
+/// both the width measurement and the actual paint read, so sizing the
+/// box can never drift from what it draws.
+fn context_action_symbol(action: crate::app::ContextAction) -> &'static str {
+    use crate::app::ContextAction;
+    match action {
+        ContextAction::Details => "?",
+        ContextAction::WriteLetter => "@",
+        ContextAction::Open => ">",
+        ContextAction::AssignProject => "#",
+        ContextAction::LeadProject => "*",
+        ContextAction::Resurrect => "^",
+        ContextAction::AddFolder => "+",
+        ContextAction::PairNode => "&",
+        ContextAction::ToggleRead => "r",
+        ContextAction::ToggleSpawn => "s",
+        ContextAction::ToggleMessage => "m",
+        ContextAction::RemoveNode => "-",
+        ContextAction::EditValue => "=",
+        ContextAction::GrantSecret => "+",
+        ContextAction::RevokeSecret => "-",
+    }
+}
+
+/// The widest line a context menu renders: its framed title or one
+/// ` symbol label` action row.
+pub(crate) fn context_menu_content_width(
+    title: &str,
+    actions: &[crate::app::ContextAction],
+) -> u16 {
+    std::iter::once(cells(&format!(" {title} ")))
+        .chain(
+            actions
+                .iter()
+                .map(|a| cells(&format!(" {} {}", context_action_symbol(*a), a.label()))),
+        )
+        .max()
+        .unwrap_or(0)
+}
+
+fn draw_context_menu(f: &mut Frame, app: &App) {
+    let Some(m) = &app.context_menu else {
+        return;
+    };
+    let area = target_menu_area(
+        f.area(),
+        m.x,
+        m.y,
+        m.actions.len(),
+        context_menu_content_width(&m.title, &m.actions),
+    );
+    f.render_widget(ratatui::widgets::Clear, area);
+    f.render_widget(
+        frame(&format!(" {} ", m.title)),
+        area,
+    );
+    let inside = inner(area);
+    let offset = m
+        .selected
+        .saturating_sub(inside.height.saturating_sub(1) as usize);
+    for (i, action) in m
+        .actions
+        .iter()
+        .enumerate()
+        .skip(offset)
+        .take(inside.height as usize)
+    {
+        let symbol = context_action_symbol(*action);
+        f.render_widget(
+            Paragraph::new(format!(" {symbol} {}", action.label())).style(if i == m.selected {
+                selected()
+            } else {
+                Style::default()
+            }),
+            Rect::new(inside.x, inside.y + (i - offset) as u16, inside.width, 1),
+        );
+    }
+}
+
+pub fn panel_role(panel: Panel) -> theme::Role {
+    match panel {
+        Panel::Home | Panel::Projects => theme::Role::Project,
+        Panel::Session | Panel::Graph => theme::Role::Agent,
+        Panel::Terminals => theme::Role::Terminal,
+        Panel::Mail => theme::Role::Mail,
+        Panel::Pending => theme::Role::Warning,
+        Panel::Roster => theme::Role::Success,
+        Panel::Log | Panel::Status => theme::Role::Muted,
+    }
+}
+/// The three count buttons sit on the RIGHT edge of the header, each led by
+/// its identity mark; `𝄞 CONDUCTOR` keeps the left.
+pub fn header_regions(area: Rect, app: &App) -> Vec<(Rect, Panel, String)> {
+    let records = app.merged();
+    let buttons = [
+        (
+            Panel::Projects,
+            format!(
+                "[{} {} Projects]",
+                theme::mark(theme::Mark::Project),
+                app.projects.len()
+            ),
+        ),
+        (
+            Panel::Session,
+            format!(
+                "[{} {} Agents]",
+                theme::mark(theme::Mark::Agent),
+                records
+                    .iter()
+                    .filter(|r| !crate::app::is_terminal(r) && !crate::app::is_done(&r.state))
+                    .count()
+            ),
+        ),
+        (
+            Panel::Terminals,
+            format!(
+                "[{} {} Terminals]",
+                theme::mark(theme::Mark::Terminal),
+                records
+                    .iter()
+                    .filter(|r| crate::app::is_terminal(r) && !crate::app::is_done(&r.state))
+                    .count()
+            ),
+        ),
+    ];
+    let total: u16 = buttons.iter().map(|(_, l)| cells(l) + 1).sum();
+    let left = area.x + 15;
+    let mut x = area.right().saturating_sub(total).max(left);
+    buttons
+        .into_iter()
+        .filter_map(|(p, label)| {
+            let width = cells(&label);
+            let r = Rect::new(x, area.y, width, 1);
+            x += width + 1;
+            (r.right() <= area.right()).then_some((r, p, label))
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1531,500 +2019,4 @@ mod tests {
         let letter_bar_x = list.right() - 1;
         assert_eq!(hit(area, &app, letter_bar_x, y), Hit::None);
     }
-}
-
-fn addresses(items: &[aoide_storage::mail::Address]) -> String {
-    if items.is_empty() {
-        return "—".into();
-    }
-    items
-        .iter()
-        .map(|a| format!("{}/{}", a.node, a.name))
-        .collect::<Vec<_>>()
-        .join(", ")
-}
-
-pub struct ComposerGeometry {
-    pub area: Rect,
-    pub tree: Rect,
-    pub to_picker: Rect,
-    pub cc_picker: Rect,
-    pub from: Rect,
-    pub fields: Vec<(Rect, crate::app::MailField)>,
-    pub original: Rect,
-    pub send: Rect,
-    pub cancel: Rect,
-    pub hint: Rect,
-}
-pub fn composer_geometry(area: Rect) -> ComposerGeometry {
-    use crate::app::MailField;
-    let outer = area.inner(ratatui::layout::Margin::new(1, 1));
-    let panels = if outer.width >= 45 {
-        Layout::horizontal([
-            Constraint::Length((outer.width / 3).clamp(16, 30)),
-            Constraint::Min(0),
-        ])
-        .split(outer)
-    } else {
-        Layout::vertical([
-            Constraint::Length((outer.height / 4).min(6)),
-            Constraint::Min(0),
-        ])
-        .split(outer)
-    };
-    let left = Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).split(panels[0]);
-    let pickers =
-        Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)]).split(left[0]);
-    let a = panels[1];
-    let i = inner(a);
-    let rows = Layout::vertical([
-        Constraint::Length(1),
-        Constraint::Length(2),
-        Constraint::Length(2),
-        Constraint::Length(2),
-        Constraint::Length(3),
-        Constraint::Min(1),
-        Constraint::Length(1),
-        Constraint::Length(2),
-    ])
-    .split(i);
-    let actions = Layout::horizontal([
-        Constraint::Length(20),
-        Constraint::Length(18),
-        Constraint::Min(0),
-    ])
-    .split(rows[6]);
-    ComposerGeometry {
-        area: a,
-        tree: left[1],
-        to_picker: pickers[0],
-        cc_picker: pickers[1],
-        from: rows[0],
-        fields: vec![
-            (rows[1], MailField::To),
-            (rows[2], MailField::Cc),
-            (rows[3], MailField::Subject),
-            (rows[5], MailField::Body),
-        ],
-        original: rows[4],
-        send: actions[0],
-        cancel: actions[1],
-        hint: rows[7],
-    }
-}
-fn draw_mail_draft(f: &mut Frame, app: &App) {
-    use crate::app::{MailField, MailMode};
-    let Some(d) = &app.mail_draft else {
-        return;
-    };
-    let g = composer_geometry(f.area());
-    f.render_widget(ratatui::widgets::Clear, g.tree);
-    draw_tree(f, g.tree, app);
-    for (rect, field, label) in [
-        (g.to_picker, MailField::To, "[+ To]"),
-        (g.cc_picker, MailField::Cc, "[+ Cc]"),
-    ] {
-        f.render_widget(
-            Paragraph::new(label).style(if d.recipient_field == field {
-                Style::default().add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
-            } else {
-                Style::default()
-            }),
-            rect,
-        );
-    }
-    f.render_widget(ratatui::widgets::Clear, g.area);
-    let title = match d.mode {
-        MailMode::New => " NEW LETTER ",
-        MailMode::Reply => " REPLY ",
-        MailMode::ReplyAll => " REPLY ALL ",
-        MailMode::Forward => " FORWARD ",
-    };
-    f.render_widget(
-        frame(title)
-            .border_style(if app.sidebar_focused {
-                Style::default()
-            } else {
-                Style::default()
-            }),
-        g.area,
-    );
-    f.render_widget(Paragraph::new(format!("From: {}  (you)", d.from)), g.from);
-    for &(r, field) in &g.fields {
-        let (label, value) = match field {
-            MailField::To => ("To", &d.to),
-            MailField::Cc => ("Cc", &d.cc),
-            MailField::Subject => ("Subject", &d.subject),
-            MailField::Body => ("Message", &d.body),
-        };
-        let active = field == d.focus && !app.sidebar_focused;
-        let label = format!("{} {} ", if active { ">" } else { " " }, label);
-        let block = Block::default()
-            .borders(Borders::TOP)
-            .title(label)
-            .border_style(Style::default());
-        let content = block.inner(r);
-        f.render_widget(
-            block,
-            r,
-        );
-        let display = if value.is_empty() {
-            match field {
-                MailField::To => "node/mailbox, ...",
-                MailField::Cc => "Optional copy recipients",
-                MailField::Subject => "What is this letter about?",
-                MailField::Body => "Write your message...",
-            }
-            .to_string()
-        } else {
-            value.clone()
-        };
-        if field == MailField::Body && d.submitted {
-            f.render_widget(
-                Paragraph::new(
-                    d.error
-                        .as_deref()
-                        .unwrap_or("Inspect delivery results before sending another letter."),
-                )
-                .wrap(Wrap { trim: false }),
-                content,
-            );
-            continue;
-        }
-        if value.is_empty() {
-            f.render_widget(Paragraph::new(display), content);
-        }
-        let lines = field_lines(value, content.width);
-        let cursor_row = lines
-            .iter()
-            .rposition(|(start, _)| *start <= d.cursor)
-            .unwrap_or(0);
-        let offset = if active {
-            cursor_row.saturating_sub(content.height.saturating_sub(1) as usize)
-        } else {
-            0
-        };
-        for (row, &(start, end)) in lines
-            .iter()
-            .enumerate()
-            .skip(offset)
-            .take(content.height as usize)
-        {
-            if value.is_empty() {
-                break;
-            }
-            f.render_widget(
-                Paragraph::new(&value[start..end]),
-                Rect::new(
-                    content.x,
-                    content.y + (row - offset) as u16,
-                    content.width,
-                    1,
-                ),
-            );
-        }
-        if active && content.width > 0 && content.height > 0 {
-            let start = lines.get(cursor_row).map(|l| l.0).unwrap_or(0);
-            let col =
-                ratatui::text::Span::raw(&value[start..d.cursor.min(value.len())]).width() as u16;
-            f.set_cursor_position((
-                content.x + col.min(content.width - 1),
-                content.y
-                    + (cursor_row - offset).min(content.height.saturating_sub(1) as usize) as u16,
-            ));
-        }
-    }
-    let original = if let Some(m) = &d.original {
-        format!(
-            "Regarding: {}\nFrom {} · {}\n{}",
-            m.subject().unwrap_or_else(|| "(no subject)".into()),
-            m.from,
-            m.minted_at,
-            abbreviated(&m.body().replace('\n', " "), g.original.width as usize)
-        )
-    } else {
-        "Recipients see To and Cc. Sending files or queues mail; it does not confirm reading."
-            .into()
-    };
-    f.render_widget(
-        Paragraph::new(original)
-            .wrap(Wrap { trim: false }),
-        g.original,
-    );
-    f.render_widget(
-        Paragraph::new(if d.submitted {
-            "[ Submitted ]"
-        } else {
-            "[> Send ^S]"
-        })
-        .style(Style::default().add_modifier(Modifier::BOLD)),
-        g.send,
-    );
-    f.render_widget(Paragraph::new("[x Cancel Esc]"), g.cancel);
-    let hint=d.error.clone().unwrap_or_else(||"Tab / Shift-Tab fields | Ctrl-S send | Esc cancel\n+ To / + Cc selects where tree clicks add recipients".into());
-    f.render_widget(Paragraph::new(hint).wrap(Wrap { trim: false }), g.hint);
-}
-/// A popup box sized to its own content, never a fixed guess: `content_w`
-/// is the widest line the caller will actually render (measured in cells),
-/// and the border adds two. `MIN_MENU_W` keeps a one-word menu from
-/// shrinking to a sliver; the frame's width is still the hard ceiling.
-const MIN_MENU_W: u16 = 14;
-pub fn target_menu_area(area: Rect, x: u16, y: u16, count: usize, content_w: u16) -> Rect {
-    let w = (content_w + 2).max(MIN_MENU_W).min(area.width);
-    let h = area.height.min(count as u16 + 2);
-    Rect::new(
-        x.min(area.right().saturating_sub(w)),
-        y.min(area.bottom().saturating_sub(h)),
-        w,
-        h,
-    )
-}
-
-const WRITE_LETTER_TITLE: &str = " WRITE LETTER TO · Esc close ";
-
-/// The widest line the mail recipient chooser renders: its fixed title or
-/// one `label · address` choice.
-pub(crate) fn target_menu_content_width(choices: &[(String, String)]) -> u16 {
-    std::iter::once(cells(WRITE_LETTER_TITLE))
-        .chain(
-            choices
-                .iter()
-                .map(|(label, address)| cells(&format!("{label} · {address}"))),
-        )
-        .max()
-        .unwrap_or(0)
-}
-fn draw_target_menu(f: &mut Frame, app: &App) {
-    let Some((x, y, choices, index)) = &app.mail_target_menu else {
-        return;
-    };
-    let a = target_menu_area(
-        f.area(),
-        *x,
-        *y,
-        choices.len(),
-        target_menu_content_width(choices),
-    );
-    f.render_widget(ratatui::widgets::Clear, a);
-    f.render_widget(
-        frame(WRITE_LETTER_TITLE),
-        a,
-    );
-    let offset = index.saturating_sub(inner(a).height.saturating_sub(1) as usize);
-    for (i, (label, address)) in choices
-        .iter()
-        .enumerate()
-        .skip(offset)
-        .take(inner(a).height as usize)
-    {
-        let r = Rect::new(
-            a.x + 1,
-            a.y + 1 + (i - offset) as u16,
-            a.width.saturating_sub(2),
-            1,
-        );
-        f.render_widget(
-            Paragraph::new(format!("{label} · {address}")).style(if i == *index {
-                selected()
-            } else {
-                Style::default()
-            }),
-            r,
-        );
-    }
-}
-
-pub fn field_lines(text: &str, width: u16) -> Vec<(usize, usize)> {
-    let width = usize::from(width.max(1));
-    let mut rows = Vec::new();
-    let mut start = 0;
-    let mut used = 0;
-    for (i, c) in text.char_indices() {
-        if c == '\n' {
-            rows.push((start, i));
-            start = i + 1;
-            used = 0;
-            continue;
-        }
-        let w = ratatui::text::Span::raw(c.to_string()).width();
-        if used + w > width {
-            rows.push((start, i));
-            start = i;
-            used = 0;
-        }
-        used += w;
-    }
-    rows.push((start, text.len()));
-    rows
-}
-pub fn field_click(
-    d: &crate::app::MailDraft,
-    field: crate::app::MailField,
-    rect: Rect,
-    x: u16,
-    y: u16,
-) -> usize {
-    let content = Block::default().borders(Borders::TOP).inner(rect);
-    let text = d.field(field);
-    let rows = field_lines(text, content.width);
-    let selected = rows
-        .iter()
-        .rposition(|(start, _)| *start <= d.cursor)
-        .unwrap_or(0);
-    let offset = if field == d.focus {
-        selected.saturating_sub(content.height.saturating_sub(1) as usize)
-    } else {
-        0
-    };
-    let row = (y.saturating_sub(content.y) as usize + offset).min(rows.len() - 1);
-    let (start, end) = rows[row];
-    let mut col = 0;
-    for (i, c) in text[start..end].char_indices() {
-        let w = ratatui::text::Span::raw(c.to_string()).width();
-        if col + w > x.saturating_sub(content.x) as usize {
-            return start + i;
-        }
-        col += w;
-    }
-    end
-}
-
-/// The identity mark beside a context-menu action row -- the one source
-/// both the width measurement and the actual paint read, so sizing the
-/// box can never drift from what it draws.
-fn context_action_symbol(action: crate::app::ContextAction) -> &'static str {
-    use crate::app::ContextAction;
-    match action {
-        ContextAction::Details => "?",
-        ContextAction::WriteLetter => "@",
-        ContextAction::Open => ">",
-        ContextAction::AssignProject => "#",
-        ContextAction::LeadProject => "*",
-        ContextAction::Resurrect => "^",
-        ContextAction::AddFolder => "+",
-        ContextAction::PairNode => "&",
-        ContextAction::ToggleRead => "r",
-        ContextAction::ToggleSpawn => "s",
-        ContextAction::ToggleMessage => "m",
-        ContextAction::RemoveNode => "-",
-        ContextAction::EditValue => "=",
-        ContextAction::GrantSecret => "+",
-        ContextAction::RevokeSecret => "-",
-    }
-}
-
-/// The widest line a context menu renders: its framed title or one
-/// ` symbol label` action row.
-pub(crate) fn context_menu_content_width(
-    title: &str,
-    actions: &[crate::app::ContextAction],
-) -> u16 {
-    std::iter::once(cells(&format!(" {title} ")))
-        .chain(
-            actions
-                .iter()
-                .map(|a| cells(&format!(" {} {}", context_action_symbol(*a), a.label()))),
-        )
-        .max()
-        .unwrap_or(0)
-}
-
-fn draw_context_menu(f: &mut Frame, app: &App) {
-    let Some(m) = &app.context_menu else {
-        return;
-    };
-    let area = target_menu_area(
-        f.area(),
-        m.x,
-        m.y,
-        m.actions.len(),
-        context_menu_content_width(&m.title, &m.actions),
-    );
-    f.render_widget(ratatui::widgets::Clear, area);
-    f.render_widget(
-        frame(&format!(" {} ", m.title)),
-        area,
-    );
-    let inside = inner(area);
-    let offset = m
-        .selected
-        .saturating_sub(inside.height.saturating_sub(1) as usize);
-    for (i, action) in m
-        .actions
-        .iter()
-        .enumerate()
-        .skip(offset)
-        .take(inside.height as usize)
-    {
-        let symbol = context_action_symbol(*action);
-        f.render_widget(
-            Paragraph::new(format!(" {symbol} {}", action.label())).style(if i == m.selected {
-                selected()
-            } else {
-                Style::default()
-            }),
-            Rect::new(inside.x, inside.y + (i - offset) as u16, inside.width, 1),
-        );
-    }
-}
-
-pub fn panel_role(panel: Panel) -> theme::Role {
-    match panel {
-        Panel::Home | Panel::Projects => theme::Role::Project,
-        Panel::Session | Panel::Graph => theme::Role::Agent,
-        Panel::Terminals => theme::Role::Terminal,
-        Panel::Mail => theme::Role::Mail,
-        Panel::Pending => theme::Role::Warning,
-        Panel::Roster => theme::Role::Success,
-        Panel::Log | Panel::Status => theme::Role::Muted,
-    }
-}
-/// The three count buttons sit on the RIGHT edge of the header, each led by
-/// its identity mark; `𝄞 CONDUCTOR` keeps the left.
-pub fn header_regions(area: Rect, app: &App) -> Vec<(Rect, Panel, String)> {
-    let records = app.merged();
-    let buttons = [
-        (
-            Panel::Projects,
-            format!(
-                "[{} {} Projects]",
-                theme::mark(theme::Mark::Project),
-                app.projects.len()
-            ),
-        ),
-        (
-            Panel::Session,
-            format!(
-                "[{} {} Agents]",
-                theme::mark(theme::Mark::Agent),
-                records
-                    .iter()
-                    .filter(|r| !crate::app::is_terminal(r) && !crate::app::is_done(&r.state))
-                    .count()
-            ),
-        ),
-        (
-            Panel::Terminals,
-            format!(
-                "[{} {} Terminals]",
-                theme::mark(theme::Mark::Terminal),
-                records
-                    .iter()
-                    .filter(|r| crate::app::is_terminal(r) && !crate::app::is_done(&r.state))
-                    .count()
-            ),
-        ),
-    ];
-    let total: u16 = buttons.iter().map(|(_, l)| cells(l) + 1).sum();
-    let left = area.x + 15;
-    let mut x = area.right().saturating_sub(total).max(left);
-    buttons
-        .into_iter()
-        .filter_map(|(p, label)| {
-            let width = cells(&label);
-            let r = Rect::new(x, area.y, width, 1);
-            x += width + 1;
-            (r.right() <= area.right()).then_some((r, p, label))
-        })
-        .collect()
 }
