@@ -3,9 +3,10 @@
 //! binary-split workstream, docs/architecture/PACKAGE-LAYOUT.md): the
 //! self-ricing loop, screen, notifications, shellbridge, and quickshell — never
 //! conducting, the graph, A2A, nodes, or the daemon (core `aoide` identity).
-//! One binary (`strillix`), one schema, same "three doors, one schema" contract
-//! (concepts/Agent-Interface) — the MCP door reuses these exact command
-//! handlers, same as core's.
+//! One binary (`strillix`), one schema, and one door onto these command handlers:
+//! the CLI (concepts/Agent-Interface). The desktop socket (`bridge`) serves its
+//! own verbs, and a verb that needs a command runs this binary. MCP is Aoide's
+//! door, and strillix serves none.
 
 pub mod bridge;
 pub mod commands;
@@ -24,27 +25,12 @@ use daemon::Door;
 /// `argv` excludes the program name. The parse/dispatch/render skeleton is
 /// `aoide_protocol::door::run` (P-A3) — the same loop `aoide-cli`'s
 /// `run_cli` drives, against strillix's OWN registry/dispatcher and its OWN
-/// smaller `special` hook: `mcp serve --stdio` starts the stdio server,
-/// `guide`/`schema`/`theme` bypass the generic `Outcome` envelope exactly
-/// like core does for the same three. Deliberately absent: `a2a serve` and
-/// `conductor` — those are core identity, never strillix's (plan P-A4: "NO a2a
-/// serve, NO conductor").
+/// smaller `special` hook: `guide`/`schema`/`theme` bypass the generic
+/// `Outcome` envelope, `guide` and `schema` exactly as core's do. Deliberately
+/// absent: `a2a serve` and `conductor` — those are core identity, never
+/// strillix's (plan P-A4: "NO a2a serve, NO conductor").
 pub fn run_strillix(argv: &[String]) -> i32 {
     aoide_protocol::door::run(argv, Door::Cli, "strillix", dispatch::registry(), &strillix_rice::paths::audit_log(), dispatch::dispatch, |inv, json| {
-        // `mcp serve --stdio` is a long-running server, not a one-shot
-        // dispatch. The registry + dispatcher are injected here (the DI
-        // seam `aoide-server`'s module doc comment explains) — STRILLIX's own
-        // assembled registry, not core's, so the tool list matches strillix's own bundle.
-        if inv.path == ["mcp", "serve"] && inv.flag_present("stdio") {
-            return Some(match aoide_server::mcp::serve_stdio(dispatch::registry(), dispatch::dispatch) {
-                Ok(()) => output::exit::OK,
-                Err(e) => {
-                    eprintln!("strillix mcp serve: {e}");
-                    output::exit::ERROR
-                }
-            });
-        }
-
         // `guide` in text mode prints the full onboarding rather than a summary.
         if inv.path == ["guide"] && !json {
             print!("{}", guide::render(dispatch::registry()));

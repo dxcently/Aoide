@@ -8,8 +8,7 @@ tags: [aoide, cli, mcp, a2a, node, daemon]
 # Doors & Federation Commands — MCP, A2A, Nodes, Daemon
 
 This group covers the doors onto the one command schema and the federation
-surface: the stdio [[Agent-Interface|MCP]] façade (`mcp serve` — `strx mcp
-serve` is the same façade over strillix's own 48-path registry), the [[aoided]]
+surface: the stdio [[Agent-Interface|MCP]] façade (`mcp serve`), the [[aoided]]
 policy skeleton (`daemon`, `events tail`, `adapter melete`), the desktop
 state bridge (`shellbridge`), the interactive session UI (`conductor`,
 detailed at [[Conductor-TUI]]), live presence (bare `session` — the roster,

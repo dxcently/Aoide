@@ -7,10 +7,11 @@ rules that govern the whole repo.
 
 ## Registry order is load-bearing
 
-`schema --json`, the MCP tool list, and the A2A `AgentCard` all derive from
-the single `Registry` each app crate assembles
-(`cli/src/commands/mod.rs::all()`, `strillix/src/commands/mod.rs::all()`) — see
-`aoide-protocol::registry`'s module doc. The assembly order reproduces the
+`schema --json` derives from the single `Registry` each app crate assembles
+(`cli/src/commands/mod.rs::all()`, `strillix/src/commands/mod.rs::all()`) —
+see `aoide-protocol::registry`'s module doc. The MCP tool list and the A2A
+`AgentCard` derive from `cli`'s registry alone: MCP and A2A are Aoide's doors,
+and Strillix serves neither. The assembly order reproduces the
 historical table byte-for-byte; **never reorder an existing `register()`
 call**, only append. A command's home is its domain crate's own `commands`
 module — nothing outside a domain's `register(&mut Registry)` function

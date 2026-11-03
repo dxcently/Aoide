@@ -43,7 +43,7 @@ Strillix is also a specialized widget maker: it integrates and launches the inde
 ## Entities
 
 - [[aoide-cli]] — the `aoide` CLI trunk and the `aoided` daemon binary; `schema --json` is the single source of truth behind the MCP façade. Paint commands (`rice`, `wallpaper`, `theme`, `screen`, …) are `strillix`'s
-- [[strillix]] — the Strillix paint binary: its own 48-command schema, its own registry and golden snapshot, the one binary allowed to depend on nix
+- [[strillix]] — the Strillix paint binary: its own schema, its own registry and golden snapshot, the one binary allowed to depend on nix
 - [[theme]] — the design-token layer and its engine: the immutable seam between nix structure and runtime rendering, native in `crates/strillix-rice/src/theme/` as `strx theme emit|resolve|lint`
 - [[aoided]] — the orchestrator daemon: neutral event stream, policy, lint, audit log, gated rebuild pipeline
 - [[shellbridge]] — the daemon-to-desktop bridge: atomic JSON state files out, unix-socket commands in, Hyprland IPC consumed

@@ -5,9 +5,8 @@
 //! The handlers carry the engine's raw byte output in `data["stdout"]` — the
 //! exact bytes the Node CLI printed (resolve JSON, shell-quoted hyprctl
 //! lines, the OSC stream, the compact `{ok, …}` envelopes) — so the CLI door
-//! can print them raw (see the `theme` special case in `cli/src/lib.rs`,
-//! mirroring `schema`/`guide`) and the MCP/A2A doors still get the
-//! structured envelope.
+//! can print them raw (see the `theme` special case in `strillix/src/lib.rs`,
+//! mirroring `schema`/`guide`), while `--json` gets the structured envelope.
 
 use crate::theme;
 use crate::theme::emit::hyprctl::render_lines;
@@ -19,7 +18,6 @@ use aoide_protocol::registry::{arg, cmd, flag, Registry};
 use aoide_storage::fs as shellbridge;
 use serde_json::json;
 use std::path::{Path, PathBuf};
-use aoide_protocol::Door;
 
 pub fn register(r: &mut Registry) {
     r.insert(cmd!(
@@ -46,7 +44,6 @@ pub fn register(r: &mut Registry) {
         gated: false,
         implemented: true,
         handler: handle_theme_resolve,
-        doors: &[Door::Cli, Door::Daemon, Door::Mcp],
     ));
     r.insert(cmd!(
         path: ["theme", "lint"],
@@ -56,7 +53,6 @@ pub fn register(r: &mut Registry) {
         gated: false,
         implemented: true,
         handler: handle_theme_lint,
-        doors: &[Door::Cli, Door::Daemon, Door::Mcp],
     ));
 }
 

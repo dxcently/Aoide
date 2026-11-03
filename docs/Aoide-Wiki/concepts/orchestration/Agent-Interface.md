@@ -97,8 +97,8 @@ order:
 | 3 | network MCP | User-enabled only, never agent-enabled: the dedicated Aoide connector (below). Has no sealed ancestor, so every send and spawn through it parks. |
 
 `aoide schema --json` / `strx schema --json` is the machine-readable
-backstop at any tier; the MCP tool list generates from it. Tier 0's
-checkout half is `docs/agent/README.md` (the read-order router) and
+backstop at any tier; the MCP tool list generates from `aoide schema --json`.
+Tier 0's checkout half is `docs/agent/README.md` (the read-order router) and
 `docs/agent/session.md` (the mechanical session checklist); the house
 rules and docs layering live in the root `AGENTS.md` itself.
 

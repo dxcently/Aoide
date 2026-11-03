@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Strillix serves no MCP
+
+- `strx mcp serve` is gone, and Strillix serves no MCP.
+- MCP is Aoide's door: `aoide mcp serve --stdio`.
+- An agent drives Strillix through `strx` in a shell.
+- `strx schema --json` shows no `doors` on the commands that used to open MCP.
+
 ### Window list and watch
 
 - `strx window list` gives the compositor's windows in its own order, with no class filter: address, class and workspace, and with `--json` also title, pid, mapped and cwd. With no compositor it is a refusal (`no-compositor`), never an empty list.

@@ -232,7 +232,7 @@ through.
 - **Approval doors.** Only a door that can approve may approve a gated
   send. The local CLI (`aoide`) and aoided's own dispatch (the conductor,
   the notifications, and any same-uid client of the aoided socket) can. The MCP
-  door (`aoide mcp serve --stdio`, and strillix's) and the A2A door
+  door (`aoide mcp serve --stdio`) and the A2A door
   (`aoide a2a serve`, loopback included) cannot: `--yes` is never read
   there and `session pending approve` is refused with a taught line. The
   A2A door parks every send. The MCP door is attested like the CLI, by the

@@ -13,9 +13,9 @@ personal-computing stack together — the desktop
 independently-owned coding harness **[[Melete]]** and knowledge server
 **[[Mneme]]** it **integrates and launches** (adapters + launchers, not vendored
 code) — and it exposes every one of their capabilities through the same system
-hooks (event stream → adapters → widgets; [[Agent-Interface|CLI trunk + MCP
-façade]]). Many capabilities below are Melete's, *surfaced* through Strillix —
-see the "Provided by" column.
+hooks (event stream → adapters → widgets; [[Agent-Interface|CLI trunk]]). Many
+capabilities below are Melete's, *surfaced* through Strillix — see the "Provided
+by" column.
 
 Every integration is a dendrite ([[Snowflake-Anatomy]]): opt-in, flag-toggled,
 themed by [[theme]], and — where it touches the outside world —

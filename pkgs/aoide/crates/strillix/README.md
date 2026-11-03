@@ -41,9 +41,9 @@ are core `aoide` identity, root `AGENTS.md`).
   hand-written file at the target path is refused, never overwritten. Never
   touches the user's flake.
 - `run_strillix` — drives `aoide_protocol::door::run` with strillix's own registry/
-  dispatcher and its own smaller `special` hook (`mcp serve --stdio`,
-  `guide`/`schema`/`theme`/`secrets ask`/`pair ask`/`pair show` raw
-  output). Deliberately absent: `a2a serve`, `conductor`.
+  dispatcher and its own smaller `special` hook (`guide`/`schema`/`theme`/
+  `secrets ask`/`pair ask`/`pair show` raw output). Deliberately absent:
+  `a2a serve`, `conductor`.
 - `commands::dialog_qml` (P-PV3, task #132; the confirm surface repurposed
   into the show surface at R2) — the shared quickshell code-entry/show
   SURFACES `secrets ask`/`pair ask` (entry) and `pair show` (show) render:
@@ -624,8 +624,7 @@ and the roster read `sessions.json` and write nothing in it.
 ## What it consumes
 
 `aoide-protocol`, `strillix-rice`, `aoide-conduct` (for the `shellbridge` socket
-loop and the `notifications` registry line), `aoide-screen`, `aoide-server` (for `mcp
-serve --stdio`'s door loop).
+loop and the `notifications` registry line), `aoide-screen`.
 
 ## Start-up migration
 

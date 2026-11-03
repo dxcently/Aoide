@@ -9,12 +9,10 @@
 //!
 //! [`all`] assembles the graphical bundle in the SAME relative order these
 //! groups hold in core's `commands/mod.rs::all()` today: meta (guide/
-//! schema/mcp serve — root-coupled, see `commands/infra.rs`'s doc comment
-//! for why `mcp serve` is here despite not being named in the plan's group
-//! list), onboard (P-I3: the nix half of the onboarding flow — root-coupled
-//! like `meta`, appended right after it: a root-level command, registered
-//! before `mcp.serve`, matching core's own relative placement of `onboard`
-//! in `crates/cli/src/commands/mod.rs::all()`), rice, draft,
+//! schema — root-coupled: they read the fully-assembled registry), onboard
+//! (P-I3: the nix half of the onboarding flow — root-coupled like `meta`,
+//! appended right after it, matching core's own relative placement of
+//! `onboard` in `crates/cli/src/commands/mod.rs::all()`), rice, draft,
 //! mode, wallpaper, theme, rice-late stubs (declare/transpose only — NOT
 //! content/make/update, which stay core), shellbridge, quickshell
 //! (healthcheck only — the placeholder-screen watchdog), reload (the one
@@ -60,7 +58,6 @@ pub mod component;
 pub mod dialog_qml;
 pub mod focus;
 pub mod icon;
-pub mod infra;
 pub mod lock;
 pub mod meta;
 pub mod migrate;
@@ -116,7 +113,7 @@ const LAYOUT: Layout = Layout {
                 ("notifications", ""),
             ],
         ),
-        ("Agent interfaces", &[("mcp", ""), ("schema", "")]),
+        ("Agent interfaces", &[("schema", "")]),
         ("System", &[("shellbridge", ""), ("quickshell", ""), ("component", ""), ("migrate", "Move old rice state into the strillix root, or report it with --check")]),
     ],
 };
@@ -126,7 +123,6 @@ pub fn all() -> Registry {
 
     meta::register(&mut r); // guide, schema
     onboard::register(&mut r); // onboard (P-I3: the nix half of the onboarding flow, root-coupled like meta)
-    infra::register_mcp(&mut r); // mcp serve (root-coupled: reads this assembled registry)
     strillix_rice::commands::rice::register(&mut r); // rice lint, list, stage, compose
     strillix_rice::commands::refresh::register(&mut r); // rice refresh — a built-in rice takes the repo's changes to files the machine never edited
     strillix_rice::commands::draft::register(&mut r); // rice draft save/list/drop

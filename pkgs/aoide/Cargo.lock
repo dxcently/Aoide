@@ -2547,7 +2547,6 @@ dependencies = [
  "aoide-conduct",
  "aoide-protocol",
  "aoide-screen",
- "aoide-server",
  "aoide-storage",
  "aoide-test-support",
  "image",

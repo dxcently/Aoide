@@ -72,8 +72,8 @@ aoide schema [--json]
 - **Notes:** read-only; not gated. This document is the machine-readable
   backstop every tier generates from — the MCP tool list derives from it
   ([[Agent-Interface]]). `strx schema` mirrors it for the paint side: its own
-  registry, its own golden snapshot (48 command paths, evolving independently
-  of core's 80 — see [[strillix]]).
+  registry and its own golden snapshot, evolving independently of core's (see
+  [[strillix]]).
 
 ### aoide make
 

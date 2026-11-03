@@ -85,9 +85,8 @@ same values, an honest-empty `design/intent.md` pointing at the widget-slot
 catalog and the update playbook rather than fabricating design rationale,
 and `widgets/.gitkeep`. No `hypr/` directory — geometry lives in `rice.nix`
 alongside palette and window, not as a separate tier of files. Because it is
-an ordinary schema command (`gated: false`, in `schema --json` and the MCP
-tool list), an agent can bootstrap a rice through the same door a human
-would.
+an ordinary schema command (`gated: false`, in `schema --json`), an agent can
+bootstrap a rice through the same door a human would.
 
 The `--from` rice resolves from the host rices first, else from the
 shipped score templates at `<templates>/<from>/theme.json`, where

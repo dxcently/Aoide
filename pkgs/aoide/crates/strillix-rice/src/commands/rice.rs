@@ -12,7 +12,6 @@ use crate::lint;
 use aoide_storage::fs as shellbridge;
 use serde_json::{json, Value};
 use std::path::PathBuf;
-use aoide_protocol::Door;
 
 pub fn register(r: &mut Registry) {
     r.insert(cmd!(
@@ -23,7 +22,6 @@ pub fn register(r: &mut Registry) {
         gated: false,
         implemented: true,
         handler: handle_rice_lint,
-        doors: &[Door::Cli, Door::Daemon, Door::Mcp],
     ));
     r.insert(cmd!(
         path: ["rice", "list"],
@@ -33,7 +31,6 @@ pub fn register(r: &mut Registry) {
         gated: false,
         implemented: true,
         handler: handle_rice_list,
-        doors: &[Door::Cli, Door::Daemon, Door::Mcp],
     ));
     r.insert(cmd!(
         path: ["rice", "stage"],
@@ -43,7 +40,6 @@ pub fn register(r: &mut Registry) {
         gated: false,
         implemented: true,
         handler: handle_rice_stage_entry,
-        doors: &[Door::Cli, Door::Daemon, Door::Mcp],
     ));
     r.insert(cmd!(
         path: ["rice", "compose"],
@@ -57,7 +53,6 @@ pub fn register(r: &mut Registry) {
         implemented: true,
         handler: handle_rice_compose,
         examples: ["rice compose moonlight --from sonata"],
-        doors: &[Door::Cli, Door::Daemon, Door::Mcp],
     ));
 }
 

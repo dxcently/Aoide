@@ -67,13 +67,14 @@ rices manifest).
 | **conductor** | The session-DAG TUI (ratatui: app/ui/graphview/theme). Depends on `{protocol, conduct, storage}` via a dependency-injection seam (`App` takes a `DispatchFn`), never on `server`. | aoide | `conductor` |
 | **upkeep** | Mechanical integrity, the working-tree half: `soundcheck` polices gitignored/uncommitted state (`result`, `state/`, stray root files) that `nix flake check` structurally cannot see. Report-only, forever — never moves, deletes, formats, or repairs. | aoide | `soundcheck` |
 | **cli** | The app shell: `aoide`/`aoided` bins, arg parse, the single dispatcher, registry assembly (`commands::all()`), guide/onboarding, and the three root-coupled groups (`meta`, `stubs`, `mcp serve`) that read the fully-assembled registry. Depends on every core domain crate; nothing depends on it. | aoide | `guide`, `schema`, `mcp.serve`, `content.*` (5, stub), `make`/`update` (stub), `onboard` |
-| **rice** | The ricing/design engine: the native theme engine (schema · resolve · emit), rice/draft/mode/wallpaper/history, the Pantheon design language. Rices portably — no Stylix/NixOS-module dependency in the crate itself. | strillix | `rice.*` (3), `rice.draft.*` (3), `rice.mode.*` (4), `wallpaper.set`, `theme.*` (3), `rice.declare`, `rice.transpose` (stub), `quickshell.*` (2), `rice.history.*` (6), `element.seed` |
-| **screen** | A read-only view onto the desktop for agents plus pointer synthesis: `info`/`shot`/`ocr`/`diff`/`send`, `point` (native `zwlr_virtual_pointer_v1` synthesis, 9 subverbs). Carved out (P-A1) specifically to isolate wayland/image dependency weight off core. | strillix | `screen.*` (14) |
+| **rice** | The ricing/design engine: the native theme engine (schema · resolve · emit), rice/draft/mode/wallpaper/history, the Pantheon design language. Rices portably — no Stylix/NixOS-module dependency in the crate itself. | strillix | `rice.*`, `rice.draft.*`, `rice.mode.*`, `wallpaper.set`, `theme.*`, `rice.declare`, `rice.transpose` (stub), `quickshell.*`, `rice.history.*`, `element.seed` |
+| **screen** | A read-only view onto the desktop for agents plus pointer synthesis: `info`/`shot`/`ocr`/`diff`/`send`, `point` (native `zwlr_virtual_pointer_v1` synthesis). Carved out (P-A1) specifically to isolate wayland/image dependency weight off core. | strillix | `screen.*` |
 | **test-support** | Shared test rig only — scratch dirs, `EnvSaver`, fixture payloads, the single `env_lock`. A dev-dependency, never a production edge. | both (dev-only) | none |
-| **strillix** | The second app shell: arg parse, dispatcher, registry assembly for the paint bundle. The one binary allowed to shell out to nix. Never registers `a2a serve`, `conductor`, or any core-only group. | strillix | `guide`, `schema`, `mcp.serve`, `onboard`, `secrets.ask`, `pair.ask`, `pair.show` |
+| **strillix** | The second app shell: arg parse, dispatcher, registry assembly for the paint bundle. The one binary allowed to shell out to nix. Never registers `a2a serve`, `conductor`, or any core-only group. | strillix | `guide`, `schema`, `onboard`, `secrets.ask`, `pair.ask`, `pair.show` |
 
-Command totals: **aoide 81** (74 real, 7 stub), **strillix 48** (47 real, 1 stub)
-— see [[Full-Architecture]] for the full per-group breakdown.
+Each binary's command-path set is pinned by its crate's `registry.rs` golden
+test, and `aoide schema --json` / `strx schema --json` is the live tree —
+see [[Full-Architecture]] for the full per-group breakdown.
 
 ## Two binaries — `aoide`/`aoided` (core) and `strillix` (paint)
 

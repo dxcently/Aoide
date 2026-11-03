@@ -1168,11 +1168,8 @@ count.
   mode/wallpaper/theme/quickshell/reload/screen/shellbridge/component/notifications/history/
   element, the painted surface. `crates/strillix/src/registry.rs`'s golden test
   pins the authoritative command-path set; `strx schema --json` is the live
-  enumeration — `mcp.serve` must itself be a registered path for
-  `aoide_protocol::door::parse` to ever reach strillix's `special` closure on
-  `mcp serve --stdio`, one of the root-coupled extras beyond the named
-  groups, alongside `onboard` (P-I3, docs/architecture/ONBOARD.md), `secrets
-  ask` (P3), and `pair ask`/`pair show` (P-PV3, task #132 — `pair ask`
+  enumeration. The root-coupled extras beyond the named groups are `secrets ask`
+  (P3) and `pair ask`/`pair show` (P-PV3, task #132 — `pair ask`
   is the ONE entry-dialog shape both pairing directions use under the
   mutual-code redesign, R1; `pair show` is the approver-side stay-open
   reply-code display it spawns after an inbound commit). `reload` (`strillix
@@ -4515,8 +4512,8 @@ Cli             `aoide` at a terminal, a local agent    yes         --yes, globa
 Daemon          aoided's own dispatch: the conductor,   yes         the same routes as Cli
                 the notifications (shellbridge verdict), and
                 any same-uid client of the aoided socket
-Mcp             `aoide mcp serve --stdio`, and          no          the parent and sibling rules,
-                `strx mcp serve --stdio`                            when the server runs under a
+Mcp             `aoide mcp serve --stdio` only          no          the parent and sibling rules,
+                                                                    when the server runs under a
                                                                     sealed session; else queued
 A2a             `aoide a2a serve`, loopback included    no          queued only; an inbound inject, or
                                                                     a spawn's opening turn, parks

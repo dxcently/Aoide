@@ -37,7 +37,6 @@ pub fn register_rice_late(r: &mut Registry) {
         implemented: true,
         handler: handle_rice_declare,
         examples: ["rice declare moonlight", "rice declare barcarolle --host"],
-        doors: &[Door::Cli, Door::Daemon, Door::Mcp],
     ));
     r.insert(cmd!(
         path: ["rice", "transpose"],

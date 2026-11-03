@@ -359,9 +359,9 @@ nix build .#checks.x86_64-linux.vm-lock-greeter -L     # graphical login + lock 
 **Per-crate tests only.** `cargo test -p <crate>`, never `cargo test
 --workspace`: `aoide-conduct`/`aoide-server` bind real sockets and a
 workspace-wide run deadlocks on this machine. Each crate carries its own
-`registry.rs` golden test pinning its exact command-path set (`aoide-cli`:
-80 paths; `strillix`: 48), plus schema validity, exit-code, and MCP
-tool-list-parity tests; the conduct crate's graph domain
+`registry.rs` golden test pinning its exact command-path set, plus schema
+validity and exit-code tests, and MCP tool-list-parity tests (core only); the
+conduct crate's graph domain
 (`crates/conduct/src/graph/{model,doc,common,commands,window,session_store,
 conduct,send}.rs`) carries handlers for all 20 commands the bare `graph`
 render, `graph link`, the `project`/`session` families, bare `session` (the

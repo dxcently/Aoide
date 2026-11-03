@@ -74,7 +74,6 @@ use crate::history::{self, HistoryRecord};
 use aoide_storage::time::{now_iso_utc, parse_iso_utc};
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
-use aoide_protocol::Door;
 
 pub fn register(r: &mut Registry) {
     r.insert(cmd!(
@@ -85,7 +84,6 @@ pub fn register(r: &mut Registry) {
         gated: false,
         implemented: true,
         handler: handle_rice_entry,
-        doors: &[Door::Cli, Door::Daemon, Door::Mcp],
     ));
     r.insert(cmd!(
         path: ["rice", "history", "list"],
@@ -95,7 +93,6 @@ pub fn register(r: &mut Registry) {
         gated: false,
         implemented: true,
         handler: handle_rice_entry_list,
-        doors: &[Door::Cli, Door::Daemon, Door::Mcp],
     ));
     r.insert(cmd!(
         path: ["rice", "history", "mark"],
@@ -105,7 +102,6 @@ pub fn register(r: &mut Registry) {
         gated: false,
         implemented: true,
         handler: handle_rice_entry_mark,
-        doors: &[Door::Cli, Door::Daemon, Door::Mcp],
     ));
     r.insert(cmd!(
         path: ["rice", "history", "diff"],
@@ -118,7 +114,6 @@ pub fn register(r: &mut Registry) {
         gated: false,
         implemented: true,
         handler: handle_rice_entry_diff,
-        doors: &[Door::Cli, Door::Daemon, Door::Mcp],
     ));
     r.insert(cmd!(
         path: ["rice", "history", "prune"],

@@ -48,7 +48,7 @@ updated: 2026-09-27
 ## Entities
 
 - [[aoide-cli]] — the `aoide` binary: the self-registering command registry behind `dispatch()`/`schema --json`/MCP, exit codes 0/1/2/64, and the `aoided` daemon
-- [[strillix]] — the Strillix paint binary: its own registry, its own 48-command schema, the nix boundary core never crosses
+- [[strillix]] — the Strillix paint binary: its own registry, its own schema, the nix boundary core never crosses
 - [[theme]] — the theme schema and tiers, the two-fan-out (stage/theme.json + Stylix), the native `strx theme` engine and its four emitters
 - [[aoided]] — the orchestrator daemon: event stream, policy, lint, audit log, gated rebuild; per-agent adapters; the notification-text security boundary
 - [[shellbridge]] — daemon↔desktop: JSON state files out, socket commands in, Hyprland IPC; the stage files and the `AOIDE_STAGE_DIR` seam

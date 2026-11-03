@@ -39,7 +39,6 @@ use strillix_rice::paths::STRILLIX_SHELL_SRC;
 use serde_json::{json, Map, Value};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
-use aoide_protocol::Door;
 
 pub fn register(r: &mut Registry) {
     r.insert(cmd!(
@@ -88,7 +87,6 @@ pub fn register(r: &mut Registry) {
         gated: false,
         implemented: true,
         handler: handle_preview_set,
-        doors: &[Door::Cli, Door::Daemon, Door::Mcp],
     ));
     r.insert(cmd!(
         path: ["preview", "declare"],
@@ -101,7 +99,6 @@ pub fn register(r: &mut Registry) {
         gated: true,
         implemented: true,
         handler: handle_preview_declare,
-        doors: &[Door::Cli, Door::Daemon, Door::Mcp],
     ));
 }
 

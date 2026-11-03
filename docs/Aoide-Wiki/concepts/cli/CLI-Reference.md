@@ -50,9 +50,9 @@ start at [[aoide-cli]] and the group pages linked below.
   (conducting state) and `/stage/` (rice staging). `~/Aoide` is the dev
   git checkout, reached via `$AOIDE_FLAKE_ROOT`, not a runtime path.
   Stage/state writes are atomic temp-then-rename.
-- **Two registries, one convention:** `aoide schema --json` holds 81
-  command paths (74 real, 7 stubs), `strx schema --json` holds 48 (47 real,
-  1 stub) — every group page prefixes
+- **Two registries, one convention:** `aoide schema --json` and
+  `strx schema --json` each hold their binary's command paths, pinned by its
+  crate's `registry.rs` golden test — every group page prefixes
   each heading `aoide `/`strillix ` so the binary a command belongs to is never
   ambiguous.
 - `secrets exec`'s parking is detailed in [[Secrets-Commands]].

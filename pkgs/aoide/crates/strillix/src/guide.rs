@@ -1,6 +1,6 @@
 //! `strx guide` — the tier-0 onboarding for the graphical/rice binary.
 //!
-//! Same shape as core's `aoide guide` — identity, the four-tier map, a
+//! Same shape as core's `aoide guide` — identity, the tier map, a
 //! registry-derived command table, the nine house-rule titles, pointers —
 //! scoped to strillix's side of the boundary. Long forms live in the Aoide repo;
 //! this text only points there. The prose is compiled in, while the command
@@ -15,21 +15,18 @@ Strillix — the graphical/rice binary (strx guide · tier-0 onboarding)
 Identity: `strillix` is Strillix's painted surface and its rice state: the
 self-ricing loop (entry: `strx rice compose <name>`), screen capture, pointer and
 OCR, the notification commands, shellbridge, the Quickshell reload, and the
-screen lock (`strx lock`). Conducting, the session graph, A2A, nodes and the
+screen lock (`strx lock`). Conducting, the session graph, A2A, MCP, nodes and the
 daemon are Aoide's, and `aoide guide` orients there. Strillix runs without Aoide.
 
 `strx` is the shorthand for `strillix`: one binary, the same surface and output under either name.
 
-Orient through four tiers, in order:
+Orient through two tiers, in order:
   Tier 0 — onboarding: this text; in the Aoide repo, root `AGENTS.md` +
     `docs/agent/README.md`.
   Tier 1 — the CLI: `strx <cmd>` is strillix's whole surface; every command
     takes and emits `--json`; `strx schema --json` is the full
     machine-readable command tree.
-  Tier 2 — stdio MCP: per-session, optional — `strx mcp serve --stdio`;
-    it lists only the commands that declare `mcp` (`doors` in
-    `strx schema --json`; absent = cli, daemon).
-  Tier 3 — network MCP: enabled by the USER only, never by an agent.
+Strillix serves no MCP; an agent drives it through `strx` in a shell.
 
 Command surface — every group this binary registered at boot, with its
 command count (a stub is registered but not yet implemented; `strillix

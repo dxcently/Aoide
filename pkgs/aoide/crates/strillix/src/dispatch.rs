@@ -114,12 +114,11 @@ mod tests {
     /// `aoide-cli`'s own `dispatch.rs` twin test: the external-command probe
     /// (`aoide_protocol::door::run`) must stay OUT of `dispatch()`'s own
     /// `None =>` arm above — that "simplification" would leave the golden
-    /// green while silently granting `PATH` execution to MCP, A2A, and the
-    /// aoided socket, since `dispatch()` (unlike `run`) is the one
-    /// door-agnostic point every non-CLI door reaches directly. This is the
-    /// tripwire: even with a real `strillix-foo` executable sitting on `PATH`,
-    /// dispatching an unregistered path on any non-CLI door must still be a
-    /// plain unknown-command usage error.
+    /// green while silently granting `PATH` execution to any non-CLI door that
+    /// reaches `dispatch()`, since `dispatch()` (unlike `run`) is door-agnostic.
+    /// This is the tripwire: even with a real `strillix-foo` executable sitting
+    /// on `PATH`, dispatching an unregistered path on any non-CLI door must still
+    /// be a plain unknown-command usage error.
     #[test]
     fn an_unregistered_path_on_a_non_cli_door_is_still_unknown_command() {
         let _guard = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());

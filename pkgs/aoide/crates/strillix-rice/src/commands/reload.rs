@@ -64,7 +64,6 @@ use aoide_protocol::output::{Fix, Kind, Outcome, Status};
 use aoide_protocol::registry::{cmd, Registry};
 use crate::mode::{self, RiceMode};
 use serde_json::{json, Value};
-use aoide_protocol::Door;
 
 pub fn register(r: &mut Registry) {
     r.insert(cmd!(
@@ -76,7 +75,6 @@ pub fn register(r: &mut Registry) {
         implemented: true,
         handler: handle_reload,
         brief: "Reload the live rice, honoring the rice mode.",
-        doors: &[Door::Cli, Door::Daemon, Door::Mcp],
     ));
 }
 

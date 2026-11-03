@@ -73,10 +73,10 @@ trail but exit 64 today.
 **Binary note.** The map below draws both binaries as one continuous picture
 of the data flow, labeled `aoide` throughout for readability. Ownership
 (`CONTRACTS.md` §3, [[Package-Layout]]): the AGENT INTERFACE/`aoided`/CONTENT
-PIPELINE/NIX EVAL boxes are `aoide`'s (81 commands: conducting/orchestration
-is aoide's identity); the RICE ENGINE, THEME, Quickshell, and shellbridge
-boxes below them are `strillix`'s (48 commands, its own schema and dispatch,
-routed through the desktop, not through `aoided`'s CLI trunk).
+PIPELINE/NIX EVAL boxes are `aoide`'s (conducting/orchestration is aoide's
+identity); the RICE ENGINE, THEME, Quickshell, and shellbridge boxes below
+them are `strillix`'s (its own schema and dispatch, routed through the
+desktop, not through `aoided`'s CLI trunk).
 
 ```
                           ┌───────────────────────────┐
@@ -134,7 +134,7 @@ the implemented/stubbed ladder.
 
 | Subsystem            | Inputs                                         | Outputs                                             | Status                                     |
 | -------------------- | ---------------------------------------------- | --------------------------------------------------- | ------------------------------------------ |
-| [[Agent-Interface]]  | agent commands; `aoide`/`strx schema --json`   | dispatched operations; structured `--json` results  | implemented (aoide 74 real/7 exit 64; strillix 47 real/1 exit 64) |
+| [[Agent-Interface]]  | agent commands; `aoide`/`strx schema --json`   | dispatched operations; structured `--json` results  | implemented (a stub exits 64) |
 | [[aoided]]           | CLI+MCP operations; desktop events             | audit log (`$AOIDE_ROOT/log`); default-deny event bus   | implemented (skeleton)                     |
 | [[Self-Ricing]]      | prompt/wallpaper; `rices/`; shipped standard | `rices/<rice>/`; rices append; stage    | mostly real (`transpose` exit 64) |
 | [[Content-Pipeline]] | folders + manifests; Mneme API                 | in-place index; quarantine on lint fail             | stubbed (all commands exit 64)                |
@@ -364,14 +364,14 @@ conducting orchestration is `aoide`'s identity, painting is `strillix`'s:
   the 5-command `content` group (`register`/`propose`/`ingest`/`query`/
   `approve`), `make`, `update`. Core is nix-independent: cargo
   build, zero nix shell-outs.
-- **`strillix`** — the Strillix paint binary. `strx schema --json` holds the rest of the surface: the same `guide`/`schema`/`mcp serve` trio as their
+- **`strillix`** — the Strillix paint binary. `strx schema --json` holds the rest of the surface: the same `guide`/`schema` pair as their
   `aoide` spellings, over strillix's own registry; the `rice` group
-  (`lint`, `stage`, `compose`, the 3-command `rice draft` group, the
-  4-command `rice mode` group, the 5-command `rice history` rehearsal-snapshot
-  group, `rice back`, `declare`; `transpose` is the 1 stub), `wallpaper set`,
-  the 3-command `theme` group (`lint`/`resolve`/`emit`
-  — the native design-token engine), `element seed` (renders a rice's
-  committed `elements/*/element.json` into `run/elements/`), `shellbridge`,
+  (`lint`, `stage`, `compose`, the `rice draft` group, the `rice mode` group,
+  the `rice history` rehearsal-snapshot group, `rice back`, `declare`;
+  `transpose` is a stub), `wallpaper set`, the `theme` group
+  (`lint`/`resolve`/`emit` — the native design-token engine), `element seed`
+  (renders a rice's committed `elements/*/element.json` into `run/elements/`),
+  `shellbridge`,
   `reload` (the Quickshell IPC hot-reload
   trigger, rebuilding the whole scene from `shell.qml` in-process to pick up
   dynamically-loaded widget/shell QML the file watcher can't track) and
@@ -383,9 +383,9 @@ conducting orchestration is `aoide`'s identity, painting is `strillix`'s:
   `imports = [ ./aoide.nix ];` line for the user's own flake — it never edits
   that flake; re-running warns and backs up the old file to `<out>.bak`, and
   a file it did not generate is refused, never overwritten), `secrets ask`
-  and the 2-command `pair` group (`ask`/`show` — the pairing-ceremony's
+  and the `pair` group (`ask`/`show` — the pairing-ceremony's
   popup dialogs, sharing `secrets ask`'s six-box QML component), and the
-  14-command `screen` group
+  `screen` group
   (capture, OCR, and synthesized-pointer control — [[Screen-Control]]). Only
   `strillix` may shell out to nix.
 

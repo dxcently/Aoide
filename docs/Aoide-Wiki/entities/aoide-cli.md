@@ -45,9 +45,8 @@ entries through its own `commands::register(&mut Registry)` function;
 `aoide_secrets::commands::register` is newest, contributing the
 [[Secrets-Broker]] group (`serve`/`exec`/`add`/`rm`/`grant`/`revoke`/
 `enroll`/`put`/`set-totp`/`automate`/`expose`/`allow-remote-origin`/`migrate`/`pending`/`approve`/
-`dismiss`/`watch`). P-A5 of the binary-split workstream moved 11 painted
-groups (rice/draft/mode/wallpaper/theme/shellbridge/quickshell/screen/notifications/
-take — 39 command paths) into `crates/strillix/src/commands/mod.rs::all()`.
+`dismiss`/`watch`). P-A5 of the binary-split workstream moved the painted
+groups into `crates/strillix/src/commands/mod.rs::all()`.
 
 `dispatch()` looks up one process-wide `Registry` (built once via
 `OnceLock`), appends to the audit log, and applies the gate — the same path
@@ -301,8 +300,7 @@ shortcut the panel itself registers (`aoide:dock`), not a CLI command (see
   dependency-free JSON-RPC 2.0 server over newline-delimited stdio: each
   command becomes one tool named by its dotted path (`session.hook`),
   args/flags become the `inputSchema`, and `tools/call` dispatches back
-  into the same handlers the CLI uses. `strx mcp serve --stdio` is the same
-  façade over strillix's own registry.
+  into the same handlers the CLI uses.
 - **`stageNotesVersion`** pins the `/stage/theme.json` format alongside
   the command tree so an agent reads one version for the whole contract.
 - **Single audit log, every door.** Every dispatch — CLI, MCP, or A2A —

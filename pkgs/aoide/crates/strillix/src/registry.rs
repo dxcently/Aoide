@@ -169,7 +169,6 @@ mod tests {
             "theme.resolve",
             "lock",
             "lock.hint",
-            "mcp.serve",
             "migrate",
             "onboard",
             "pair.ask",
@@ -225,52 +224,16 @@ mod tests {
         assert_eq!(got, expected, "command path set drifted from strillix's golden snapshot");
     }
 
-    /// Golden snapshot: the commands an MCP caller may list and call. Every
-    /// `doors` change updates this list in the same commit (crates/AGENTS.md).
+    /// Golden snapshot: the commands an MCP caller may list and call. Strillix
+    /// serves no MCP (the door is Aoide's), so the set is empty, and a `doors`
+    /// line that opens a command to MCP fails here.
     #[test]
     fn mcp_open_paths_match_the_golden_snapshot() {
         let r = crate::commands::all();
         let mut got: Vec<String> = r.commands().filter(|c| c.opens(aoide_protocol::audit::Door::Mcp)).map(|c| c.dotted()).collect();
         got.sort();
-        let mut expected = vec![
-            "guide", "theme.lint", "theme.resolve", "preview.declare", "preview.notes", "preview.set",
-            "preview.tree", "reload", "rice.compose", "rice.declare", "rice.draft.list", "rice.lint",
-            "rice.list", "rice.mode.status", "rice.stage", "rice.history", "rice.history.diff", "rice.history.list",
-            "rice.history.mark", "schema",
-        ];
-        expected.sort();
+        let expected: Vec<String> = Vec::new();
         assert_eq!(got, expected, "MCP-open set drifted from strillix's golden snapshot");
-    }
-
-    /// Every MCP-open command passes the door gate when given nothing.
-    #[test]
-    fn every_mcp_open_command_passes_the_door_gate() {
-        use aoide_protocol::audit::Door;
-        let r = crate::commands::all();
-        for c in r.commands().filter(|c| c.opens(Door::Mcp)) {
-            let mut inv = aoide_protocol::Invocation {
-                path: c.path.iter().map(|s| s.to_string()).collect(),
-                args: vec![],
-                flags: Default::default(),
-                door: Door::Mcp,
-            };
-            if let Err(refusal) = c.check("strillix", &mut inv) {
-                assert!(!refusal.what.contains("is not open to the mcp door"), "{}: {}", c.dotted(), refusal.what);
-            }
-        }
-    }
-
-    /// `mcp serve` reports the same count the MCP-open set has.
-    #[test]
-    fn mcp_serve_counts_only_the_mcp_open_commands() {
-        let inv = aoide_protocol::Invocation {
-            path: vec!["mcp".into(), "serve".into()],
-            args: vec![],
-            flags: Default::default(),
-            door: aoide_protocol::audit::Door::Cli,
-        };
-        let outcome = crate::dispatch::dispatch(&inv);
-        assert_eq!(outcome.data.as_ref().unwrap()["toolCount"], 20, "{outcome:?}");
     }
 
     #[test]

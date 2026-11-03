@@ -6,7 +6,6 @@ use crate::dispatch::Invocation;
 use crate::output::Outcome;
 use crate::registry::{cmd, Registry};
 use serde_json::{json, Value};
-use aoide_protocol::Door;
 
 pub fn register(r: &mut Registry) {
     r.insert(cmd!(
@@ -17,7 +16,6 @@ pub fn register(r: &mut Registry) {
         gated: false,
         implemented: true,
         handler: handle_guide,
-        doors: &[Door::Cli, Door::Daemon, Door::Mcp],
     ));
     r.insert(cmd!(
         path: ["schema"],
@@ -28,7 +26,6 @@ pub fn register(r: &mut Registry) {
         implemented: true,
         handler: handle_schema,
         brief: "Print every strillix command and state shape as JSON, for machines.",
-        doors: &[Door::Cli, Door::Daemon, Door::Mcp],
     ));
 }
 

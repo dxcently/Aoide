@@ -77,7 +77,7 @@
   into a path — an unvalidated slot is exactly the same class of escape.
 - **`rice declare --host` is CLI-door-only and lives in `strillix-rice`.** The
   flag's `doors: &[Door::Cli]` is the registration's own (it changes what the
-  next rebuild performs, so MCP and the daemon socket do not reach it; the
+  next rebuild performs, so the daemon socket does not reach it; the
   shellbridge re-execs the CLI); `the_host_flag_is_cli_only` pins it. The
   handler only routes `--host` to `strillix_rice::host_declare::declare_on_host`
   and keeps the copy mode byte-identical; no host-file logic belongs here.

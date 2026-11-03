@@ -109,7 +109,6 @@ use serde_json::{json, Map, Value};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
-use aoide_protocol::Door;
 
 pub fn register(r: &mut Registry) {
     r.insert(cmd!(
@@ -139,7 +138,6 @@ pub fn register(r: &mut Registry) {
         gated: false,
         implemented: true,
         handler: handle_preview_tree,
-        doors: &[Door::Cli, Door::Daemon, Door::Mcp],
     ));
     r.insert(cmd!(
         path: ["preview", "notes"],
@@ -158,7 +156,6 @@ pub fn register(r: &mut Registry) {
         gated: false,
         implemented: true,
         handler: handle_preview_notes,
-        doors: &[Door::Cli, Door::Daemon, Door::Mcp],
     ));
 }
 
