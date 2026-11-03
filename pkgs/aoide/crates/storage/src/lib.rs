@@ -12,9 +12,10 @@
 //! symbol is re-exported at its old root path via `pub use`, so no existing
 //! call site changes.
 //!
-//! `takes` (Self-Ricing Phase A) is a new addition, not a moved one: the
-//! per-draft take store backing `rice back`/`rice history` — see its module
-//! doc for the tree-of-takes model.
+//! The git seam (`git`), time formatting (`time`), the host name
+//! (`display::os_hostname`), the runtime root (`runtime_dir::runtime_root`)
+//! and the hash helpers (`seal::{sha256, hex_encode}`) live in `ground` and
+//! are re-exported here at their old paths.
 //!
 //! `petname` and `display` (petnames plan, P1) are likewise new: the
 //! `adjective-noun` wordlist + mint, and the render-time-only
@@ -143,7 +144,7 @@ pub mod config;
 pub mod display;
 pub mod edits;
 pub mod fs;
-pub mod git;
+pub use ground::git;
 pub mod identity;
 pub mod ledger;
 pub mod letter;
@@ -163,7 +164,7 @@ pub mod seal;
 pub mod sealed_id;
 pub mod session;
 pub mod stage;
-pub mod time;
+pub use ground::time;
 pub mod tunnel;
 pub mod undying;
 pub mod wire_auth;

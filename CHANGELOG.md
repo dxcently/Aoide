@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### ground: the neutral host crate
+
+- A new crate, `ground`, holds the host seams that name neither Aoide nor Strillix: the local socket and peer credentials, OS randomness, the stored-command shell, the Windows process table, socket and owner-only policy, the git probes, time formatting, the host name, the runtime root and the SHA-256 and hex helpers. `aoide-protocol` and `aoide-storage` re-export every one at its old path, so no caller changes.
+- The pre-image git helpers in `aoide-storage::git` (`hash_object_write`, `hash_object`, `cat_file_blob`, `anchor`) are gone: nothing called them.
+- On native Windows the temporary name a `UnixStream::pair` rendezvous binds begins `afunix-`, not `aoide-`.
+- The `boundary` check has a third side: a neutral crate may name neither product and may depend on no crate of either side.
+
 ### Strillix serves no MCP
 
 - `strx mcp serve` is gone, and Strillix serves no MCP.

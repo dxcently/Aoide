@@ -3,18 +3,23 @@ name = "ground"
 version.workspace = true
 edition = "2021"
 license = "MIT"
-description = "The neutral host seams: process table, local sockets, peer credentials, randomness, shell, and the Windows owner-only policy."
+description = "The neutral host seams: process table, local sockets, peer credentials, randomness, shell, git probes, time, hashing, and the Windows owner-only policy."
 
 [lib]
 name = "ground"
 path = "src/lib.rs"
 
-# `local_socket`, `peercred`: fcntl, socket, getsockopt, geteuid.
+[dependencies]
+# `hash`. 0.10, not the workspace's 0.11: the desktop lock holds sha2 0.10.9 only.
+sha2 = "0.10"
+
+# `local_socket`, `peercred`, `git`, `host_name`, `runtime_dir`: fcntl, socket,
+# getsockopt, geteuid, gethostname, open flags.
 [target.'cfg(unix)'.dependencies]
 libc = { workspace = true }
 
-# Native sockets, process table, owner-only DACLs, CNG randomness; only Windows
-# needs these APIs.
+# Native sockets, process table, owner-only DACLs, CNG randomness, host name;
+# only Windows needs these APIs.
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61.2", features = [
     "Wdk_System_Threading",
@@ -26,6 +31,7 @@ windows-sys = { version = "0.61.2", features = [
     "Win32_Storage_FileSystem",
     "Win32_System_Diagnostics_ToolHelp",
     "Win32_System_IO",
+    "Win32_System_SystemInformation",
     "Win32_System_SystemServices",
     "Win32_System_Threading",
     "Win32_UI_Shell",

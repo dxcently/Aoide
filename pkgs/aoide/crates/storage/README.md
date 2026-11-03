@@ -938,14 +938,16 @@ by decision — no embedded database yet
   Leaving it unbounded would hand one JSON array of whole envelopes to a
   client that refuses any response over 20 MiB (`MAX_RESPONSE_BYTES`): a
   stall no retry could clear, since nothing at the hub would change.
-- `git` — the git seam (`src/git.rs`). Three subprocess operations: `installed`
-  (`--version`), `toplevel` finds a repo, and `status_under` lists a path's
-  uncommitted lines (`status --porcelain`, read-only). `common_dir(path)`
-  is the one pure read: the git common directory of the repo `path` sits in,
-  found by walking up to the nearest `.git` and following a file's `gitdir:`
-  through its `commondir`. Every linked worktree of one repo answers the same
-  path, and no `git` process runs, so it answers with `git` absent from
-  `PATH`. It is the repo key `session find`'s "same repo" reason compares.
+- `git` — the git seam, re-exported from `ground` (`pub use ground::git`).
+  Three subprocess operations: `installed` (`--version`), `toplevel` finds a
+  repo, and `status_under` lists a path's uncommitted lines
+  (`status --porcelain`, read-only). `common_dir(path)` is the one pure read:
+  the git common directory of the repo `path` sits in, found by walking up to
+  the nearest `.git` and following a file's `gitdir:` through its `commondir`.
+  Every linked worktree of one repo answers the same path, and no `git`
+  process runs, so it answers with `git` absent from `PATH`. It is the repo
+  key `session find`'s "same repo" reason compares. The source and what an
+  edit there must keep are in `crates/ground`.
 - `identity` — this instance's lazily-minted ed25519 keypair (pairing
   workstream P-P1, `docs/architecture/PAIRING.md`, CONTRACTS.md §4's
   `state/identity/` subsection): `state/identity/ed25519.key` (the raw

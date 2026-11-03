@@ -47,46 +47,15 @@ pub fn socket_dir() -> PathBuf {
     runtime_root().join("aoide")
 }
 
-/// The runtime ROOT: `$XDG_RUNTIME_DIR` on either host, else this host's own
-/// per-user answer (`/run/user/<euid>` on Unix, `%LOCALAPPDATA%` — falling
-/// back to the temp dir when that variable is somehow absent — on native
-/// Windows). Each owner appends its own segment: [`socket_dir`] for aoide,
-/// `strillix/` for the desktop's bridge socket.
-pub fn runtime_root() -> PathBuf {
-    if let Some(dir) = std::env::var("XDG_RUNTIME_DIR").ok().filter(|s| !s.is_empty()) {
-        return PathBuf::from(dir);
-    }
-    host_default()
-}
-
-#[cfg(unix)]
-fn host_default() -> PathBuf {
-    PathBuf::from(format!("/run/user/{}", euid()))
-}
-
-#[cfg(windows)]
-fn host_default() -> PathBuf {
-    std::env::var("LOCALAPPDATA")
-        .ok()
-        .filter(|s| !s.is_empty())
-        .map(PathBuf::from)
-        .unwrap_or_else(std::env::temp_dir)
-}
-
-/// This process's effective uid. `std` has no `geteuid(2)` wrapper and the
-/// call takes no arguments and cannot fail, so this is the whole of it — kept
-/// private to this module because the uid appears in exactly one answer here
-/// (`/run/user/<uid>`), the same way `aoide-secrets`' home keeps its own.
-#[cfg(unix)]
-fn euid() -> u32 {
-    // SAFETY: `geteuid(2)` takes no arguments, cannot fail, and touches no
-    // memory this process does not already own.
-    unsafe { libc::geteuid() }
-}
+pub use ground::runtime_dir::runtime_root;
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
+    use ground::runtime_dir::euid;
+    #[cfg(windows)]
+    use ground::runtime_dir::host_default;
 
     /// Native Windows, where the DEFAULT (no override) is the interesting
     /// half: this host's own per-user store, and a resolution that creates

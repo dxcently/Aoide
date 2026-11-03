@@ -1,12 +1,14 @@
 # ground
 
 The host seams that name neither product: the local socket, peer credentials,
-OS randomness and the stored-command shell, and, on Windows, the process table,
-the `AF_UNIX` socket and the owner-only policy. The crate is a leaf. It names
-neither product, and it depends on no workspace crate: the `boundary` check
-holds both lines. `aoide-protocol` links it and re-exports every module at its
-old path (`pub use ground::<module>`), so `aoide_protocol::peercred::peer_cred`
-names the same item it always did.
+OS randomness and the stored-command shell, the git probes, time formatting,
+the host name, the runtime root and the SHA-256 and hex helpers, and, on
+Windows, the process table, the `AF_UNIX` socket and the owner-only policy.
+The crate is a leaf. It names neither product, and it depends on no workspace
+crate: the `boundary` check holds both lines. `aoide-protocol` and
+`aoide-storage` link it and re-export every module at its old path
+(`pub use ground::<module>`), so `aoide_protocol::peercred::peer_cred` and
+`aoide_storage::git::common_dir` name the same items they always did.
 
 Code on either side of the product line can use a host seam here without
 linking the other side. The re-exports keep every old path valid until the
@@ -14,6 +16,19 @@ importers name `ground` themselves.
 
 ## Seams
 
+- `git.rs`: the git seam. `installed` (`git --version`), `toplevel` (the root
+  of the working tree a path sits in) and `status_under` (a path's uncommitted
+  lines, `status --porcelain`, read-only) run `git`. `common_dir` is the one
+  pure read: the git common directory of the repo a path sits in, found by
+  walking up to the nearest `.git` and following a file's `gitdir:` through its
+  `commondir`. Every linked worktree of one repo answers the same path, and no
+  `git` process runs, so it answers with `git` absent from `PATH`.
+- `hash.rs`: `sha256`, and `hex_encode` and `hex_decode` for lowercase hex
+  with no separator.
+- `host_name.rs`: `os_hostname`, this host's name as the OS reports it:
+  `gethostname(2)` on Unix, the DNS host name from `GetComputerNameExW` on
+  Windows (never the truncated NetBIOS name). `None` on any failure, never a
+  panic.
 - `host_random.rs`: `fill`, OS randomness with one contract per host:
   `/dev/urandom` on Unix, CNG's `BCryptGenRandom` on native Windows. No pool,
   no seed, no fallback: a host that cannot hand out OS randomness fails rather
@@ -35,6 +50,13 @@ importers name `ground` themselves.
   Windows, `None` elsewhere), the `PeerCred` it returns, the `PeerUser` a gate
   compares (a uid on Unix, a SID on Windows, never one derived from the other),
   and `own_user`, this process's side of the comparison.
+- `runtime_dir.rs`: `runtime_root`, the per-user runtime root:
+  `$XDG_RUNTIME_DIR` when it is set and not empty, else this host's own answer
+  (`/run/user/<euid>` on Unix, `%LOCALAPPDATA%` on native Windows, the temp dir
+  when that variable is absent). Each owner appends its own segment.
+- `time.rs`: ISO-8601 UTC time as `YYYY-MM-DDTHH:MM:SSZ`, hand-rolled so the
+  offline lock never grows a time crate: `now_iso_utc`, `iso_utc_from_epoch`,
+  `shift_iso_utc` and `parse_iso_utc`, the exact inverse of the formatters.
 - `owner_only.rs` (Windows only): the owner-only policy a native-Windows core
   attaches to a private file or directory: an explicit, `SE_DACL_PROTECTED`,
   single-ACE DACL for the current token user, attached AT creation and read
@@ -65,28 +87,36 @@ importers name `ground` themselves.
 
 ## What it consumes
 
-`libc` on Unix (`fcntl`, `socket`, `getsockopt`, `geteuid`) and `windows-sys` on
-Windows. No workspace crate: a `dep` row from a neutral crate to either side is
-a failure of the `boundary` check.
+`libc` on Unix (`fcntl`, `socket`, `getsockopt`, `geteuid`, `gethostname`, and
+the `O_NOFOLLOW` and `O_NONBLOCK` flags of the git file open), `windows-sys` on
+Windows, and `sha2` for `hash`. No workspace crate: a `dep` row from a neutral
+crate to either side is a failure of the `boundary` check.
 
 ## How it composes
 
 ```
- aoide-protocol
- pub use ground::<module>
-      |
-      |        +----------------------------------+
-      +------> | ground                           |
+ aoide-protocol                                          aoide-storage
+ pub use ground::<module>                  pub use ground::<module> / <item>
+      |                                                        |
+      |        +----------------------------------+            |
+      +------> | ground                           | <----------+
                |                                  |
-               |  host_shell  host_random         |   libc        [unix]
+               |  host_shell  host_random         |   libc      [unix]
                |  local_socket  peercred          |   windows-sys [windows]
+               |  git  time  host_name            |   sha2
+               |  runtime_dir  hash               |
                |  [windows] owner_only            |
                |            win_proc  win_unix    |
                +----------------------------------+
 ```
 
 - A module keeps its name when it moved whole, so `aoide_protocol::peercred`
-  and `ground::peercred` are one module.
+  and `ground::peercred` are one module. `host_name`, `runtime_dir` and `hash`
+  hold the stateless halves of three storage modules; storage keeps the rest of
+  each and re-exports the moved item beside it (`display::os_hostname`,
+  `runtime_dir::runtime_root`, `seal::{hex_encode, sha256}`).
 - On Windows, `local_socket` and `peercred` reach `win_unix` and `win_proc`.
   `win_proc` reads the token user through `owner_only`, and `win_unix::pair_in`
   makes its rendezvous directory with `owner_only::ensure_private_dir`.
+- `git` is a root module of this crate, so its tests keep the path
+  `git::tests::...`.

@@ -61,7 +61,8 @@ use crate::node_store;
 use crate::time::now_iso_utc;
 use crate::wire_auth;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
+pub use ground::hash::{hex_encode, sha256};
+use ground::hash::hex_decode;
 use std::io;
 use std::path::PathBuf;
 
@@ -161,31 +162,6 @@ fn parse_frame<'a>(label: &str, bytes: &'a [u8]) -> Result<Vec<&'a [u8]>, String
         it += len;
     }
     Ok(fields)
-}
-
-pub fn sha256(bytes: &[u8]) -> [u8; 32] {
-    Sha256::digest(bytes).into()
-}
-
-/// Lowercase hex, no separator.
-pub fn hex_encode(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
-}
-
-fn hex_decode(s: &str) -> Option<Vec<u8>> {
-    if !s.len().is_multiple_of(2) {
-        return None;
-    }
-    let b = s.as_bytes();
-    let mut out = Vec::with_capacity(s.len() / 2);
-    let mut i = 0;
-    while i < b.len() {
-        let hi = (b[i] as char).to_digit(16)?;
-        let lo = (b[i + 1] as char).to_digit(16)?;
-        out.push(((hi << 4) | lo) as u8);
-        i += 2;
-    }
-    Some(out)
 }
 
 /// Decode a fixed-width hex field, refusing any other length. The one

@@ -176,7 +176,17 @@ fn read_git_file(path: &Path) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aoide_test_support::unique_tmp;
+
+    fn unique_tmp(tag: &str) -> PathBuf {
+        let mut dir = std::env::temp_dir();
+        dir.push(format!(
+            "ground-{tag}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
 
     /// `git [-C dir] <args>`, asserting success — the test-side counterpart
     /// of [`run_git`], used to set up/inspect fixtures rather than to
@@ -282,11 +292,11 @@ mod tests {
 
     /// The parent's `PATH` is shared by every test thread, so the no-git proof
     /// re-runs this test in a child whose `PATH` is empty. The parent builds the
-    /// fixture with git and hands the worktree over in `AOIDE_COMMON_DIR_WT`;
+    /// fixture with git and hands the worktree over in `GROUND_COMMON_DIR_WT`;
     /// the child runs no git at all.
     #[test]
     fn common_dir_answers_with_git_absent_from_path() {
-        if let Some(wt) = std::env::var_os("AOIDE_COMMON_DIR_WT") {
+        if let Some(wt) = std::env::var_os("GROUND_COMMON_DIR_WT") {
             let wt = PathBuf::from(wt);
             let main = wt.parent().unwrap();
             assert_eq!(common_dir(&wt), Some(main.join(".git").canonicalize().unwrap()));
@@ -296,7 +306,7 @@ mod tests {
         let status = Command::new(std::env::current_exe().unwrap())
             .args(["--exact", "git::tests::common_dir_answers_with_git_absent_from_path", "--nocapture"])
             .env("PATH", "")
-            .env("AOIDE_COMMON_DIR_WT", &wt)
+            .env("GROUND_COMMON_DIR_WT", &wt)
             .status()
             .expect("re-run this test binary");
         assert!(status.success(), "common_dir must answer with an empty PATH");

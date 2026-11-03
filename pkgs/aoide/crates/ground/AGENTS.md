@@ -14,13 +14,30 @@ are in README.md.
   included. Comments and `*.md` files are not counted, so keep them neutral by
   review: say "the daemon" or "the secrets crate", not a product's name or an
   `aoide_*` path. A fixture takes `ground` for the product word
-  (`ground-peercred-{pid}`, `ground-cap-{pid}-{nanos}`). A test helper is
-  written in this crate and never taken from `aoide-test-support`.
-- **A moved item is one item at both paths.** `aoide-protocol` re-exports a
-  module (`pub use ground::<module>`) under the `cfg` the module has here. A
-  consumer never gets a copy (`pkgs/aoide/crates/AGENTS.md`: no cross-crate
-  copying). A signature change here changes the old path too, so check the
-  whole workspace (`cargo check --workspace --all-targets`).
+  (`ground-peercred-{pid}`, `GROUND_COMMON_DIR_WT`). A test helper is written
+  in this crate and never taken from `aoide-test-support`.
+- **A moved item is one item at both paths.** `aoide-protocol` and
+  `aoide-storage` re-export a module (`pub use ground::<module>`) or an item
+  (`pub use ground::host_name::os_hostname`), under the `cfg` the module has
+  here. A consumer never gets a copy (`pkgs/aoide/crates/AGENTS.md`: no
+  cross-crate copying). A signature change here changes both old paths, so
+  check the whole workspace (`cargo check --workspace --all-targets`).
+- **`git` stays a root module of this crate.**
+  `common_dir_answers_with_git_absent_from_path` re-runs its own test binary in
+  a child, filtered `--exact` on its own path under `git::tests`. Under a
+  nested module that filter matches nothing, libtest runs zero tests and exits
+  0, and the parent passes without having tested anything. The child's own
+  result line reads `1 passed`.
+- **`git::common_dir` is the one `git.rs` function that runs no process
+  (SESSION-FIND B2).** It canonicalizes its input, walks up to the nearest
+  `.git`, and follows a file's `gitdir:` (relative to the file's own
+  directory) and that gitdir's `commondir`. It judges the `.git` entry's kind
+  with `symlink_metadata`: a symlink, FIFO or socket answers as no repo. A git
+  file is opened with `O_NOFOLLOW | O_NONBLOCK` (the open refuses a symlink
+  and cannot block on a FIFO), its kind is judged on the open descriptor, and
+  it is read to at most 4 KiB. Its no-git-on-`PATH` test re-runs itself in a
+  child with an empty `PATH`, because the parent's `PATH` is shared by every
+  test thread. Don't give it a `Command`.
 - **A unix connect that must not hang goes through
   `local_socket::connect_bounded`, never a bare `UnixStream::connect`.** A full
   listen backlog makes the bare call wait forever. On Linux the socket
@@ -52,6 +69,17 @@ are in README.md.
   it shrinks only with a Windows build in hand.** A feature can gate the
   signature of an API (`WSAIoctl` takes an `OVERLAPPED`) with no `use` path
   naming it.
+
+## Not tested here
+
+- `hash` has no test module. The `seal` tests of the storage crate exercise
+  `sha256`, `hex_encode` and `hex_decode` through the re-export, in the same
+  gate.
+- `host_name` and `runtime_dir` have no test of their own. Their tests sit
+  beside the fallback and the segment they are compared with, in the storage
+  crate's `display` and `runtime_dir` modules, and reach the items through the
+  re-exports. `runtime_dir::euid` and `runtime_dir::host_default` are `pub`
+  for those tests and for no other caller.
 
 ## Extension points
 
