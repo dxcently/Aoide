@@ -183,7 +183,7 @@ fn open_or_reuse_with(
         pid,
         opened_at: aoide_storage::time::now_iso_utc(),
     };
-    aoide_storage::tunnel::save(&record).map_err(|e| {
+    aoide_storage::tunnel::save(&record).inspect_err(|_e| {
         // A spawn that succeeded and even answered its own probe, but
         // whose record then failed to write, is otherwise an immediate,
         // untracked orphan: nothing will ever find this pid again once
@@ -192,7 +192,6 @@ fn open_or_reuse_with(
         // timeout branch above already extends.
         let _ = child.kill();
         let _ = child.wait();
-        e
     })?;
     Ok(local_port)
 }

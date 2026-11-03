@@ -580,6 +580,7 @@ fn run_provider_show(provider: &str, id: &str, name: &str, context: &str, code: 
 /// dialog fires strictly after the commit it belongs to already succeeded,
 /// so there is no "resolved elsewhere" or marker race left to guard
 /// against, unlike the entry dialog's own three-reason `should_cancel`.
+#[allow(clippy::too_many_arguments)]
 fn run_show_dialog(
     provider: Option<&str>,
     zenity_cmd: &str,

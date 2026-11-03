@@ -3608,7 +3608,7 @@ mod tests {
 
         // The operator re-signs with an EMPTY node list — the revocation — and
         // this machine applies v2.
-        let src2 = format!("mesh = \"home\"\nversion = 1\nrelays = []\n\n[nodes]\n");
+        let src2 = "mesh = \"home\"\nversion = 1\nrelays = []\n\n[nodes]\n".to_string();
         std::fs::write(aoide_storage::charter::source_path("home"), &src2).unwrap();
         aoide_storage::charter::sign("home", None).unwrap();
         assert_eq!(
@@ -5192,7 +5192,7 @@ mod tests {
             .unwrap()
             .iter()
             .filter(|body| body.contains("aoide/mailDeposit"))
-            .map(|body| body.clone())
+            .cloned()
             .collect()
     }
 

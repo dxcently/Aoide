@@ -977,7 +977,7 @@ pub struct ConvergeReport {
 /// two screens — and says so rather than leaving the operator to wonder
 /// whether a declared flag quietly did something. The sentence itself is
 /// `config::Mesh::same_operator_note`'s, the one place it is written.
-
+///
 /// Assemble one converge's report. Pure, so the retirement above is a unit
 /// test over in-memory values: the note's presence is the ONLY thing
 /// `same_operator` changes about a report.

@@ -556,7 +556,7 @@ fn handle_charter_show(inv: &Invocation) -> Outcome {
                 continue;
             }
             let held = charter::meshes_with_state();
-            if !held.is_empty() && aoide_protocol::suggest::closest(mesh, held.iter().map(String::as_str), 1).first().is_some() {
+            if !held.is_empty() && !aoide_protocol::suggest::closest(mesh, held.iter().map(String::as_str), 1).is_empty() {
                 return teach::unknown_name(inv, cmd, "mesh", teach::Slot::Arg(0), mesh, &held, "meshes with a charter here", "aoide mesh charter show", Fix::Run("aoide mesh charter show".to_string()));
             }
             return no_charter(cmd, mesh, Some(charter::mesh_state_dir(mesh).display().to_string()));

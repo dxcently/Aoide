@@ -2651,7 +2651,7 @@ pub(crate) fn default_self_url() -> String {
 /// `selfVia` already means to the approver; `--self-via` overrides the
 /// whole function.
 pub(crate) fn default_self_via(toward: &str) -> Option<String> {
-    default_self_via_with(toward, &resolve_toward, &outbound_ip_toward)
+    default_self_via_with(toward, resolve_toward, outbound_ip_toward)
 }
 
 /// [`default_self_via`] with its two environment-touching steps injected —
@@ -2917,6 +2917,7 @@ fn pair_via_url(cmd: &str, inv: &Invocation, url: &str) -> Outcome {
 /// which can only ever OBSERVE this request arriving over the tunnel (i.e.
 /// loopback), has something to record a working `via` from at ITS OWN
 /// approve-commit time ([`approve_inbound`]'s own doc).
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn run_pair_request(
     cmd: &str,
     url: &str,
@@ -2953,7 +2954,7 @@ pub(crate) fn run_pair_request(
         &own_pubkey,
         &self_name,
         &commit,
-        &self_url,
+        self_url,
         self_via,
         aoide_storage::seal::publish_binding().ok().as_ref(),
         mesh,
@@ -3705,6 +3706,7 @@ pub(crate) fn approve_outbound(
 /// second copy of this loop anywhere is the design error this exists to
 /// prevent — the SAS/transcript binding below is the whole security of the
 /// requester's half, and it must not be re-derived per caller.
+#[allow(clippy::large_enum_variant)]
 pub(crate) enum PollOutcome {
     /// The approver released: the entry is now `AwaitingConfirm` and carries
     /// the released pubkey, bound to what this instance learned at request
@@ -4395,7 +4397,7 @@ fn pair_with_heard(
         dial_via.as_ref(),
         record_via,
         mesh,
-        &finish,
+        finish,
     )
 }
 
@@ -7753,7 +7755,6 @@ mod tests {
                     ..Default::default()
                 })
                 .collect(),
-            ..Default::default()
         };
         let path = aoide_storage::stage::sessions_path();
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -8891,12 +8892,12 @@ mod tests {
             let override_via = aoide_storage::tunnel::parse_via("ssh://khoa@sakaki").unwrap();
             let with_override =
                 post_json_to_node_with_via_override(&node, "{}", None, &[], 1, Some(&override_via));
-            match with_override {
-                Err(e) => assert!(
+            // a bounded curl call against the seeded listener may also just succeed/timeout cleanly
+            if let Err(e) = with_override {
+                assert!(
                     !e.contains("not-a-valid-via-at-all"),
                     "an explicit --via override must never surface the recorded (invalid) node.via: {e}"
-                ),
-                Ok(_) => {} // a bounded curl call against the seeded listener may also just succeed/timeout cleanly
+                );
             }
             drop(listener);
         });
