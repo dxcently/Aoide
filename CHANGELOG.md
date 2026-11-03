@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Window list and watch
+
+- `strx window list` gives the compositor's windows in its own order, with no class filter: address, class and workspace, and with `--json` also title, pid, mapped and cwd. With no compositor it is a refusal (`no-compositor`), never an empty list.
+- `strx window watch` follows the compositor's window events: a line for each window that appears, changes or closes, with `connected` and `lost` around each connection to the event socket. It ends with a `no-compositor` refusal once its event socket cannot be connected. It ends at its next write once nothing reads its lines (`stdout-closed`), and any other write error ends it with `stdout-failed`. A refusal goes to stderr in both forms: as text, with its why and fix lines; with `--json`, as the envelope with `data.refusal` (`kind`, `what`, `why`, `fix`) and the reason in `data.reason`. `data.detail` is the OS error for a failed connect and for a failed write; the no-socket refusal and `window list`'s have none. A reader that leaves ends the watch with `stdout-closed` on stderr and exit 1. With `--json` stdout carries only event objects.
+
 ### Staging an edited rice, or one not built in, works again
 
 - `strillix rice stage`, `strillix rice back` and `strillix reload` stage a built-in rice whose machine copy differs from the shipped one, and a rice that is not built in when this system has the packages it needs. Otherwise the stage is refused and asks for a rebuild. `rice back` goes through the same gate. Before, the runtime named the shipped generator's argument `rices` where the generator takes `ricesRoot`; nix refused the call, so the stage was refused, and a login or a switch left the bar on the widgets the last activation deployed.

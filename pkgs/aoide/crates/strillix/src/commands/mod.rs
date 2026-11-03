@@ -50,7 +50,8 @@
 //! of them, with the launcher's cached thumbnails) follows, and `lock` (`lock`,
 //! the one lock entry, and `lock hint`, logind's LockedHint for the shell's
 //! lock host) follows, and `focus` (`focus session`, the compositor jump the
-//! strillix home module's `AOIDE_FOCUS_CMD` wrapper runs) closes the list.
+//! strillix home module's `AOIDE_FOCUS_CMD` wrapper runs) follows, and `window`
+//! (`window list` and `window watch`, the compositor's own windows) closes the list.
 //! `registry.rs`'s golden test is the sole authority for the command set
 //! (`pkgs/aoide/crates/AGENTS.md`, "Golden discipline").
 pub mod apps;
@@ -70,6 +71,7 @@ pub mod preview_tools;
 pub mod secrets;
 pub mod shellbridge;
 pub mod stubs;
+pub mod window;
 
 use crate::registry::{Layout, Registry};
 
@@ -103,6 +105,7 @@ const LAYOUT: Layout = Layout {
                 ("screen", "See and drive the desktop: info, shots, pointer, OCR, diff"),
                 ("lock", "Lock the screen in the staged rice's face, or with hyprlock"),
                 ("focus", "Focus a session's window, or its workspace"),
+                ("window", "The compositor's windows: list them, or follow their events"),
             ],
         ),
         (
@@ -149,6 +152,7 @@ pub fn all() -> Registry {
     focus::register(&mut r); // focus session — the compositor jump AOIDE_FOCUS_CMD's wrapper runs
     migrate::register(&mut r); // migrate + --check — the rice state's move, run by hand (the start-up hook runs it only under STRILLIX_MIGRATE=1)
     component::register(&mut r); // component — a cross-component call: the slot's provider answers the verb (strillix shell, or its declared argv)
+    window::register(&mut r); // window list + window watch — the compositor's windows, read off the request and event sockets
 
     r.arrange(LAYOUT);
     r

@@ -154,10 +154,11 @@ name strillix pkgs/aoide/crates/strillix/src/commands/preview_tools.rs 48
 name strillix pkgs/aoide/crates/strillix/src/commands/secrets.rs 13
 name strillix pkgs/aoide/crates/strillix/src/commands/shellbridge.rs 4
 name strillix pkgs/aoide/crates/strillix/src/commands/stubs.rs 48
+name strillix pkgs/aoide/crates/strillix/src/commands/window.rs 2
 name strillix pkgs/aoide/crates/strillix/src/daemon.rs 2
 name strillix pkgs/aoide/crates/strillix/src/dispatch.rs 2
 name strillix pkgs/aoide/crates/strillix/src/guide.rs 9
-name strillix pkgs/aoide/crates/strillix/src/hypr/client.rs 1
+name strillix pkgs/aoide/crates/strillix/src/hypr/client.rs 2
 name strillix pkgs/aoide/crates/strillix/src/hypr/door.rs 11
 name strillix pkgs/aoide/crates/strillix/src/hypr/focus.rs 5
 name strillix pkgs/aoide/crates/strillix/src/hypr/listener.rs 2
@@ -165,6 +166,7 @@ name strillix pkgs/aoide/crates/strillix/src/hypr/sweep.rs 2
 name strillix pkgs/aoide/crates/strillix/src/hypr/terminals.rs 6
 name strillix pkgs/aoide/crates/strillix/src/hypr/tests.rs 103
 name strillix pkgs/aoide/crates/strillix/src/hypr/testutil.rs 12
+name strillix pkgs/aoide/crates/strillix/src/hypr/watch.rs 1
 name strillix pkgs/aoide/crates/strillix/src/lib.rs 3
 name strillix pkgs/aoide/crates/strillix/src/output.rs 1
 name strillix pkgs/aoide/crates/strillix/src/registry.rs 17
@@ -172,6 +174,7 @@ name strillix pkgs/aoide/crates/strillix/src/xdg/mod.rs 3
 name strillix pkgs/aoide/crates/strillix/tests/boot.rs 6
 name strillix pkgs/aoide/crates/strillix/tests/core_state.rs 17
 name strillix pkgs/aoide/crates/strillix/tests/migrate_gate.rs 8
+name strillix pkgs/aoide/crates/strillix/tests/window.rs 2
 name strillix pkgs/strillix-rices/default.nix 3
 name strillix pkgs/strillix-shell/preview/fixtures/empty/projects.json 1
 name strillix pkgs/strillix-shell/preview/fixtures/long-text/notifications.json 1

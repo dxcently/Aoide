@@ -16,7 +16,7 @@ are core `aoide` identity, root `AGENTS.md`).
 - `dispatch`/`registry` — strillix's own argv parsing, dispatch, and golden
   command-path snapshot, independent of core's.
 - `commands::LAYOUT` — how `strillix` lists itself (Start here · Rices &
-  themes · Widgets & icons · Desktop apps · Clipboard · Screen control (screen, lock, focus) ·
+  themes · Widgets & icons · Desktop apps · Clipboard · Screen control (screen, lock, focus, window) ·
   Dialogs & notices · Agent interfaces · System), adopted by `all()` through
   `Registry::arrange`; bare `strillix`, `--help`, group pages and `guide` read it.
 - `guide` — `strx guide`.
@@ -433,6 +433,20 @@ are core `aoide` identity, root `AGENTS.md`).
   stage and needs no aoided, so it runs whether or not aoided listens. It verifies
   the window on hyprctl, and dispatches it through `hypr::focus_session`, the
   resolution the bridge's `focussession` arm answers too.
+- `commands::window` — `window list` and `window watch`, the compositor's own
+  windows, read through strillix's CLI door. `list` is one read of the request
+  socket (`hypr::hyprctl_clients`): every client in hyprctl's order, with no class
+  filter, and no compositor is a refusal, never an empty list. `watch` follows the
+  event socket through `hypr::follow_window_events` and writes a line per window
+  event. It ends with a `no-compositor` refusal once its event socket cannot be
+  connected, and at its next write once nothing reads its lines (`stdout-closed`); any
+  other write error ends it with `stdout-failed`. A reader that leaves ends it with
+  `stdout-closed` on stderr and exit 1, not the quiet 141 a printing verb gives: the
+  end is audited, and the door prints every refusal. With stderr on that same pipe, the
+  print ends it by SIGPIPE after the audit line. `data.detail` is the OS error for
+  a failed connect and for a failed write; the no-socket refusal and `list`'s have
+  none. Neither keeps window state: core stores nothing from them, and the audit log
+  records each call that returns.
 - `commands::lock` — `lock` and `lock hint [yes|no]`, the one lock entry
   (`SUPER+ESCAPE`, shellbridge's power-menu `lock`, the `lock` alias). A
   staged rice whose OWN manifest entry carries `lockscreen` is locked by the
@@ -575,20 +589,23 @@ window and runs no `hyprctl`: it stores what this module reports.
 
 | Module | Owns |
 |---|---|
-| `client.rs` | the request socket (`j/clients`, bounded connect), `hyprctl_clients`, `client_workspace_for_address` |
+| `client.rs` | the request socket (`j/clients`), `hyprctl_clients`, `client_workspace_for_address` |
 | `door.rs` | `call`: one core verb execed through the core door (`aoide` on `AOIDE_CORE_BIN`, else on PATH) once aoided's socket answers a probe; its `Reply`, and `Latch`, which logs each problem once and holds the facts core refused |
 | `focus.rs` | `focus_window`, `focus_session`, `focus_workspace`, `focused_workspace`, `NO_COMPOSITOR` |
 | `listener.rs` | the event socket (`socket2`), `run_hypr_window_listener` (spawned by the `shellbridge` command), and `Owed`: the calls the desktop still owes core |
 | `sweep.rs` | `resolve_windows`: decides which pending session runs in which window, and which bound session moved workspace; each decision is `aoide session window attach` |
 | `terminals.rs` | a terminal-class client as a `TermWindow` (cwd from `/proc`), and `RosterGate`: the roster published through `aoide session window roster` when it changes |
+| `watch.rs` | `follow_window_events`, `WatchEvent`, `WatchEnd`: the event socket followed for `window watch`; each connect is `aoide_protocol::local_socket::connect_bounded`, `Lost` is emitted once per ended connection, and the backoff waits only before the next connect |
 
 ```
 request socket ──► client.rs ─┬─► focus.rs                      focuswindow, workspace N
+                              ├─► commands/window.rs            window list: one read, audited
                               └─► sweep.rs and terminals.rs read the same snapshot
 event socket   ──► listener.rs ─┬─ closewindow ─────────────────► door ─► session window closed
                                 ├─ openwindow, reconnect ─────► door ─► session codex sync
                                 ├─ open, move, retitle, reconnect, tick ─► sweep.rs ─► door ─► session window attach
                                 └─ any event, any tick ───────► terminals.rs ─► door ─► session window roster
+event socket   ──► watch.rs ──► commands/window.rs (window watch)
 ```
 
 A closed window is reported once per event. The codex sync runs on an appearance
@@ -633,7 +650,8 @@ and the retry goes through. With no aoide binary, the rice move runs and leaves
 Command paths: onboard/rice/draft/mode/wallpaper/theme/quickshell/screen/
 shellbridge/notifications/history/element/migrate/secrets ask/pair ask/pair show/preview/
 preview set/preview declare/preview shot/preview tree/preview notes/icon/
-apps/clipboard/lock/lock hint/focus session — everything that paints, or that a desktop needs.
+apps/clipboard/lock/lock hint/focus session/window list/window watch — everything that
+paints, or that a desktop needs.
 `element seed` (L-E1,
 docs/architecture/ELEMENTS.md) renders a rice's committed
 `elements/*/element.json` (non-QML rice targets — waybar, dunst, anything

@@ -2,7 +2,7 @@
 //! dir, a session and terminal builder, and the env save/restore guard. Test-only.
 
 use aoide_conduct::graph::SessionRecord;
-use serde_json::Map;
+use serde_json::{Map, Value};
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
@@ -79,7 +79,7 @@ pub(crate) fn session(
     }
 }
 
-/// The fake Hyprland request socket behind [`super::window::hyprctl_clients`]: a
+/// The fake Hyprland request socket behind [`super::client::hyprctl_clients`]: a
 /// listener at `<root>/hypr/test/.socket.sock`, with `XDG_RUNTIME_DIR=<root>` and
 /// `HYPRLAND_INSTANCE_SIGNATURE=test` set. It answers `j/clients` with the one
 /// window [`fake_hyprctl`]'s shim would print, built from the same vars
@@ -106,6 +106,42 @@ impl Drop for HyprSocket {
 
 #[cfg(unix)]
 pub(crate) fn fake_hypr_socket(tag: &str) -> (HyprSocket, PathBuf) {
+    let (socket, root) = fake_hypr_clients(tag, env_client);
+    std::env::set_var("AOIDE_TEST_WS", "3");
+    (socket, root)
+}
+
+/// The one window [`fake_hypr_socket`] serves, built from `AOIDE_TEST_WS`, `AOIDE_TEST_CLIENT_PID`
+/// and `AOIDE_TEST_CLIENT_CLASS`, read per request.
+#[cfg(unix)]
+fn env_client() -> Value {
+    let env_or = |k: &str| std::env::var(k).ok();
+    let ws = env_or("AOIDE_TEST_WS")
+        .and_then(|s| s.parse::<i64>().ok())
+        .unwrap_or(3);
+    let pid = env_or("AOIDE_TEST_CLIENT_PID")
+        .and_then(|s| s.parse::<u32>().ok())
+        .unwrap_or_else(std::process::id);
+    let class = env_or("AOIDE_TEST_CLIENT_CLASS").unwrap_or_else(|| "kitty".to_string());
+    serde_json::json!([{
+        "address": "0xAA",
+        "class": class,
+        "title": "t",
+        "pid": pid,
+        "workspace": { "id": ws, "name": "ws" },
+        "mapped": true,
+        "at": [0, 0],
+        "size": [1, 1],
+    }])
+}
+
+/// [`fake_hypr_socket`] with the clients the caller builds: `clients` runs on every `j/clients`
+/// request, so a test can change the list mid-way.
+#[cfg(unix)]
+pub(crate) fn fake_hypr_clients(
+    tag: &str,
+    clients: impl Fn() -> Value + Send + 'static,
+) -> (HyprSocket, PathBuf) {
     use std::io::{Read, Write};
     use std::os::unix::net::UnixListener;
     let root = unique_stage(tag);
@@ -122,7 +158,6 @@ pub(crate) fn fake_hypr_socket(tag: &str) -> (HyprSocket, PathBuf) {
     ]);
     std::env::set_var("XDG_RUNTIME_DIR", &root);
     std::env::set_var("HYPRLAND_INSTANCE_SIGNATURE", "test");
-    std::env::set_var("AOIDE_TEST_WS", "3");
     let stop = Arc::new(AtomicBool::new(false));
     let server = {
         let stop = Arc::clone(&stop);
@@ -135,26 +170,7 @@ pub(crate) fn fake_hypr_socket(tag: &str) -> (HyprSocket, PathBuf) {
                         let mut request = [0u8; 64];
                         let n = conn.read(&mut request).unwrap_or(0);
                         if &request[..n] == b"j/clients" {
-                            let env_or = |k: &str| std::env::var(k).ok();
-                            let ws = env_or("AOIDE_TEST_WS")
-                                .and_then(|s| s.parse::<i64>().ok())
-                                .unwrap_or(3);
-                            let pid = env_or("AOIDE_TEST_CLIENT_PID")
-                                .and_then(|s| s.parse::<u32>().ok())
-                                .unwrap_or_else(std::process::id);
-                            let class = env_or("AOIDE_TEST_CLIENT_CLASS")
-                                .unwrap_or_else(|| "kitty".to_string());
-                            let reply = serde_json::json!([{
-                                "address": "0xAA",
-                                "class": class,
-                                "title": "t",
-                                "pid": pid,
-                                "workspace": { "id": ws, "name": "ws" },
-                                "mapped": true,
-                                "at": [0, 0],
-                                "size": [1, 1],
-                            }]);
-                            let _ = conn.write_all(reply.to_string().as_bytes());
+                            let _ = conn.write_all(clients().to_string().as_bytes());
                         }
                     }
                     Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
