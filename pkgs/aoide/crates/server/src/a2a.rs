@@ -1262,7 +1262,7 @@ fn stamped_key(id: &str) -> Option<String> {
 fn frame_tail(params: &Value) -> Option<u64> {
     let asked = params.get("metadata")?.get(FRAME_KEY)?;
     let tail = asked.get("tail").and_then(Value::as_u64).unwrap_or(FRAME_TAIL_DEFAULT);
-    Some(tail.min(FRAME_TAIL_MAX).max(1))
+    Some(tail.clamp(1, FRAME_TAIL_MAX))
 }
 
 /// The ping-back cursor a `tasks/get` request carries: `Some(seq)` when
@@ -2514,6 +2514,7 @@ fn do_spawn(
 ///   ([`history_admitted`]). No claim changes whether an Inject parks.
 /// - **Reads** are gated by [`token_authorized`] or a granted signature, and
 ///   the door-wide bearer never identifies a node.
+#[allow(clippy::too_many_arguments)]
 fn message_send(
     params: &Value,
     audit_log: &Path,
@@ -2895,15 +2896,16 @@ fn deposit_admitted(grant: &Grant) -> bool {
 ///    the detail names both operator keys, so it goes to the audit line and
 ///    never to an ungated caller), and points at `aoide mesh charter show`;
 /// 2. paired-but-not-allowed in THIS
-/// MESH, told the exact `node allow --mesh` fix AND where it runs (the
-/// RECEIVING host: the gift is the receiver's record of the sender, never the
-/// sender's own) plus the `mail outbox retry --refused` that then moves the
-/// parked letters;
+///    MESH, told the exact `node allow --mesh` fix AND where it runs (the
+///    RECEIVING host: the gift is the receiver's record of the sender, never
+///    the sender's own) plus the `mail outbox retry --refused` that then moves
+///    the parked letters;
 /// 3. everything else (unpaired, unsigned, no resolution at all)
-/// told to pair and allow. `mesh` is the mesh the request acted in, named in
-/// both the refusal and its fix: a grant in another mesh is not a grant here,
-/// and saying which mesh was read is the difference between a fixable refusal
-/// and a mystery.
+///    told to pair and allow. `mesh` is the mesh the request acted in, named
+///    in both the refusal and its fix: a grant in another mesh is not a grant
+///    here, and saying which mesh was read is the difference between a fixable
+///    refusal and a mystery.
+///
 /// The refusal a **charter-shaped** mesh owes an ungranted caller — shared by
 /// both mail arms so they can never teach different fixes for the same state.
 /// They did: N5 gave `deposit_refusal` this arm and `poll_refusal` had none
@@ -4950,6 +4952,7 @@ fn task_state_of(task: &Value) -> String {
 /// The request was already fully parsed by [`handle_connection`], so this only
 /// ever WRITES the socket (never reads it again) — the 10s read-timeout set on
 /// the stream by `handle_connection` therefore cannot interrupt this loop.
+#[allow(clippy::too_many_arguments)]
 fn stream_task<W: Write>(
     writer: &mut W,
     req: &HttpRequest,
@@ -5991,6 +5994,7 @@ fn own_identity_key() -> Option<String> {
 /// re-verified here — `handle_connection` runs that check exactly once, before
 /// EITHER dispatch path), threaded straight into [`RequestCtx`] for
 /// `message/send` to consume.
+#[allow(clippy::too_many_arguments)]
 fn route(
     req: &HttpRequest,
     bind: &str,
@@ -6336,6 +6340,7 @@ impl Drop for ConnGuard {
 // TODO(a2a-hardening): chunked Transfer-Encoding and extra systemd
 // sandboxing (aoide-a2a.service) are deliberately out of scope for this
 // pass — see the security-review notes that produced this hardening.
+#[allow(clippy::too_many_arguments)]
 pub fn serve(
     bind: &str,
     port: u16,
@@ -6537,6 +6542,7 @@ fn serve_mail_from(port: u16, audit_log: &Path, registry: &'static Registry, sta
 /// Handle one connection: parse exactly one request, route it, audit it,
 /// write the response. A malformed request never panics — it becomes a 4xx
 /// with a JSON-RPC-style error body, same as every other routing failure.
+#[allow(clippy::too_many_arguments)]
 fn handle_connection(
     stream: TcpStream,
     bind: &str,
@@ -14423,7 +14429,7 @@ mod tests {
     #[test]
     fn a_header_line_with_no_newline_past_max_line_is_rejected() {
         let mut raw = b"GET / HTTP/1.1\r\n".to_vec();
-        raw.extend(std::iter::repeat(b'A').take(MAX_LINE + 1));
+        raw.extend(std::iter::repeat_n(b'A', MAX_LINE + 1));
         let mut r = BufReader::new(std::io::Cursor::new(raw));
         let err = parse_http_request(&mut r, Instant::now()).unwrap_err();
         assert_eq!(err.status, 400);
@@ -17545,7 +17551,7 @@ mod tests {
     /// (a first cut spelled the name it searched for, which the search found
     /// in itself); the live answer to "which record is this caller" is
     /// `grant_in_mesh`, exercised by the gate tests above.
-
+    ///
     /// **A config that will not load grants nothing** (review F6, door-wide).
     /// An unnamed request's mesh is the CONFIG's to name, so an unreadable
     /// config leaves nothing to judge it by — and the pre-image fallback (the
@@ -17916,7 +17922,7 @@ mod tests {
             grant_in_mesh(Some("home"), &receiver_key) == Grant::none(),
             "a removed line refuses on the FIRST request after the new version is received"
         );
-        assert!(aoide_storage::charter::in_force_charter("home").unwrap().nodes.get("receiverbox").is_none());
+        assert!(!aoide_storage::charter::in_force_charter("home").unwrap().nodes.contains_key("receiverbox"));
 
         let _ = std::fs::remove_dir_all(&root);
         for (key, value) in [
