@@ -185,19 +185,17 @@
 //! call's refusal; with `--id` or `--all` and no `--project`, the usage error
 //! the call gives; with `--project`, the `dry-run-not-held` refusal, since that
 //! call would hold and show the caller nothing. Nothing is held, spawned or
-//! sent on any door. The handler writes three things and no others: the audit
-//! line (status `dry-run`, at the points the real call audits); the one-time
-//! `carry.json` rename an undying read performs
+//! sent on any door. The handler writes two things and no others: the audit
+//! line (status `dry-run`, at the points the real call audits); and the
+//! one-time `carry.json` rename an undying read performs
 //! (`aoide_storage::undying::load_undying`), on a host that still holds the
-//! legacy file; and the one-time conducting-stage migration a stage read
-//! performs (`aoide_storage::fs::conducting_stage_dir`), on a host that still
-//! holds the legacy stage files. Two writes come with any call, dry or real,
-//! outside the handler: the door's audit line, and the start-up migration both
-//! core binaries run (`aoide_storage::fs::migrate_root_once`). It locks
-//! `state/` owner-only when it exists and renames old peer state files. When
-//! the legacy `~/Aoide` root is not `$AOIDE_ROOT`, it moves that root's state
-//! unless `AOIDE_STATE_DIR` is set, and its log unless `AOIDE_AUDIT_LOG` is set
-//! and not empty.
+//! legacy file. Two writes come with any call, dry or real, outside the
+//! handler: the door's audit line, and the start-up migration both core
+//! binaries run (`aoide_storage::fs::migrate_root_once`). It locks `state/`
+//! owner-only when it exists and renames old peer state files. When the legacy
+//! `~/Aoide` root is not `$AOIDE_ROOT`, it moves that root's state unless
+//! `AOIDE_STATE_DIR` is set, and its log unless `AOIDE_AUDIT_LOG` is set and
+//! not empty.
 
 use super::common::{is_unsafe, require_flag, stage_error, strip_unsafe};
 use super::conduct::{program_is_a_shell, program_is_an_interactive_shell, runs_a_privilege_program};

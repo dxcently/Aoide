@@ -53,23 +53,20 @@ pub fn undying_path() -> std::path::PathBuf {
 
 /// One-shot-in-effect migration of the pre-rename `state/carry.json` onto
 /// `state/undying.json` (command-defrag lane U1, 2026-08-27) — the mark
-/// prototyped under the name "carry" (task #96) ships as "undying". Same
-/// atomic discipline `aoide-storage::fs::migrate_conducting_stage`
-/// established for the S1 stage-tree split: a plain `rename` (both paths
-/// live under the same [`state_dir`], so this is always same-filesystem —
-/// no cross-filesystem copy fallback is needed the way the multi-directory
-/// S1 migration required one), never clobbers an existing `undying.json` (a
-/// fresher file, or a process that already migrated), and narrates rather
-/// than panics on a failed rename.
+/// prototyped under the name "carry" (task #96) ships as "undying". A plain
+/// `rename`, with no copy fallback: both paths live under the same
+/// [`state_dir`], so it is always same-filesystem. It never clobbers an
+/// existing `undying.json` (a fresher file, or a process that already
+/// migrated), and it narrates rather than panics on a failed rename.
 ///
-/// Unlike S1's migration, this one carries no process-wide `Once` guard — a
-/// single small file, checked with one cheap `exists()` stat immediately
-/// before every [`load_undying`] call, is idempotent by construction: once
-/// the rename lands, `carry.json` is gone, so every later check is a single
-/// stat that finds nothing to do. A host that never had a `carry.json` (a
-/// fresh install, or one that already migrated) pays that one stat and
-/// nothing else — and every existing caller of `load_undying`/`save_undying`
-/// gets the migration for free, with no new call site to remember.
+/// This carries no process-wide `Once` guard. A single small file, checked
+/// with one cheap `exists()` stat immediately before every [`load_undying`]
+/// call, is idempotent by construction: once the rename lands, `carry.json` is
+/// gone, so every later check is a single stat that finds nothing to do. A
+/// host that never had a `carry.json` (a fresh install, or one that already
+/// migrated) pays that one stat and nothing else — and every existing caller of
+/// `load_undying`/`save_undying` gets the migration for free, with no new call
+/// site to remember.
 fn migrate_carry_to_undying() {
     let old_path = state_dir().join("carry.json");
     let new_path = undying_path();

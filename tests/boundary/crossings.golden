@@ -46,7 +46,7 @@ name aoide pkgs/aoide/crates/server/src/a2a.rs 12
 name aoide pkgs/aoide/crates/storage/src/charter.rs 2
 name aoide pkgs/aoide/crates/storage/src/commands.rs 2
 name aoide pkgs/aoide/crates/storage/src/config.rs 1
-name aoide pkgs/aoide/crates/storage/src/fs.rs 21
+name aoide pkgs/aoide/crates/storage/src/fs.rs 12
 name aoide pkgs/aoide/crates/storage/src/node_store.rs 2
 name aoide pkgs/aoide/crates/storage/src/outbox.rs 6
 name aoide pkgs/aoide/crates/storage/src/pairing.rs 4

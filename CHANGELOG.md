@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Core stops moving old stage files
+
+- Core no longer moves conducting stage files from `$STRILLIX_ROOT/stage` (default `~/.strillix/stage`); a host that never ran an aoide from after 2026-08-27 keeps those files there, unread.
+
 ### Aoide is Eidolon's front end
 
 - `aoide guide` and the front pages (root AGENTS.md, README.md, the wiki Overview, INSTALL.md) say Aoide is mainly Eidolon's front end, that other harnesses connect to it, drive it and talk through it, and that Strillix is the OS rather than something built on Aoide.

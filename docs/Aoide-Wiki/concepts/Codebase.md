@@ -323,11 +323,7 @@ Live-side state, all under the runtime root (`$AOIDE_ROOT`, default
   pinned by a serialized precedence test. On first run the core binaries run a
   one-shot root migration (`fs::migrate_root_once()`) moving pre-existing
   `~/Aoide/{state,log}` into the root, each piece gated on its
-  own override being unset. The first no-override resolution
-  of `conducting_stage_dir()` runs a one-shot migration moving any of the
-  six conducting files still sitting at the old `/stage/` location into
-  `state/stage/`, never clobbering a fresher file already there and never
-  touching a rice file.
+  own override being unset.
 
 ## Repo-file roles
 
