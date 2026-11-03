@@ -647,8 +647,8 @@ since a nested `conduct`/`spawn` chain can legitimately land a same-window
 pair that are grandparent/grandchild, or cousins through a shared ancestor.
 A same-window record with no lineage relation and no live process of its own
 (the legitimate compact/resume-twin case) collapses instantly. A nested
-headless session is windowless by construction: the hook-time
-`windowAddress` backfill skips it outright whenever its `parentSessionId`
+headless session is windowless by construction: the window placement
+rule skips it outright whenever its `parentSessionId`
 chain passes through a conducted session with its own `windowAddress` still
 empty, so it can never wrongly inherit the ENCLOSING terminal's window and
 get treated as that terminal's duplicate.
@@ -666,7 +666,7 @@ meets a window owner before any harness, a shell owner included, binds nothing. 
 client list (off Hyprland, or an unreadable request socket) no owner check runs. Two residuals: a hand-run hook under an `aoide conduct` wrap
 or a multiplexer server takes that process as its harness and binds the window under it; a
 hook behind `timeout`, `script`, `nix`, `su`, `doas` or `sudo` takes that launcher as its
-harness and binds the same window, and its chain heals once per turn. The window sweep ([[shellbridge]], on window events)
+harness and binds the same window, and its chain heals once per turn. Core's placement rule, which the window sweep ([[shellbridge]], on window events) and the roster verb ask,
 binds a pid-less record through its stored `hookAncestry`: the nearest chain
 pid that owns a window is the owner, and the record binds only while a process
 of its own chain, a tab shell included, stands beneath that owner right now. A chain whose processes have all exited binds nothing. The next per-turn hook from a resumed harness replaces a stale chain with its own, and the record binds on that turn. A per-turn hook heals a stored chain whose pids are dead, whatever wrote it. Tab-shell residual: a chain whose tab shell stands beneath the owner binds the window, but its heal is blocked while that shell lives outside the hook's chain, so it stays stale until the shell exits. Because nothing stamps the owner's pid, the seal never collides on
@@ -677,9 +677,10 @@ turn. So six live claudes in one app window bind to that window and are all kept
 
 ## Interplay with the window-event listener
 
-[[shellbridge]]'s Hyprland event listener (the authoritative `windowAddress`
-source — see [[Terminal-Commander]]) is the *counterpart* to the reaper: it
-fills the address at window-creation time and **clears it on `closewindow`**.
+[[shellbridge]]'s Hyprland event listener (the authoritative source of the
+windows core places sessions in — see [[Terminal-Commander]]) is the
+*counterpart* to the reaper: it reports each window at creation time, when core
+fills the address, and again on `closewindow`, when the claim is released.
 So for a terminal closed with `SUPER+Q`, the record's address is usually
 already blank by the time the reaper runs, and it is the **pid-gone** signal
 (the SIGKILLed `conduct` process's `/proc/<pid>` vanishing) that reaps it —

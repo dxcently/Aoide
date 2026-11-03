@@ -47,12 +47,14 @@ The plumbing already exists ([[Desktop-Architecture]], [[shellbridge]]):
 - **Authoritative, event-driven capture (primary).** [[shellbridge]] runs a
   **Hyprland event listener** on a background thread — it reads the compositor's
   `socket2` event stream (`$XDG_RUNTIME_DIR/hypr/$HYPRLAND_INSTANCE_SIGNATURE/.socket2.sock`)
-  and, the moment a window opens (or moves / retitles), (re)resolves any tracked
-  session still missing its `windowAddress`: it walks each session's recorded
-  lifecycle **pid** up the `/proc` ppid chain and matches an ancestor against
-  the `j/clients` socket read, stamping the client's canonical `0x…` address into
-  `sessions.json` via the atomic graph writer. The same pass also reads the
-  client's `workspace.id` and stamps it onto the session's additive **`workspace`**
+  and, the moment a window opens (or moves / retitles), reads the `j/clients`
+  socket and asks core's placement rule (`window_bindings`) where each tracked
+  session still missing its `windowAddress` runs: the rule walks each
+  session's recorded lifecycle **pid** up the `/proc` ppid chain and matches
+  an ancestor against those windows, and the sweep records each answer through
+  `aoide session window attach`, stamping the client's canonical `0x…` address
+  into `sessions.json`. The same pass also takes the client's `workspace.id`
+  and stamps it onto the session's additive **`workspace`**
   field — and, because a resolved window can be *dragged* to another workspace,
   the pass re-stamps every already-resolved session's `workspace` on each window
   event (the `movewindow` / `movewindowv2` re-check), so the id stays current. It
@@ -72,8 +74,8 @@ The plumbing already exists ([[Desktop-Architecture]], [[shellbridge]]):
   process's ancestry the same way at `SessionStart` and backfills on any later
   hook while still empty. The door yields the window only, never the owning
   app's pid. A hook-only session with no recorded pid (a Claude Code session
-  running headless inside one desktop app window) is bound by the listener's
-  sweep through its stored hook chain, and only while any live process of that chain, a tab shell included, stands beneath the window's owner. Several such sessions can share one
+  running headless inside one desktop app window) is placed by core's rule
+  (asked by the listener's sweep) through its stored hook chain, and only while any live process of that chain, a tab shell included, stands beneath the window's owner. Several such sessions can share one
   window, and each keeps its own address.
 - Agent hooks post execution phase, so each row shows live state (working ·
   awaiting · stopped · idle · done) — claude's `Notification` / `Stop` /

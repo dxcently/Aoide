@@ -157,13 +157,12 @@ name strillix pkgs/aoide/crates/strillix/src/commands/stubs.rs 48
 name strillix pkgs/aoide/crates/strillix/src/daemon.rs 2
 name strillix pkgs/aoide/crates/strillix/src/dispatch.rs 2
 name strillix pkgs/aoide/crates/strillix/src/guide.rs 9
-name strillix pkgs/aoide/crates/strillix/src/hypr/client.rs 1
 name strillix pkgs/aoide/crates/strillix/src/hypr/door.rs 11
 name strillix pkgs/aoide/crates/strillix/src/hypr/focus.rs 5
 name strillix pkgs/aoide/crates/strillix/src/hypr/listener.rs 2
 name strillix pkgs/aoide/crates/strillix/src/hypr/sweep.rs 2
 name strillix pkgs/aoide/crates/strillix/src/hypr/terminals.rs 6
-name strillix pkgs/aoide/crates/strillix/src/hypr/tests.rs 103
+name strillix pkgs/aoide/crates/strillix/src/hypr/tests.rs 102
 name strillix pkgs/aoide/crates/strillix/src/hypr/testutil.rs 12
 name strillix pkgs/aoide/crates/strillix/src/lib.rs 3
 name strillix pkgs/aoide/crates/strillix/src/output.rs 1

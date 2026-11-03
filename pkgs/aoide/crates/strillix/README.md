@@ -575,11 +575,11 @@ window and runs no `hyprctl`: it stores what this module reports.
 
 | Module | Owns |
 |---|---|
-| `client.rs` | the request socket (`j/clients`, bounded connect), `hyprctl_clients`, `client_workspace_for_address` |
+| `client.rs` | the request socket (`j/clients`, bounded connect), `hyprctl_clients` |
 | `door.rs` | `call`: one core verb execed through the core door (`aoide` on `AOIDE_CORE_BIN`, else on PATH) once aoided's socket answers a probe; its `Reply`, and `Latch`, which logs each problem once and holds the facts core refused |
 | `focus.rs` | `focus_window`, `focus_session`, `focus_workspace`, `focused_workspace`, `NO_COMPOSITOR` |
 | `listener.rs` | the event socket (`socket2`), `run_hypr_window_listener` (spawned by the `shellbridge` command), and `Owed`: the calls the desktop still owes core |
-| `sweep.rs` | `resolve_windows`: decides which pending session runs in which window, and which bound session moved workspace; each decision is `aoide session window attach` |
+| `sweep.rs` | `resolve_windows`: turns the clients into `TermWindow`s and asks core's `window_bindings` which pending session runs in which window and which bound session moved workspace; each answer is `aoide session window attach` |
 | `terminals.rs` | a terminal-class client as a `TermWindow` (cwd from `/proc`), and `RosterGate`: the roster published through `aoide session window roster` when it changes |
 
 ```

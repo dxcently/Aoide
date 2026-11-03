@@ -1,35 +1,10 @@
-//! The Hyprland request socket: the client list (`j/clients`), the bounded connect
-//! behind it, and the workspace a window reports. Every read of the compositor in the
-//! desktop goes through here.
+//! The Hyprland request socket: the client list (`j/clients`) and the bounded connect behind it.
+//! Every read of the compositor in the desktop goes through here.
 
-use aoide_conduct::graph::normalize_addr;
 use serde_json::Value;
 #[cfg(unix)]
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
-
-/// The Hyprland workspace id of the client whose `address` matches `want` in a
-/// decoded `hyprctl clients -j` array (`workspace.id` in the client JSON).
-/// Pure over the decoded JSON — unit-testable without a compositor. Address
-/// comparison is `0x`/case-tolerant via [`normalize_addr`] (the stored
-/// `windowAddress` and hyprctl can disagree on both). `None` when the window is
-/// absent from the list or carries no numeric `workspace.id` — the caller then
-/// leaves the stored `workspace` untouched (degrade gracefully, never a panic).
-pub(crate) fn client_workspace_for_address(clients: &[Value], want: &str) -> Option<i64> {
-    let want = normalize_addr(want);
-    if want.is_empty() {
-        return None;
-    }
-    clients.iter().find_map(|c| {
-        let a = c.get("address").and_then(Value::as_str)?;
-        if normalize_addr(a) != want {
-            return None;
-        }
-        c.get("workspace")
-            .and_then(|w| w.get("id"))
-            .and_then(Value::as_i64)
-    })
-}
 
 /// The compositor's client list, decoded into a JSON array. It asks Hyprland's
 /// request socket, `$XDG_RUNTIME_DIR/hypr/$HYPRLAND_INSTANCE_SIGNATURE/.socket.sock`,

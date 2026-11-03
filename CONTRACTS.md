@@ -1578,9 +1578,10 @@ to that walk), and the workspace default outranks the cwd anchor because
 binding a workspace is an act an operator performed while a cwd is incidental.
 `workspaceProject` is written ONLY by
 `aoide-conduct::graph::observe_workspace` — the one seam `workspace` itself is
-written through, called by all three compositor stamp sites (the hook-time
-window backfill, the event-driven sweep, and the synthetic bare-terminal
-publisher) — and only when the record has no explicit `project`, no
+written through, called by every compositor stamp site (the one window
+placement step that `session window attach` and the roster verb's bindings
+share, and the synthetic bare-terminal publisher) — and only when the
+record has no explicit `project`, no
 `workspaceProject` yet, and its workspace carries a binding. It is therefore
 STAMPED ONCE: never re-stamped when a window moves, never cleared by movement,
 never adopted retroactively (binding a workspace affects new births, not the
@@ -3217,8 +3218,8 @@ looks for a live, not-`done`, agent-kind session whose `hookAncestry`
 intersects it — the closest (deepest) matching ancestor wins as parent, so a
 nested headless `conduct`/`spawn` launched from inside an agent's shell tool
 lands as that agent's CHILD rather than, via a stale ambient
-`AOIDE_SESSION_ID`, as a sibling of the enclosing terminal. The desktop's window sweep
-also reads it: a pid-less hosted session binds to a window only while any live process of its chain, a tab shell included, stands beneath that window's owner (never a pid, never a payload
+`AOIDE_SESSION_ID`, as a sibling of the enclosing terminal. The placement rule
+(`window_bindings`) also reads it: a pid-less hosted session binds to a window only while any live process of its chain, a tab shell included, stands beneath that window's owner (never a pid, never a payload
 claim). Absent means "no ancestry recorded" (a legacy record, or any
 non-hook registration); readers must tolerate both forms and round-trip fields
 they do not know. Consumed internally only — never rendered.
@@ -3924,9 +3925,10 @@ site:
   never calls window discovery at all when `headless` is set — an
   unconditional call would resolve to the enclosing terminal's window; a
   headless wrap's own
-  record must never be handed a window by the desktop's sweep, not merely
+  record must never be handed a window by the placement rule, not merely
   have one filtered out downstream;
-- the listener self-check: the desktop's window sweep (strillix `hypr/sweep.rs`)
+- the listener self-check: the placement rule (`window_bindings`, which the
+  roster verb applies and the desktop's sweep asks)
   and the per-turn chain fill (`ensure_session_chain`, reached from `aoide session
   hook`) all route through
   `windowless_by_lineage`, which now checks the session's OWN record first
@@ -3936,10 +3938,10 @@ site:
 
 A session with no parent, or whose chain anchors in a windowed conducted
 session directly (an interactive `conduct` with a real `windowAddress`),
-keeps the ordinary backfill. The backfill is the desktop's: its sweep binds the window and its workspace through `aoide session window attach <id> <address> [--workspace <n>]`, a daemon verb that fills an empty window, moves the workspace when the same window reports again, and refuses a second window while the first is held. Core walks no window, and the owning app's pid is never stamped as the session's pid. The
+keeps the ordinary backfill. The backfill is core's decision over the windows the desktop hands it (`window_bindings`): the roster verb applies each binding itself, and the desktop's sweep asks for the same bindings and records each through `aoide session window attach <id> <address> [--workspace <n>]`, a daemon verb that fills an empty window, moves the workspace when the same window reports again, and refuses a second window while the first is held. Core reads no compositor, and the owning app's pid is never stamped as the session's pid. The
 desktop's other window facts come through the same door: `aoide session window closed <address>`
 judges the sessions that ran in a closed window and releases their claims, `aoide session window
-roster` (a JSON array of terminal windows on stdin) publishes the untracked-terminal records, and
+roster` (a JSON array of terminal windows on stdin) places the sessions those windows host and then publishes the untracked-terminal records, all in one stage write, and
 `aoide session codex sync` reconciles the desktop's codex threads. The same-window eviction
 (immediately above `graph.json`'s render, below) never retires a sharing
 window by itself. A same-window record is retired only as a superseded twin
@@ -3956,7 +3958,7 @@ own" is judged against the record's stored `hookAncestry`. A record takes a
 fresh chain at a SessionStart unless its pid or its harness lives outside the
 new chain (`ancestry_may_move`), so a stale chain survives only a SessionStart
 that was missed or refused. The residual is a SessionStart that was missed or refused: such a record holds a stale chain until a per-turn hook from its live harness heals it (`hookAncestry` above), and until then a same-depth sibling registration can still retire the record. A chainless record with no pid is never a twin (`superseded_by`).
-Tab-shell residual: a chain whose tab shell stands beneath the window owner binds that window through the desktop's sweep (`window_for_hook_chain`), but its heal is blocked while the tab shell lives outside the hook's chain (`lives_apart`), so such a stored chain stays stale until the shell exits.
+Tab-shell residual: a chain whose tab shell stands beneath the window owner binds that window through the placement rule (`window_for_hook_chain`), but its heal is blocked while the tab shell lives outside the hook's chain (`lives_apart`), so such a stored chain stays stale until the shell exits.
 
 **Additive in v0 (P-CX-5):** a session record MAY also carry an optional
 `sources` (object, string → string): a provenance map from a captured
