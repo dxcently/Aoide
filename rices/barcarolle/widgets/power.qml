@@ -20,11 +20,7 @@ Item {
     readonly property real secs: forced ? 4980 : (!dev ? 0 : (charging ? dev.timeToFull : dev.timeToEmpty))
 
     readonly property string phase: full ? "Fully charged" : (charging ? "Charging" : "On battery")
-    readonly property string span: {
-        if (full || secs <= 0) return ""
-        var m = Math.round(secs / 60)
-        return (charging ? "full in " : "") + Math.floor(m / 60) + "h" + (m % 60 < 10 ? "0" : "") + (m % 60) + "m" + (charging ? "" : " left")
-    }
+    readonly property string span: Kit.timeLeft(secs, charging, full)
 
     implicitWidth: 196
     implicitHeight: present ? 78 : 0

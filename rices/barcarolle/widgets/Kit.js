@@ -80,6 +80,13 @@ function hostNote(auth) {
     return auth.message
 }
 
+function timeLeft(secs, charging, full) {
+    if (full || secs < 60) return ""
+    var m = Math.round(secs / 60)
+    var t = m < 60 ? m + "m" : Math.floor(m / 60) + "h" + (m % 60 < 10 ? "0" : "") + (m % 60) + "m"
+    return charging ? "full in " + t : t + " left"
+}
+
 function make(theme) {
     var b = (theme && theme.raw && theme.raw.base16) ? theme.raw.base16 : {}
     function slot(n, fb) { return b[n] ? b[n] : fb }
@@ -89,7 +96,8 @@ function make(theme) {
         accent:   "#77fffc",
         working:  slot("base0B", "#3bdcac"),
         awaiting: slot("base0A", "#e8cf6a"),
-        urgent:   slot("base09", "#f2a65e")
+        urgent:   slot("base09", "#f2a65e"),
+        critical: slot("base08", "#f47a72")
     }
 }
 

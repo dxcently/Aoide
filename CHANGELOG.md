@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### The battery cell shows its percentage and opens a flyout
+
+- barcarolle's battery cell is a small smoked-glass battery with a glossy fill coloured by charge: green from 50%, yellow from 20% and red below, from the theme's base0B, base0A and base08; the white fill that turned urgent orange below 15% is gone. The rounded percentage sits inside it, dark over the fill and white past it, and the charging bolt sits beside the nub, so it never covers the number. The cell is 38px wide.
+- A click on the battery cell opens the battery flyout: the same battery three times larger, then the percentage and the state and time in the power gadget's words (`On battery · 1h23m left`, `Charging · full in 1h23m`, `Fully charged`). The cell shows the hover box and stays lit while its flyout is open, like the other tray cells.
+- Under an hour the time reads `45m left` or `full in 45m`, with no `0h`, and under a minute no time shows; barcarolle's power gadget reads the same.
+- On a laptop, a notification balloon's tail points at the Action Center flag again, and a summons balloon's at the agents button: both pointed at the battery cell, because the tail offsets assume a bar with no battery. The bar publishes the battery cell's width, and the balloon adds it.
+
 ### ground: the neutral host crate
 
 - A new crate, `ground`, holds the host seams that name neither Aoide nor Strillix: the local socket and peer credentials, OS randomness, the stored-command shell, the Windows process table, socket and owner-only policy, the git probes, time formatting, the host name, the runtime root and the SHA-256 and hex helpers. `aoide-protocol` and `aoide-storage` re-export every one at its old path, so no caller changes.

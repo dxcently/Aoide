@@ -47,10 +47,11 @@ Glass is a frame, content is a plate, light comes from above.
   special drawers · always-visible `+` · notification area: RICE cell,
   chevron overflow, agents, Action Center flag, battery (laptops only),
   network, volume · two-line clock · 15px show-desktop sliver. The battery
-  cell draws the charge: a white outline with its nub, a white fill that
-  turns urgent orange below 15%, and a green bolt while charging. It is
-  absent on a machine with no battery. It is not a button: no hover box, and
-  a click does nothing.
+  cell is a small smoked-glass battery: a dark glass case with a metal nub, a
+  glossy fill that is green from 50%, yellow from 20% and red below, and the
+  rounded percentage inside it, dark over the fill and white past it. A green
+  bolt sits beside the nub while charging. It is absent on a machine with no
+  battery. A click opens the battery flyout.
 - **Workspace button**, 62×40: 28px front icon (focused or most-windowed
   class), up to two 14px minis beside it, number chip bottom-left, agent
   badge, stack edges for 2+/3+ windows. Empty workspaces are 40px ghosts.
@@ -118,7 +119,11 @@ Glass is a frame, content is a plate, light comes from above.
   bridge timed out, naming the host file to check (the menu's
   `hostConfig`).
 - **Tray flyouts**: the Win7 narrow volume flyout (device, slider, percent,
-  mute, `Mixer` footer), the network flyout from its tray icon, and the
+  mute, `Mixer` footer), the network flyout from its tray icon, the battery
+  flyout from its cell (the same battery three times larger, then the
+  percentage and the power gadget's state and time:
+  `On battery · 1h23m left`, `Charging · full in 1h23m`, `Fully charged`),
+  and the
   calendar from the clock (month grid, today ringed, an analogue clock beside
   it). The calendar is a surface of its own, not a flyout: opened from the
   clock, it sits above it, its right edge on the clock's right edge and its bottom flush on the
@@ -356,8 +361,8 @@ Consolas → Noto Sans Mono.
   volume flyout are shifted left of it; the balloon is lifted above the open
   agent flyout with a dashed leader down to the agents button.
 - Not shown: the HDMI-A-1 compact bar, jump lists, chevron overflow grid,
-  network flyout, the calendar, Action Center, power screen, window frames
-  and terminals.
+  network flyout, the battery cell and its flyout, the calendar, Action
+  Center, power screen, window frames and terminals.
 
 ## Open questions
 

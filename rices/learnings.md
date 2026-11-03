@@ -170,3 +170,27 @@ in git; `git log --follow -- rices/default/` finds it.
   birth, no paint; opened at 3 s, the glow lands 4 s later; close and reopen
   paint nothing. The trade is a glow that lands late at the first reveal. The
   GPU path stays unmeasured.
+
+## A number inside a fill glyph (barcarolle's battery, 2026-11-03)
+
+- **Draw the number twice, each copy clipped to its side of the fill edge.**
+  Ink over the fill and the rice's text colour past it, at the same position,
+  with the fill's width a whole number of pixels so the clip edge and the fill
+  edge agree. One copy in one colour fails on either the fill or the empty
+  case.
+- **On a dark case a digit the edge crosses splits in two colours.** It reads
+  as a fleck at 1x and a seam at 3x. A light track avoids it with one ink copy;
+  the User chose the smoked case for its look, seam and all.
+- **Keep the charging mark off the number.** A bolt over the body covers the
+  digits. Beside the nub it costs width once, and the cell keeps that width
+  unplugged too, so nothing in the tray moves when the charger goes in.
+- **Colour by the number shown.** The level colours compare the rounded
+  percentage, so a cell that reads 50 is never yellow.
+
+## A tray cell only some machines have (barcarolle's battery, 2026-11-03)
+
+- **Offsets measured on one layout miss a cell that appears on another.**
+  `Kit.tray` holds the balloon tails' targets for a bar with no battery, so on
+  a laptop they pointed at the battery cell. The bar publishes the battery
+  cell's width in `Kit.hub.batteryShift`, and the balloon adds it, re-read on
+  its tick.

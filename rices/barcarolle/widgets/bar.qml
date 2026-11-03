@@ -845,6 +845,80 @@ Item {
         }
     }
 
+    component BatGlyph: Item {
+        id: glyph
+        property real level: 0
+        property string label: ""
+        property color tone: "transparent"
+        property bool charging: false
+        readonly property int fillW: glyph.level > 0 ? Math.max(1, Math.round(20 * glyph.level)) : 0
+        width: 33
+        height: 16
+        Rectangle { y: 1; width: 24; height: 14; radius: 3; color: Kit.dark(0.9) }
+        Rectangle {
+            x: 1; y: 2; width: 22; height: 12
+            radius: 2
+            border.width: 1
+            border.color: Kit.white(0.55)
+            gradient: Gradient {
+                GradientStop { position: 0; color: Kit.dark(0.30) }
+                GradientStop { position: 1; color: Kit.dark(0.70) }
+            }
+        }
+        Rectangle {
+            x: 2; y: 3; width: glyph.fillW; height: 10
+            radius: 1
+            gradient: Gradient {
+                GradientStop { position: 0; color: Qt.lighter(glyph.tone, 1.45) }
+                GradientStop { position: 0.48; color: Qt.lighter(glyph.tone, 1.08) }
+                GradientStop { position: 0.52; color: glyph.tone }
+                GradientStop { position: 1; color: Qt.darker(glyph.tone, 1.25) }
+            }
+        }
+        Rectangle {
+            x: 2; y: 3; width: 20; height: 5
+            radius: 1
+            gradient: Gradient {
+                GradientStop { position: 0; color: Kit.white(0.40) }
+                GradientStop { position: 1; color: Kit.white(0.06) }
+            }
+        }
+        Item {
+            x: 2 + glyph.fillW; y: 3; width: 20 - glyph.fillW; height: 10
+            clip: true
+            Text { x: -glyph.fillW; width: 20; height: 10; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter; text: glyph.label; color: root.kit.text; font: Kit.boldFont(9); textFormat: Text.PlainText }
+        }
+        Item {
+            x: 2; y: 3; width: glyph.fillW; height: 10
+            clip: true
+            Text { width: 20; height: 10; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter; text: glyph.label; color: Kit.ink; font: Kit.boldFont(9); textFormat: Text.PlainText }
+        }
+        Rectangle {
+            x: 24; y: 5; width: 2; height: 6
+            radius: 0.5
+            gradient: Gradient {
+                GradientStop { position: 0; color: root.kit.text }
+                GradientStop { position: 0.5; color: Qt.darker(root.kit.text, 1.5) }
+                GradientStop { position: 1; color: Qt.darker(root.kit.text, 2.3) }
+            }
+        }
+        Shape {
+            visible: glyph.charging
+            preferredRendererType: Shape.CurveRenderer
+            ShapePath {
+                strokeColor: Kit.ink
+                strokeWidth: 0.8
+                joinStyle: ShapePath.RoundJoin
+                fillGradient: LinearGradient {
+                    x1: 0; y1: 1.9; x2: 0; y2: 14.1
+                    GradientStop { position: 0; color: Qt.lighter(root.kit.working, 1.4) }
+                    GradientStop { position: 1; color: Qt.darker(root.kit.working, 1.3) }
+                }
+                PathSvg { path: "M31.2 1.9 L27 8.9 H29.7 L28.4 14.1 L32.8 7 H30 Z" }
+            }
+        }
+    }
+
     component ShadowText: Item {
         id: st
         property string text: ""
@@ -1774,23 +1848,30 @@ Item {
             onClicked: root.toggleFlyout("network")
             Icon { x: 4; y: 12; width: 16; height: 16; src: root.trayDir + (root.netUp ? "tray-net-up.svg" : "tray-net-down.svg") }
         }
-        Item {
+        Cell {
             id: bat
-            width: 24
-            height: Kit.barHeight
+            width: 38
             readonly property var rig: (Quickshell.env("AOIDE_RIG_BATTERY") || "").split(":")
             readonly property bool forced: rig[0] !== ""
             readonly property var dev: UPower.displayDevice
             readonly property bool present: forced || (!!dev && dev.isLaptopBattery && dev.isPresent)
             readonly property real pct: forced ? parseFloat(rig[0]) : (dev ? dev.percentage * 100 : 0)
             readonly property real level: Math.max(0, Math.min(100, pct || 0)) / 100
+            readonly property int whole: Math.round(level * 100)
+            readonly property color tone: whole < 20 ? root.kit.critical : whole < 50 ? root.kit.awaiting : root.kit.working
             readonly property bool charging: forced ? rig[1] === "charging" : (!!dev && dev.state === UPowerDeviceState.Charging)
+            readonly property bool full: forced ? rig[1] === "full" : (!!dev && dev.state === UPowerDeviceState.FullyCharged)
+            readonly property real secs: forced ? 4980 : (!dev ? 0 : (charging ? dev.timeToFull : dev.timeToEmpty))
+            readonly property string phase: full ? "Fully charged" : (charging ? "Charging" : "On battery")
+            readonly property string span: Kit.timeLeft(secs, charging, full)
+            readonly property int shift: present ? width : 0
             visible: present
             anchors.right: net.left
-            Svg { x: 4; y: 12; d: "M2.5 3.5 H11.5 a1 1 0 0 1 1 1 V11.5 a1 1 0 0 1 -1 1 H2.5 a1 1 0 0 1 -1 -1 V4.5 a1 1 0 0 1 1 -1 Z"; stroke: root.kit.text; sw: 1 }
-            Svg { x: 4; y: 12; d: "M13 6.5 H14.5 V9.5 H13 Z"; fill: root.kit.text }
-            Svg { x: 4; y: 12; d: "M3 5 H" + (3 + Math.max(bat.level > 0 ? 1 : 0, 8 * bat.level)) + " V11 H3 Z"; fill: bat.pct < 15 ? root.kit.urgent : root.kit.text }
-            Svg { visible: bat.charging; x: 4; y: 12; d: "M8.8 4.2 L6.2 8.6 H7.9 L7.1 11.8 L9.8 7.4 H8.1 Z"; fill: root.kit.working; stroke: Kit.ink; sw: 0.6 }
+            lit: root.flyout === "battery"
+            onClicked: root.toggleFlyout("battery")
+            onShiftChanged: Kit.hub.batteryShift = shift
+            Component.onCompleted: Kit.hub.batteryShift = shift
+            BatGlyph { x: 4; y: 12; level: bat.level; label: "" + bat.whole; tone: bat.tone; charging: bat.charging }
         }
         Cell {
             id: flag
@@ -2308,6 +2389,32 @@ Item {
                             cursorShape: Qt.PointingHandCursor
                             onClicked: { root.flyout = ""; root.runDetached("nm-connection-editor") }
                         }
+                    }
+                }
+            }
+        }
+
+        Flyout {
+            name: "battery"
+            cell: bat
+            gate: bat.present
+            implicitWidth: batRim.width
+            implicitHeight: batRim.height + 6
+            Rim {
+                id: batRim
+                width: 300
+                height: 80
+                Plate {
+                    x: 7; y: 8; width: 286; height: 64
+                    BatGlyph { x: 12; y: 8; scale: 3; transformOrigin: Item.TopLeft; level: bat.level; label: "" + bat.whole; tone: bat.tone; charging: bat.charging }
+                    Text { x: 124; y: 11; text: bat.whole + "%"; color: Kit.ink; font: Kit.boldFont(16); textFormat: Text.PlainText }
+                    Text {
+                        x: 124; y: 34; width: parent.width - 136
+                        text: bat.phase + (bat.span !== "" ? " · " + bat.span : "")
+                        elide: Text.ElideRight
+                        color: Kit.dark(0.72)
+                        font: Kit.bodyFont(11)
+                        textFormat: Text.PlainText
                     }
                 }
             }

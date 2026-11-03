@@ -103,7 +103,10 @@ PanelWindow {
         return !!(open && open[root.focusName])
     }
 
-    readonly property int pointAt: root.summons ? Kit.tray.agents : Kit.tray.flag
+    readonly property int pointAt: {
+        root.tick
+        return (root.summons ? Kit.tray.agents : Kit.tray.flag) + (Kit.hub.batteryShift || 0)
+    }
     readonly property int edge: Math.max(root.padX, root.pointAt - root.cardW / 2)
     readonly property real tailCx: Math.max(22, Math.min(root.cardW - 22, root.cardW - (root.pointAt - root.edge)))
 
