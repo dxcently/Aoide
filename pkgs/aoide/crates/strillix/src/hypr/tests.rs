@@ -13,7 +13,7 @@ use aoide_conduct::graph::{
     load_stage, normalize_addr, sessions_path, write_stage, SessionRecord, SessionsFile,
 };
 use aoide_test_support::fake_hyprctl;
-use serde_json::{json, Value};
+use serde_json::json;
 use std::path::PathBuf;
 
 /// The recording core stub with aoided up: the door's probe finds the daemon listening, so each
@@ -53,10 +53,6 @@ fn no_compositor() -> EnvVars {
     let env = EnvVars::save(&["HYPRLAND_INSTANCE_SIGNATURE"]);
     std::env::remove_var("HYPRLAND_INSTANCE_SIGNATURE");
     env
-}
-
-fn match_window_for_ancestry(ancestry: &[i32], clients: &[Value]) -> Option<String> {
-    match_window_and_pid(ancestry, clients).map(|(addr, _)| addr)
 }
 
     #[test]
@@ -125,107 +121,6 @@ fn match_window_for_ancestry(ancestry: &[i32], clients: &[Value]) -> Option<Stri
         assert_eq!(normalize_addr("0xABC"), "abc");
         assert_eq!(normalize_addr("abc"), "abc");
         assert_eq!(normalize_addr("  0Xabc  "), "abc");
-    }
-
-    #[test]
-    fn window_discovery_matches_the_nearest_ancestor_client() {
-        // conduct(pid 100) ← shell(same pid, exec) ← kitty(pid 42) ← hypr(pid 7).
-        // kitty owns the window; the compositor (7) does not.
-        let clients = vec![
-            json!({ "pid": 42, "address": "0xKITTY", "class": "kitty" }),
-            json!({ "pid": 999, "address": "0xOTHER", "class": "firefox" }),
-        ];
-        let ancestry = vec![100, 42, 7];
-        assert_eq!(
-            match_window_for_ancestry(&ancestry, &clients),
-            Some("0xKITTY".to_string())
-        );
-
-        // The NEAREST ancestor with a window wins (self before its parents), even
-        // if a further-up ancestor also owns a client.
-        let nested = vec![
-            json!({ "pid": 42, "address": "0xOUTER" }),
-            json!({ "pid": 100, "address": "0xINNER" }),
-        ];
-        assert_eq!(
-            match_window_for_ancestry(&[100, 42, 7], &nested),
-            Some("0xINNER".to_string())
-        );
-
-        // No ancestor owns a window → None (address stays unset, as before).
-        assert_eq!(match_window_for_ancestry(&[100, 42, 7], &[json!({ "pid": 5, "address": "0xX" })]), None);
-        // A client whose pid matches but whose address is empty/absent is skipped.
-        assert_eq!(
-            match_window_for_ancestry(&[42], &[json!({ "pid": 42, "address": "" })]),
-            None
-        );
-        assert_eq!(
-            match_window_for_ancestry(&[42], &[json!({ "pid": 42, "class": "kitty" })]),
-            None
-        );
-        // Empty inputs never match.
-        assert_eq!(match_window_for_ancestry(&[], &clients), None);
-        assert_eq!(match_window_for_ancestry(&ancestry, &[]), None);
-    }
-
-    #[test]
-    fn window_discovery_also_returns_the_owning_pid() {
-        // The hook door records the matched terminal pid (helps the reaper): a
-        // `/proc` liveness signal that vanishes with the window, never a false
-        // reap. The pid returned is the matched ancestor/client pid.
-        let clients = vec![
-            json!({ "pid": 42, "address": "0xKITTY", "class": "kitty" }),
-            json!({ "pid": 999, "address": "0xOTHER" }),
-        ];
-        assert_eq!(
-            match_window_and_pid(&[100, 42, 7], &clients),
-            Some(("0xKITTY".to_string(), 42))
-        );
-        // Nearest ancestor wins, and its pid comes back with it.
-        let nested = vec![
-            json!({ "pid": 42, "address": "0xOUTER" }),
-            json!({ "pid": 100, "address": "0xINNER" }),
-        ];
-        assert_eq!(
-            match_window_and_pid(&[100, 42, 7], &nested),
-            Some(("0xINNER".to_string(), 100))
-        );
-        // No match → None (address AND pid stay unset, never a partial record).
-        assert_eq!(match_window_and_pid(&[5], &clients), None);
-        assert_eq!(match_window_and_pid(&[42], &[json!({ "pid": 42, "address": "" })]), None);
-    }
-
-    #[test]
-    fn client_workspace_lookup_reads_workspace_id_and_tolerates_address_form() {
-        let _guard = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        // `hyprctl clients -j` carries `workspace: { id, name }`; the lookup pulls
-        // the numeric id for the matching window. Address match is 0x/case
-        // tolerant, exactly like window_present (the stored addr may differ).
-        let clients = vec![
-            json!({ "address": "0x55aabb", "workspace": { "id": 3, "name": "3" } }),
-            json!({ "address": "0x1234ef", "workspace": { "id": 7, "name": "seven" } }),
-            // Special workspaces carry NEGATIVE ids — surfaced verbatim.
-            json!({ "address": "0xdeadbe", "workspace": { "id": -99, "name": "special:magic" } }),
-        ];
-        assert_eq!(client_workspace_for_address(&clients, "0x55aabb"), Some(3));
-        assert_eq!(client_workspace_for_address(&clients, "55AABB"), Some(3)); // no 0x + upper
-        assert_eq!(client_workspace_for_address(&clients, "0X1234EF"), Some(7));
-        assert_eq!(client_workspace_for_address(&clients, "0xdeadbe"), Some(-99));
-
-        // A window absent from the list → None (leave the stored workspace be).
-        assert_eq!(client_workspace_for_address(&clients, "0xnope"), None);
-        // An empty address never matches.
-        assert_eq!(client_workspace_for_address(&clients, ""), None);
-        // A client without a workspace object (or without a numeric id) → None,
-        // never a panic — degrade gracefully when Hyprland omits the field.
-        let noworkspace = vec![
-            json!({ "address": "0xaa" }),
-            json!({ "address": "0xbb", "workspace": {} }),
-            json!({ "address": "0xcc", "workspace": { "name": "3" } }),
-        ];
-        assert_eq!(client_workspace_for_address(&noworkspace, "0xaa"), None);
-        assert_eq!(client_workspace_for_address(&noworkspace, "0xbb"), None);
-        assert_eq!(client_workspace_for_address(&noworkspace, "0xcc"), None);
     }
 
     #[test]
@@ -523,54 +418,6 @@ fn match_window_for_ancestry(ancestry: &[i32], clients: &[Value]) -> Option<Stri
             None => std::env::remove_var("AOIDE_STAGE_DIR"),
         }
         let _ = std::fs::remove_dir_all(&stage);
-    }
-
-    /// A decoded `hyprctl clients -j` entry: an app window owned by `pid`.
-    fn client(addr: &str, pid: i64, class: &str) -> Value {
-        json!({ "address": addr, "pid": pid, "class": class })
-    }
-
-    #[test]
-    fn a_desktop_chain_binds_to_its_app_window_not_a_terminal() {
-        // A harness (1137986) under a desktop app (867785) whose window's class is
-        // not a terminal's. The owner is found by pid alone, whatever the class.
-        let clients = [client("0x639050c25000", 867785, "com.example.App")];
-        let chain = [119735, 1137986, 867785, 1454];
-        let beneath = |p: i32, owner: i32| p == 1137986 && owner == 867785;
-        assert_eq!(
-            window_for_hook_chain(&chain, &clients, beneath).as_deref(),
-            Some("0x639050c25000")
-        );
-    }
-
-    #[test]
-    fn a_stale_chain_with_nothing_beneath_its_owner_binds_nothing() {
-        let clients = [client("0xAA", 867785, "com.example.App")];
-        let chain = [2_000_000_000, 2_000_000_001, 867785, 1454];
-        assert_eq!(window_for_hook_chain(&chain, &clients, |_, _| false), None);
-    }
-
-    #[test]
-    fn a_chain_with_no_owner_client_binds_nothing() {
-        let clients = [client("0xAA", 999, "com.example.App")];
-        assert_eq!(window_for_hook_chain(&[1, 2, 3], &clients, |_, _| true), None);
-    }
-
-    #[test]
-    fn the_nearest_owner_wins_over_a_farther_one() {
-        let clients = [client("0xFAR", 900, "com.example.App"), client("0xNEAR", 500, "kitty")];
-        let chain = [10, 500, 900];
-        let beneath = |p: i32, owner: i32| p == 10 && owner == 500;
-        assert_eq!(
-            window_for_hook_chain(&chain, &clients, beneath).as_deref(),
-            Some("0xNEAR")
-        );
-    }
-
-    #[test]
-    fn an_owner_at_the_head_of_the_chain_has_nothing_beneath_it() {
-        let clients = [client("0xAA", 500, "kitty")];
-        assert_eq!(window_for_hook_chain(&[500, 1], &clients, |_, _| true), None);
     }
 
     /// The sweep asks core to bind the pid-less hosted sessions whose hook chain runs under a live

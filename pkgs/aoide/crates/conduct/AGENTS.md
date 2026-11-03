@@ -426,8 +426,9 @@ in the message.
   sites.** `SessionRecord.workspaceProject` (additive, `skip_serializing_if`)
   is written only by `graph/model.rs::observe_workspace` — the same seam
   `SessionRecord.workspace` is written through — and every site that observes
-  a workspace calls it: `window.rs::attach_window` (the desktop's
-  `session window attach --workspace`) and `reconcile_untracked_terminals`
+  a workspace calls it: `window.rs::place_in_window` (the one step
+  `attach_window` and the roster verb's bindings take) and
+  `reconcile_untracked_terminals`
   (both its upsert and its move branches) (the synthetic `win:` record a bare tty
   gets — a terminal on a bound workspace joins the project exactly as an
   agent's session does, so that publisher builds its record with
@@ -533,8 +534,10 @@ in the message.
 
 - **No path may synthesize a per-thread window address.** A Codex-app
   record's `windowAddress` is the window owning the process that holds that
-  thread's writer lock, stamped ONLY by the desktop's window sweep, through
-  `session window attach` — core resolves no window. `reconcile_codex_app_threads` itself never touches
+  thread's writer lock, stamped ONLY by the placement rule
+  (`window_bindings`, applied by the roster verb or through
+  `session window attach`) — core reads no compositor.
+  `reconcile_codex_app_threads` itself never touches
   `windowAddress`/`workspace`; N threads of one app therefore share one
   address by construction, and focusing any of them raises the app, which
   is the only thing the app lets anyone do.
@@ -770,8 +773,8 @@ in the message.
   `aoide_storage::petname::mint_for` exactly once per NEW presence id, the
   same insert-only timing `reconcile_codex_app_threads` holds; a rescan of
   an unchanged presence must never re-mint one, and `windowAddress`/
-  `workspace` are left empty here for the desktop's window sweep to fill — this
-  module reads no compositor either.
+  `workspace` are left empty here for the placement rule (`window_bindings`) to
+  fill — this module reads no compositor either.
 
 - **A record whose presence stops being observed is dropped only on an
   `Observed` pass, never on `Unknown` — identical to the Codex ruling
@@ -1832,22 +1835,26 @@ in the message.
     permanent `headless: bool` marker is still written there, through
     `session_store::stamp_headless` (change-only, written once, never cleared),
     right after registration.
-  - **The chain and sweep gates.** `window::windowless_by_lineage` checks a
+  - **The chain and placement gates.** `window::windowless_by_lineage` checks a
     session's OWN record FIRST (via `is_windowless_wrap`: `conductable` and
     (`headless` OR its own `windowAddress` empty)) before walking its parent
     chain, so the wrap's own record is caught by the same function that catches
     its descendants. Two callers route through it: `ensure_session_chain`, which
-    returns early, and the desktop's sweep (strillix `hypr/sweep.rs`), which skips
-    the record. Miss either, and a nested `conduct --headless`/`spawn` picks up a
-    chain the sweep can bind to the ENCLOSING terminal's window. That is what made
+    returns early, and the placement rule (`window::window_bindings`), which
+    skips the record. The roster verb applies that rule's bindings itself, and
+    the desktop's sweep (strillix `hypr/sweep.rs`) asks it for the same ones.
+    Miss either, and a nested `conduct --headless`/`spawn` picks up a chain the
+    placement can bind to the ENCLOSING terminal's window. That is what made
     the same-window eviction (below) treat an agent and its own headless
     grandchild as stale twins.
   - **Open: `session window attach` does not re-check lineage.** The verb trusts
-    its caller, and its one automated caller, the desktop's sweep, applies the gate
-    above first. A core-side check cannot reuse `is_windowless_wrap` as it stands,
-    because that predicate also marks an unwindowed conducted wrap, which the
-    desktop must still be able to bind after registration. The rule for that case
-    is undecided.
+    its caller. Its one automated caller, the desktop's sweep, attaches only
+    what `window_bindings` returns, and that rule applies the gate above first;
+    the roster verb binds through the same rule. A core-side check inside the
+    verb cannot reuse `is_windowless_wrap` as it stands, because that predicate
+    also marks an unwindowed conducted wrap, which must still be bindable after
+    registration. The rule for that case, for a direct caller of `attach`, is
+    undecided.
   - `headless` deliberately overrides a stray non-empty `windowAddress`:
     it is a PERMANENT self-reported registration fact, not a live re-check,
     so a bug elsewhere that stamps a window onto a headless wrap's record
@@ -1870,27 +1877,31 @@ in the message.
   `reap`'s dedup pass (`superseded_agent_duplicates`) call that ONE rule, so
   they cannot disagree. Do not reintroduce a window-only test in either
   pass: a live sibling sharing the window would be retired.
-- **A window is a fact the desktop reports, never one core discovers.** Core
-  reads no compositor. The desktop's sweep (strillix `hypr/sweep.rs`) places a
-  session's window and writes it through `aoide session window attach`, the one
-  core verb that records a window. It fills an empty window, moves the workspace
-  when the same window reports again, and refuses a second window while the first
-  is held (`Attach::Held`). Core never stamps an owner's pid on a session: a
-  window's owner is the app, not the session's process, and a stamped owner pid
-  made every subprocess of the app attest as that record. A self-reported `pid` is
-  vouched only when it is one of the hook's own ancestors
-  (`send.rs::vouched_payload_pid`), so a payload may name its harness and never the
-  app that owns the window.
-- **A pid-less hosted session binds only through a live chain, and the desktop
-  makes that walk.** The desktop's sweep (strillix `hypr/sweep.rs`,
+- **A window is a fact the desktop reports, never one core discovers, and
+  which session runs in it is core's decision.** Core reads no compositor. The
+  desktop hands core the windows it sees, and `window::window_bindings` places
+  the sessions in them. The roster verb applies those bindings itself, in the
+  hold that reconciles the `win:*` records. The desktop's sweep (strillix
+  `hypr/sweep.rs`) asks the same function and writes each answer through
+  `aoide session window attach`, the verb that records a window. It fills an
+  empty window, moves the workspace when the same window reports again, and
+  refuses a second window while the first is held (`Attach::Held`); the roster
+  verb takes the same step (`place_in_window`). Core never stamps an owner's
+  pid on a session: a window's owner is the app, not the session's process,
+  and a stamped owner pid made every subprocess of the app attest as that
+  record. A self-reported `pid` is vouched only when it is one of the hook's
+  own ancestors (`send.rs::vouched_payload_pid`), so a payload may name its
+  harness and never the app that owns the window.
+- **A pid-less hosted session binds only through a live chain, and core makes
+  that walk.** The placement rule (`window::window_bindings`, through
   `window_for_hook_chain`) walks a record's stored `hookAncestry`: the nearest
-  chain pid that owns a client is the owner, and the record binds while any
+  chain pid that owns a window is the owner, and the record binds while any
   process of its own chain, a tab shell included, stands beneath that owner. A
   dead chain binds nothing (a dead pid's ancestry is itself), and a reused pid
-  outside the owner's tree binds nothing. Core never performs this walk and never
-  writes a pid for such a record. A chain with no live process beneath the owner is
-  replaced by the next per-turn hook from its live harness (`ensure_session_chain`),
-  and then binds at the desktop's next sweep.
+  outside the owner's tree binds nothing. The walk never writes a pid for such
+  a record. A chain with no live process beneath the owner is replaced by the
+  next per-turn hook from its live harness (`ensure_session_chain`), and then
+  binds at the next roster or sweep.
 - **`RestoreSnapshot.idle` is captured as its OWN field, never inferred
   from `state` (P-C5).** `reap.rs`'s sweep assigns `s.state = "done"`
   BEFORE calling `ledger_session_exit` — by the time the ledger line is
@@ -2312,9 +2323,10 @@ in the message.
   ambient `AOIDE_SESSION_ID` env only when nothing intersects. Precedence is
   explicit `--parent` > ancestry walk > env, in that order, for all three of
   `wrap`/`conduct`/`spawn` (spawn re-execs `conduct --headless`, so fixing
-  `conduct`'s own call covers it). The window sweep reads it to bind a
-  pid-less hosted session (`window::window_for_hook_chain`), and binds while any live process of that chain, a tab shell included, stands beneath the window's owner. Neither
-  reader ever turns the chain into a pid.
+  `conduct`'s own call covers it). The placement rule (`window_bindings`) reads
+  it to bind a pid-less hosted session (`window::window_for_hook_chain`), and
+  binds while any live process of that chain, a tab shell included, stands
+  beneath the window's owner. Neither reader ever turns the chain into a pid.
 - **`parentSessionId` on a hook record is re-stamped from ATTESTED kernel
   process evidence at SessionStart and on every per-turn hook, not only at
   registration — unlike `hookAncestry` above, which moves only where

@@ -11,9 +11,10 @@
 #
 # The record's discovery is the registry, so the hook, borrow resolution and
 # `builtIn` never read `dir` (no import-from-derivation); only the paint lane's
-# rices package consumes `dir`'s contents. A consumer hands `dir` to the rice
-# hook (`rices = …`) and to the strillix lane's per-host rices, and reads
-# `discoveredNames` / `riceDirs` / `rices` off the same record.
+# rices package consumes `dir`'s contents. The merge hands `dir` to
+# `lib/rices.nix` as `ricesRoot`, so the hook sets `_module.args.ricesRoot` to
+# it for the strillix lane; a consumer reads `discoveredNames` / `riceDirs` /
+# `rices` off the same record.
 #
 # Merge happens BEFORE borrow resolution: every rice is visible in one registry
 # first, so a rice may borrow a slot from a rice that came from another book (a

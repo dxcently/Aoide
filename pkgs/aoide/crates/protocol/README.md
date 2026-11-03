@@ -298,8 +298,8 @@ other crate in this workspace sits above.
   resolve at exec time — `agents::on_path` needs it, checked BEFORE spawning
   rather than caught as an `ENOENT` after. `core_present` is true when `core_bin`'s
   answer is a program named `aoide` that is there: an absolute path is checked where
-  it is, a bare name goes through `on_path`. `door::parse` asks it before a refusal
-  names `aoide`. `resolve_executable_on_
+  it is, a bare name goes through `on_path`. A refusal that names `aoide` asks it
+  first, as the strillix focus path does. `resolve_executable_on_
   path` (task #138) is the SPAWNABLE sibling of `on_path`: it additionally
   checks the executable bit and returns the resolved absolute path rather
   than a bool — kept as its own walk rather than widening `on_path`'s

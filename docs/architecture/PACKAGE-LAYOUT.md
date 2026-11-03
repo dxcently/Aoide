@@ -423,15 +423,21 @@ surface: everything that paints, or that only a desktop needs.
   `share/strillix/nix/` (the OFFLINE generator: `manifest.nix`, copies of
   `lib/rices.nix`/`lib/rice.nix`, and the locked nixpkgs `lib/`) and
   `share/strillix/aoide-options.json` (`lib/options.nix`'s output, read by
-  `strx onboard`). `aoide_storage::fs::rice_templates_dir` finds the rices
-  through `STRILLIX_TEMPLATES` or the exe-sibling path, and `fs::strillix_share_dir`
-  is that path's parent; only `strillix-rice`/`strillix` read either. THREE
-  arguments: `rices` (which folders ship) and `builtin` (the selection, written to
-  `builtin.json`), both defaulted for this flake's own
-  `packages.<system>.strillix-rices` (every discovered rice) and both overridden
-  per host by the `strillix` dendrite, plus `aoideOptions` (the option doc list, which
-  `callPackage` cannot derive — each build context names it through
-  `lib/pkgs.nix`'s `extra`). **What it copies is a host contract,**
+  `strx onboard`). `rice_templates_dir` (strillix-rice's `src/paths.rs`) finds
+  the rices through `STRILLIX_TEMPLATES` or the exe-sibling path, and
+  `strillix_share_dir` (the same file) is that path's parent; only
+  `strillix-rice`/`strillix` read either. Beyond the
+  `callPackage` scope (`lib`, `pkgs`, `runCommand`, `jq`), the file takes five
+  arguments: `rices` (which folders ship; `null` ships every discovered rice),
+  `builtin` (the selection, written to `builtin.json`; `null` writes none),
+  `ricesRoot` (the directory those names live in; the repo's own `rices/` by
+  default), `riceDirs` (name to rice directory, when already discovered; `null`
+  discovers `ricesRoot`), and `aoideOptions` (the option doc list, which
+  `callPackage` cannot derive, so a build context names it: `lib/pkgs.nix`'s
+  `extra` for the flake's own packages, and the strillix dendrite's own derivation
+  for a host). The flake's own `packages.<system>.strillix-rices` leaves `rices`
+  and `builtin` at `null`; the strillix dendrite overrides both per host and passes
+  `ricesRoot`, `riceDirs` and `aoideOptions`. **What it copies is a host contract,**
   not tidiness: each shipped rice enters the derivation as its OWN store path
   and the baked manifest/registry are over the shipped set only, because this
   package's path is a STRING in a host's session variables and activation — so
@@ -549,7 +555,7 @@ flake.nix
 ├── lib.composition           the constructor, a function of `{ lib }`
 ├── lib.theme                the venue-recolour resolver, a function of `{ lib }`
 ├── lib.rices              discovery, selection and the rices' module list,
-│                             a function of `{ lib, rices ? … }`
+│                             a function of `{ lib, ricesRoot ? … }`
 ├── lib.rices.merge         several rices DIRECTORIES as one, a function of
 │                             `{ lib, pkgs, books }`: the `registry`, the merged
 │                             `dir` and the `lib.rices` record, from one call
@@ -703,8 +709,8 @@ registry.catalogue = removeAttrs aoide.lib.catalogue [ "bar" ] // slots;
   and nothing else: it brings the strillix runtime by path, and it reads the
   constructor's own facts. A host that selects one passes `nixosModules.nucleus`
   in its `extraModules`, applies `overlays.default`, and gets the hook's
-  `_module.args` (`rice`, `borrow`, `rices`) from `lib.rices.hook`'s
-  `extraModulesFor`.
+  `_module.args` (`rice`, `borrow`, `ricesRoot`, `riceDirs`) from the
+  `extraModulesFor` of the hook that `lib.rices` returns.
 - **Value slots need habit >= 0.4.0.** A provider set written inline in a
   catalogue entry is what habit's value-slot support reads.
 - **A rice is registered by the hook, not merged.** `strillix.rices` names each
@@ -723,15 +729,17 @@ read.
 
 A consumer performs from one rices DIRECTORY per host: Aoide's own, exported
 as `ricesRoot`, or one in the CONSUMER's tree. `lib.rices` takes the
-directory (`rices ? …`); the consumer passes the same value, once, into the
-rice hook it calls (`lib.rices.hook`, which sets `_module.args.rices`
-beside `rice` and `borrow`); and the dendrite that paints the built-in rices and
-`pkgs/strillix-rices` take it as an argument instead of naming a path in this
-repo. A host that performs Aoide's `sonata` therefore writes
-`rices = aoide.ricesRoot` in both places and `habit.rice.declared = "sonata"` in
-its module — never `inputs.aoide + "/rices/…"`. A host says what it
-performs (`habit.rice.declared`) and what it merely builds in (`habit.rice.available`), with
-the borrow closure and the machine-owned rices unchanged from §5.
+directory (`ricesRoot ? …`); the consumer passes the same value, once, into
+`lib.rices`, then calls the hook it returns (`(lib.rices { … }).hook`, which
+sets `_module.args.ricesRoot` beside `rice`, `borrow` and `riceDirs`); and the
+dendrite that paints the built-in rices and `pkgs/strillix-rices` take it as an
+argument instead of naming a path in this repo. A host that performs Aoide's
+`sonata` therefore writes `ricesRoot = aoide.ricesRoot` once, in its
+`lib.rices` call, and `habit.rice.declared = "sonata"` in its module —
+never `inputs.aoide + "/rices/…"`. A host says what it performs
+(`habit.rice.declared`) and what it merely builds in
+(`habit.rice.available`), with the borrow closure and the machine-owned rices
+unchanged from §5.
 
 Discovery, selection and `borrow` all read that one directory. A host whose
 rices come from both Aoide's rices and the consumer's takes them through

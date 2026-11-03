@@ -32,11 +32,11 @@ file covers only the strillix lane.
   its fact at both levels. The NixOS-only parts
   (`home.packages`, the session variables and the shellbridge unit) are gated on
   `strillix.runtime.nixos`, so a standalone home gets them from this file instead.
-- **`runtime.nix` reads rices through the registry, never through `rices`
-  alone.** The hook hands it `ricesDirs` (name to rice directory); the
+- **`runtime.nix` reads rices through the registry, never through `ricesRoot`
+  alone.** The hook hands it `riceDirs` (name to rice directory); the
   lane's rices library and every per-rice path come from that map, so a
   merged rices (a derivation) is never read at evaluation. Absent, the
-  lane discovers `rices` itself.
+  lane discovers `ricesRoot` itself.
 - **`runtime.nix` sets `strillix.enable` and `strillix.quickshell.config`,** and
   brings the shell by importing `../quickshell/system.nix`; `runtime-home.nix`
   imports `../quickshell/home.nix` beside its own body. `mkFact` accepts

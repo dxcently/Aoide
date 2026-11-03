@@ -26,7 +26,7 @@
 #   aoide-options.json `lib/options.nix`'s output, so `strillix onboard` derives the
 #                      `aoide.*` option set without a checkout and without nix.
 #
-# Consumed at runtime by `aoide_storage::fs::rice_templates_dir` /
+# Consumed at runtime by `rice_templates_dir` (strillix-rice's `paths.rs`) /
 # `STRILLIX_TEMPLATES` (rices/) and by its parent (nix/,
 # aoide-options.json) — `strillix rice compose --from <rice>`,
 # `strillix-rice::widgets`'s registry/manifest regeneration, and `strillix onboard`
@@ -68,11 +68,11 @@
   builtin ? null,
   # The rices those names live in. A consumer's host may perform from its
   # own tree's rices, so this is an argument and not a path literal into
-  # Aoide's own (the strillix lane passes the host's `_module.args.rices`; the
-  # flake's own `packages` output keeps its default).
+  # Aoide's own (the strillix lane passes the host's `_module.args.ricesRoot`;
+  # the flake's own `packages` output keeps its default).
   ricesRoot ? ../../rices,
   # name -> rice directory, when the caller has already discovered them (the
-  # merged rices's registry); null = discover `rices`. Reading `rices`
+  # merged rices's registry); null = discover `ricesRoot`. Reading `ricesRoot`
   # itself at eval would make a merged rices (a derivation) import-from-derivation.
   riceDirs ? null,
 }:

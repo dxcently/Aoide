@@ -979,7 +979,7 @@ fn apply_codex_merges(
 /// thread's own [`capture_for`] onto its `"app"` record
 /// ([`apply_codex_merges`], which internally calls [`apply_codex_capture`]
 /// then [`apply_codex_lineage`]), and re-stages `graph.json` only when
-/// something changed. Mirrors `sync_untracked_terminal_rows`'s
+/// something changed. Mirrors `place_and_publish`'s
 /// shape. An `Unknown` scan takes NO stage lock and writes NOTHING —
 /// [`audit_scan_unknown_once`] notes it and this returns `false`, same as
 /// an ordinary no-op tick.

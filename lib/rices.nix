@@ -11,9 +11,11 @@
 #   - `pkgs/strillix-rices`'s generator (`nix/manifest.nix`), which imports a COPY
 #     of this file at BUILD time to emit `manifest.json`/`registry.json` into the
 #     deployed QML tree — over the host's BUILT-IN rices only.
-#   - The `ricesManifest` flake output (flake.nix) wraps this so
-#     `pkgs/aoide/crates/rice/src/widgets.rs` can shell out to `nix eval
-#     --json` and regenerate both files WHOLE at RUNTIME, no rebuild — the
+#   - The `ricesManifest` flake output (flake.nix) wraps this. Checks 11 and 12
+#     call the shipped generator themselves, and the runtime runs it too:
+#     `pkgs/aoide/crates/strillix-rice/src/widgets.rs` shells out to
+#     `nix-instantiate --eval --strict --json` over the shipped
+#     `nix/manifest.nix` and regenerates both files WHOLE, no rebuild — the
 #     hot-sync half of `rice stage`. That one is over EVERY discovered rice
 #     (the machine owns its rices; a machine-made rice must regenerate like
 #     any other). A per-rice directory scan cannot answer "who owns this slot"
@@ -34,8 +36,9 @@
   ricesRoot ? ../rices,
   # name -> directory, when the rices are already discovered: the merge's
   # registry (lib/rices-merge.nix), whose entries point INTO the input books,
-  # so nothing here reads `rices` (a merged directory is a derivation output,
-  # and reading it at eval is import-from-derivation). Null = discover `rices`.
+  # so nothing here reads `ricesRoot` (a merged directory is a derivation
+  # output, and reading it at eval is import-from-derivation). Null = discover
+  # `ricesRoot`.
   discovered ? null,
 }:
 let
@@ -331,7 +334,8 @@ let
   #                     v0.5.0); a user who should not perform it opts out per
   #                     aggregation.
   #   extraModulesFor   the checks, then the `_module.args` a body reads (`rice`,
-  #                     `borrow`, `rices`) and the facts the paint lanes read.
+  #                     `borrow`, `ricesRoot`, `riceDirs`) and the facts the
+  #                     paint lanes read.
   #
   # The reads, exhaustively: `habit.rice.*` and `habit.aggregation.<rice>`. Never
   # a `rice.*` option, and never a body but the selected one. The checks are the list `extraModulesFor` returns,

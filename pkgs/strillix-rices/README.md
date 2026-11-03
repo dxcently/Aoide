@@ -9,9 +9,9 @@ Three payloads under `$out/share/strillix/`, one per consumer:
 
 | path | what reads it |
 |---|---|
-| `rices/` — the rice folders this instance ships, plus `manifest.json`, `registry.json` and (when a host selected rices) `builtin.json` | `aoide_storage::fs::rice_templates_dir`, through `STRILLIX_TEMPLATES` or the exe-sibling `../share/strillix/rices` |
+| `rices/` — the rice folders this instance ships, plus `manifest.json`, `registry.json` and (when a host selected rices) `builtin.json` | `rice_templates_dir` (strillix-rice's `paths.rs`), through `STRILLIX_TEMPLATES` or the exe-sibling `../share/strillix/rices` |
 | `nix/` — the OFFLINE generator: `manifest.nix` + copies of `lib/rices.nix` and `lib/rice.nix` + the locked nixpkgs `lib/` (tests dropped) | `strillix-rice::widgets`'s `plan_stage`, which evaluates `nix/manifest.nix` with a plain `nix-instantiate --eval --strict --json` over the machine's own rices |
-| `aoide-options.json` — `lib/options.nix`'s output | `strillix`'s `onboard`, through `fs::strillix_share_dir` (this dir) |
+| `aoide-options.json` — `lib/options.nix`'s output | `strillix`'s `onboard`, through `strillix_share_dir` (strillix-rice's `paths.rs`; this dir) |
 
 `strillix-rice` and `strillix` read it. The installed strillix
 (`modules/dendrites/strillix/package.nix`) names the `rices/` path as its default, and
@@ -23,8 +23,8 @@ the strillix dendrite's units that exec `strillix` spell the same path.
 |---|---|---|
 | `rices` | `null` | `null` ships every discovered rice; a list ships those folders |
 | `builtin` | `null` | `{ declared, rices, packages }`, written to `builtin.json`; `null` writes none |
-| `rices` | `../../rices` | the directory those names live in |
-| `riceDirs` | `null` | name to rice directory, when already discovered (a merged rices's registry); `null` discovers `rices`. Reading `rices` itself at eval would make a merged rices import-from-derivation |
+| `ricesRoot` | `../../rices` | the directory those names live in |
+| `riceDirs` | `null` | name to rice directory, when already discovered (a merged rices's registry); `null` discovers `ricesRoot`. Reading `ricesRoot` itself at eval would make a merged rices import-from-derivation |
 
 The flake's own `packages.strillix-rices` uses the defaults. The `strillix` lane
 overrides both per host (`lib/rices.nix`'s `builtIn`), which is what makes the
@@ -39,7 +39,7 @@ through `lib/pkgs.nix`'s `extra`, and a host through the strillix lane's own
 
 ## The `nix/` payload — one generator, shipped
 
-`nix/manifest.nix` is a thin entry (`{ rices }: { manifest; registry;
+`nix/manifest.nix` is a thin entry (`{ ricesRoot }: { manifest; registry;
 packages; }`) over `nix/rices.nix` and `nix/rice.nix`, which are COPIES of
 `lib/rices.nix` and `lib/rice.nix` made at build time, and `nix/lib/` is the
 locked nixpkgs `lib/`. So the machine evaluates the same generator this build
