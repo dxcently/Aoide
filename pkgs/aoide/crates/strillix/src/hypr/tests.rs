@@ -292,48 +292,31 @@ fn no_compositor() -> EnvVars {
     }
 
     /// A request socket that never accepts: its backlog fills, the next plain connect blocks
-    /// in the kernel, and `hyprctl_clients` must still answer `None` within its budget.
+    /// in the kernel, and `hyprctl_clients` must still answer `None` within its budget. It takes
+    /// its budget, so at least 1 s: a `None` sooner never waited on the backlog.
     #[cfg(unix)]
     #[test]
     fn hyprctl_clients_gives_up_within_its_budget_when_the_backlog_is_full() {
-        use std::os::unix::net::UnixStream;
-        use std::sync::atomic::{AtomicUsize, Ordering};
-        use std::sync::Arc;
-        use std::time::Duration;
+        use std::time::{Duration, Instant};
         let _guard = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let (_env, root, listener) = bind_request_socket("backlog-full");
         let socket = root.join("hypr").join("test").join(".socket.sock");
 
-        // Connect until the kernel blocks one; nothing accepts, so the queue fills and stays full.
-        let queued = Arc::new(AtomicUsize::new(0));
-        {
-            let queued = Arc::clone(&queued);
-            std::thread::spawn(move || {
-                let mut held = Vec::new();
-                while let Ok(s) = UnixStream::connect(&socket) {
-                    held.push(s);
-                    queued.fetch_add(1, Ordering::SeqCst);
-                }
-            });
-        }
-        let mut seen = queued.load(Ordering::SeqCst);
-        loop {
-            std::thread::sleep(Duration::from_millis(100));
-            let now = queued.load(Ordering::SeqCst);
-            if now == seen {
-                break;
-            }
-            seen = now;
-        }
-        assert!(seen > 0, "the filler never connected");
+        let _held = fill_backlog(&listener, &socket);
 
         let (tx, rx) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
-            let _ = tx.send(hyprctl_clients());
+            let started = Instant::now();
+            let answered = hyprctl_clients();
+            let _ = tx.send((started.elapsed(), answered));
         });
-        let answered = rx
+        let (elapsed, answered) = rx
             .recv_timeout(Duration::from_secs(3))
             .expect("hyprctl_clients was still blocked after 3 s on a full backlog");
+        assert!(
+            elapsed >= Duration::from_secs(1),
+            "hyprctl_clients gave up after {elapsed:?}, not its budget"
+        );
         assert!(answered.is_none(), "a listener that never accepts answers nothing");
         drop(listener);
         let _ = std::fs::remove_dir_all(&root);

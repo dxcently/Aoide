@@ -6,7 +6,7 @@
 //! keeps its own loop for core's calls.
 
 use super::listener::{parse_hypr_window_event, HyprWindowEvent};
-use aoide_protocol::local_socket::connect_bounded;
+pub(super) use aoide_protocol::local_socket::connect_bounded;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
 use std::time::Duration;

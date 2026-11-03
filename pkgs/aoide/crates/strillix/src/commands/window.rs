@@ -267,15 +267,14 @@ fn stdout_failed(cmd: &str, e: &std::io::Error) -> Outcome {
 mod tests {
     use super::*;
     use crate::bridge::testutil::env_lock;
-    use crate::hypr::testutil::{fake_hypr_clients, unique_stage, EnvVars};
+    use crate::hypr::testutil::{fake_hypr_clients, fill_backlog, unique_stage, EnvVars};
     use crate::output::Status;
     use aoide_test_support::{accept_one, finishes_within, DELIVERY_BUDGET};
     use std::collections::BTreeMap;
     use std::io::{ErrorKind, Write};
     use std::os::unix::net::{UnixListener, UnixStream};
     use std::path::PathBuf;
-    use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::sync::{mpsc, Arc};
+    use std::sync::mpsc;
     use std::time::Instant;
 
     fn invocation(path: &[&str]) -> Invocation {
@@ -604,31 +603,7 @@ mod tests {
         let path = event_socket(&root);
         let listener = UnixListener::bind(&path).unwrap();
 
-        // Connect until the kernel blocks one; nothing accepts, so the queue fills and stays full.
-        let queued = Arc::new(AtomicUsize::new(0));
-        {
-            let queued = Arc::clone(&queued);
-            let path = path.clone();
-            std::thread::spawn(move || {
-                let mut held = Vec::new();
-                while let Ok(s) = UnixStream::connect(&path) {
-                    held.push(s);
-                    queued.fetch_add(1, Ordering::SeqCst);
-                }
-            });
-        }
-        let settled_by = Instant::now() + Duration::from_secs(5);
-        let mut seen = queued.load(Ordering::SeqCst);
-        loop {
-            std::thread::sleep(Duration::from_millis(100));
-            let now = queued.load(Ordering::SeqCst);
-            if now == seen {
-                break;
-            }
-            assert!(Instant::now() < settled_by, "the backlog was still filling after 5 s");
-            seen = now;
-        }
-        assert!(seen > 0, "the filler never connected");
+        let _held = fill_backlog(&listener, &path);
 
         let (tx, rx) = mpsc::channel();
         let sock = path.clone();

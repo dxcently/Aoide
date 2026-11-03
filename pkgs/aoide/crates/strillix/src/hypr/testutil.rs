@@ -184,6 +184,30 @@ pub(crate) fn fake_hypr_clients(
     (HyprSocket { _env: env, stop, server: Some(server) }, root)
 }
 
+/// Shrinks `listener`'s backlog with a second listen and fills it, returning the queued connects
+/// for the caller to hold. A plain connect made after this blocks in the kernel until something
+/// accepts; a bounded one times out.
+#[cfg(unix)]
+pub(crate) fn fill_backlog(
+    listener: &std::os::unix::net::UnixListener,
+    path: &std::path::Path,
+) -> Vec<std::os::unix::net::UnixStream> {
+    use std::os::unix::io::AsRawFd;
+    // std's bind backlog is too deep to fill with a few fds; a second listen sets it on Linux.
+    // SAFETY: the fd is the listener's own and stays open while it is borrowed.
+    let rc = unsafe { libc::listen(listener.as_raw_fd(), 1) };
+    assert_eq!(rc, 0, "listen: {}", std::io::Error::last_os_error());
+    let mut held = Vec::new();
+    while held.len() < 16 {
+        match super::watch::connect_bounded(path, Duration::ZERO) {
+            Ok(stream) => held.push(stream),
+            Err(e) if e.kind() == std::io::ErrorKind::TimedOut => return held,
+            Err(e) => panic!("filling the backlog at {}: {e}", path.display()),
+        }
+    }
+    panic!("the backlog took {} connects: the second listen left it deep", held.len());
+}
+
 /// Monotonic per-process counter backing `unique_stage`'s directory name —
 /// see that function's doc for why a counter, not a nanosecond timestamp.
 static STAGE_SEQ: AtomicU64 = AtomicU64::new(0);
