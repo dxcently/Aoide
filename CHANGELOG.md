@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### nix-independence sees every path crate
+
+- `nix-independence` walks every path crate in core's closure, not only the `aoide-*` lines of `[dependencies]` and `[build-dependencies]`: it reads `[target.<cfg>.dependencies]` tables too, forbids the `crates/strillix-rice`, `crates/screen` and `crates/strillix` directories under any package name, and fails the build, naming the line, on a dependency form it cannot read.
+
 ### Core passes clippy
 
 - `cargo clippy --workspace --all-targets --all-features` reports no warning for any core crate, and the `aoide-clippy` flake check holds it there with `-D warnings`; `strillix`, `strillix-rice` and `aoide-screen` are left out by name.

@@ -44,10 +44,11 @@
 #      cargo-buildable, no nix shell-outs, no NixOS assumption, made real
 #      instead of discipline-only. Derives the crate closure from
 #      `pkgs/aoide/Cargo.toml`'s `[workspace.dependencies]` and a transitive
-#      walk of `[dependencies]`/`[build-dependencies]` starting at
-#      `crates/cli` (never `[dev-dependencies]` — test-support never ships),
-#      then asserts the closure never reaches `strillix-rice`/`aoide-screen`/
-#      `strillix` and that no closure crate's `src/` shells out to nix.
+#      walk of every `[dependencies]`/`[build-dependencies]` table, target
+#      tables included, from `crates/cli` (never `[dev-dependencies]` —
+#      test-support never ships), then asserts the closure never reaches
+#      `crates/strillix-rice`, `crates/screen` or `crates/strillix`, and that
+#      no closure crate's `src/` shells out to nix.
 #
 #   8. portability — the static artifact (`packages.aoide-static`, Phase C)
 #      is genuinely free of nix, not merely built with the right cargo flags:
@@ -608,28 +609,32 @@ let
   # NixOS assumption; only `strillix` (and the deployment modules) may depend on
   # nix (P-A5 of the binary-split workstream; cli/Cargo.toml:36-43 documents
   # the boundary this check makes real). The closure is DERIVED, never
-  # hardcoded: `pkgs/aoide/Cargo.toml`'s `[workspace.dependencies]` gives an
-  # aoide-* name -> `crates/` directory map, then a transitive walk of
-  # `[dependencies]`/`[build-dependencies]` from `crates/cli` builds the
-  # closure — `[dev-dependencies]` is never walked (test-support never
-  # ships, same reasoning `aoide-cli`'s own manifest states for
-  # `aoide-test-support`). Regex-based, like Check 6: any aoide-* entry
-  # neither TOML file states as a plain single-line `{ path = "crates/…" }`
-  # or `{ workspace = true }` (a multi-line inline table, a `package = "…"`
-  # rename) fails the build naming the offending line instead of walking
-  # past it unseen.
+  # hardcoded. `pkgs/aoide/Cargo.toml`'s `[workspace.dependencies]` maps each
+  # path crate's name to its `crates/<dir>`; a walk from `crates/cli` follows
+  # each `[dependencies]` and `[build-dependencies]` table, plain or under
+  # `[target.<cfg>.]`, through every entry that names a mapped crate.
+  # `[dev-dependencies]` is never walked (test-support never ships, same
+  # reasoning `aoide-cli`'s own manifest states for `aoide-test-support`).
+  # The manifests are read by regex, not a TOML parser, so where a form is not
+  # one it can read, the build fails naming the line or table instead of
+  # walking past it: a path entry in a walked dependency table, before a walked
+  # crate's first header, or in the root outside the single-line
+  # `{ path = "crates/<dir>" }` map form; a dependency written as a root key
+  # (`dependencies.<name>`, `target = { ... }`) rather than under a header; a
+  # dotted table (`[dependencies.<name>]` and its build and target forms, or
+  # `[workspace.dependencies.<name>]`); a renamed mapped crate; and a mapped
+  # name not written as the single-line `{ workspace = true }`.
   #
-  # Two assertions. First, the closure must not contain `strillix-rice`,
-  # `aoide-screen`, or `strillix` — a directory denylist would pass this
-  # while core silently grew an `strillix-rice` dependency and inherited its
-  # nix-eval transitively; deriving the closure is what catches that.
-  # Second, no closure crate's `src/` shells out to nix: a quoted `"nix"` /
-  # `"nix-<word>"` literal, or a quoted string naming `nixos-rebuild` or
-  # `nix eval|build|flake|develop|run|shell|store|copy`, on a line that also
-  # spawns a process (`Command::new(`/`.arg(`/`.args(`) — gated on the
-  # process-spawn call so a `--help` summary that merely mentions `nix flake
-  # check`, or a test fixture mocking a `"sudo nixos-rebuild switch"`
-  # activity label, is prose/data rather than a violation.
+  # Two assertions. First, the closure must not reach `crates/strillix-rice`,
+  # `crates/screen` (package `aoide-screen`) or `crates/strillix`; the walk
+  # keys crates by directory, so the message names each one with the closure
+  # path that reached it. Second, no closure crate's `src/` shells out to nix:
+  # a quoted `"nix"` / `"nix-<word>"` literal, or a quoted string naming
+  # `nixos-rebuild` or `nix eval|build|flake|develop|run|shell|store|copy`, on
+  # a line that also spawns a process (`Command::new(`/`.arg(`/`.args(`) —
+  # gated on the process-spawn call so a `--help` summary that merely mentions
+  # `nix flake check`, or a test fixture mocking a `"sudo nixos-rebuild
+  # switch"` activity label, is prose/data rather than a violation.
   nixIndependence =
     src:
     let
@@ -649,55 +654,90 @@ let
             return $t;
         }
 
-        # Full-line TOML comments (first non-whitespace char '#') stripped
-        # before any aoide-* scanning below: both the workspace manifest and
-        # every crate manifest carry long prose comments naming
-        # strillix-rice/aoide-screen/strillix that are not dependency edges.
-        sub strip_comment_lines {
+        # Every table of a manifest as [name, [body lines]], in file order.
+        # The first entry has the empty name and holds the lines before the
+        # first header. A header is a line holding only [name] or [[name]] and
+        # an optional comment; its name loses blanks and quotes, so
+        # `[ dependencies ]` is `dependencies`. A body runs to the next header.
+        sub tables {
             my ($text) = @_;
-            return join "\n", grep { !/^\s*#/ } split /\n/, $text, -1;
+            my @out = (["", []]);
+            for my $line (split /\n/, $text, -1) {
+                if ($line =~ /^\s*\[\[?([^\[\]]+)\]\]?\s*(?:#.*)?$/) {
+                    (my $name = $1) =~ s/[\s"']+//g;
+                    push @out, [ $name, [] ];
+                } else {
+                    push @{ $out[-1][1] }, $line;
+                }
+            }
+            return @out;
         }
 
-        # One [section] block: from its header line to the next top-level
-        # [..] header or EOF.
-        sub section {
-            my ($text, $name) = @_;
-            my @lines = split /\n/, $text, -1;
-            my $start;
-            for my $i (0 .. $#lines) {
-                if ($lines[$i] =~ /^\[\Q$name\E\]\s*$/) { $start = $i + 1; last; }
-            }
-            return "" unless defined $start;
-            my @out;
-            for my $i ($start .. $#lines) {
-                last if $lines[$i] =~ /^\[/;
-                push @out, $lines[$i];
-            }
-            return join "\n", @out;
+        # The lines of a body that can hold an entry: not blank, and not a
+        # full-line TOML comment (the manifests carry prose comments naming
+        # these crates).
+        sub entries {
+            my ($body) = @_;
+            return grep { /\S/ && !/^\s*#/ } @$body;
         }
 
-        # ── 1. workspace.dependencies: aoide-* name -> crates/ directory ────
-        my $ws_text = read_file($ws_toml);
-        my $ws_deps = strip_comment_lines(section($ws_text, "workspace.dependencies"));
+        # [dependencies] and [build-dependencies], plain or under
+        # [target.<cfg>.]. The dev tables are never read: test-support never
+        # ships.
+        sub is_dep_table { return $_[0] =~ /^(?:target\..+\.)?(?:build-)?dependencies$/ }
 
+        # A dependency written as its own table: [dependencies.<name>] and its
+        # forms. Its entry is not a line of a table this check reads: it fails.
+        sub is_dotted_dep { return $_[0] =~ /^(?:target\..+\.)?(?:build-)?dependencies\..+$/ }
+
+        # A path entry, whatever the key's spelling: `path =`, `"path" =`,
+        # `x.path =`. A key that only ends in -path (`json-path = "0.7"`) is a
+        # crate name.
+        sub is_path_entry { return $_[0] =~ /(?<![\w-])path["']?\s*=/ }
+
+        # A dependency written as a root key, outside every table header:
+        # `dependencies.<n>`, `dependencies = { ... }`, `target = { ... }` and
+        # the build forms. Cargo reads each as the table it spells, so it is
+        # refused rather than skipped.
+        sub is_root_dep_key {
+            my ($line) = @_;
+            my ($key) = $line =~ /^\s*([^=]+?)\s*=/ or return 0;
+            (my $n = $key) =~ s/[\s"']+//g;
+            return $n =~ /^(?:target|dependencies|build-dependencies)(?:\.|$)/ ? 1 : 0;
+        }
+
+        # ── 1. the map: name -> crates/<dir>, from the root's path entries ──
+        # Each is one line, `{ path = "crates/<dir>" }`, under
+        # [workspace.dependencies].
         my %dir_of;
-        my @ws_ambiguous;
-        for my $line (split /\n/, $ws_deps) {
-            next unless $line =~ /aoide-/;
-            if ($line =~ /^(aoide-[\w-]+)\s*=\s*\{\s*path\s*=\s*"crates\/([\w-]+)"\s*\}\s*$/) {
-                $dir_of{$1} = $2;
-            } else {
-                push @ws_ambiguous, $line;
+        my $ws_seen = 0;
+        my @ws_bad;
+        for my $t (tables(read_file($ws_toml))) {
+            my ($name, $body) = @$t;
+            die "aoide check nix-independence FAILED: $ws_toml has the table [$name], which this "
+              . "check cannot read (write the entry under [workspace.dependencies])\n"
+              if $name =~ /^workspace\.dependencies\..+$/;
+            $ws_seen = 1 if $name eq "workspace.dependencies";
+            for my $line (entries($body)) {
+                next unless is_path_entry($line);
+                if ($name eq "workspace.dependencies"
+                    && $line =~ /^\s*([\w-]+)\s*=\s*\{\s*path\s*=\s*"crates\/([\w-]+)"\s*\}\s*$/) {
+                    $dir_of{$1} = $2;
+                } else {
+                    push @ws_bad, $line;
+                }
             }
         }
-        if (@ws_ambiguous) {
-            die "aoide check nix-independence FAILED: workspace.dependencies has an aoide-* "
-              . "entry this check cannot parse as a single-line { path = \"crates/...\" }:\n"
-              . join("\n", @ws_ambiguous) . "\n";
-        }
+        die "aoide check nix-independence FAILED: $ws_toml has no [workspace.dependencies] table\n"
+          unless $ws_seen;
+        die "aoide check nix-independence FAILED: $ws_toml has a path entry this check cannot parse "
+          . "as a single-line { path = \"crates/<dir>\" } under [workspace.dependencies]:\n"
+          . join("\n", @ws_bad) . "\n"
+          if @ws_bad;
 
-        # ── 2. walk [dependencies] + [build-dependencies] from crates/cli,
-        # never [dev-dependencies] (test-support never ships) ───────────────
+        # ── 2. the closure: from crates/cli, walk each dependency table
+        # of the kinds above, following every entry that names a mapped
+        # crate; a path entry or a dotted table fails ──
         my %visited = (cli => 1);
         my %parent;
         my @queue = ("cli");
@@ -707,26 +747,35 @@ let
             my $toml = "$root/$dir/Cargo.toml";
             die "aoide check nix-independence FAILED: no $toml (closure walk reached "
               . "an unresolved crate)\n" unless -f $toml;
-            my $text = read_file($toml);
-            for my $sect ("dependencies", "build-dependencies") {
-                my $block = strip_comment_lines(section($text, $sect));
-                for my $line (split /\n/, $block) {
-                    next unless $line =~ /aoide-/;
-                    if ($line =~ /^(aoide-[\w-]+)\s*=\s*\{\s*workspace\s*=\s*true\s*\}\s*$/) {
-                        my $name = $1;
-                        my $child = $dir_of{$name};
-                        die "aoide check nix-independence FAILED: $toml [$sect] depends on "
-                          . "$name, which workspace.dependencies never maps to a crates/ "
-                          . "directory\n" unless defined $child;
-                        unless ($visited{$child}) {
-                            $visited{$child} = 1;
-                            $parent{$child} = $dir;
-                            push @queue, $child;
-                        }
-                    } else {
-                        die "aoide check nix-independence FAILED: $toml [$sect] has an "
-                          . "aoide-* entry this check cannot parse as a single-line "
-                          . "{ workspace = true }:\n$line\n";
+            for my $t (tables(read_file($toml))) {
+                my ($name, $body) = @$t;
+                die "aoide check nix-independence FAILED: $toml has the table [$name], which this "
+                  . "check cannot read (write each dependency as a line of [dependencies])\n"
+                  if is_dotted_dep($name);
+                if ($name eq "") {
+                    my @bad = grep { is_path_entry($_) || is_root_dep_key($_) } entries($body);
+                    die "aoide check nix-independence FAILED: $toml has a dependency or path entry "
+                      . "outside every table (before its first header):\n" . join("\n", @bad) . "\n"
+                      if @bad;
+                }
+                next unless is_dep_table($name);
+                for my $line (entries($body)) {
+                    die "aoide check nix-independence FAILED: $toml [$name] has a path dependency "
+                      . "the workspace.dependencies map cannot see:\n$line\n"
+                      if is_path_entry($line);
+                    die "aoide check nix-independence FAILED: $toml [$name] renames a mapped crate, "
+                      . "which this check cannot follow:\n$line\n"
+                      if $line =~ /(?<![\w-])package["']?\s*=\s*["']([\w-]+)["']/ && exists $dir_of{$1};
+                    my ($q, $key) = $line =~ /^\s*(["']?)([\w-]+)\1\s*[.=]/ or next;
+                    next unless exists $dir_of{$key};
+                    die "aoide check nix-independence FAILED: $toml [$name] has an entry this check "
+                      . "cannot parse as a single-line { workspace = true }:\n$line\n"
+                      unless $line =~ /^\s*\Q$q$key$q\E\s*=\s*\{\s*workspace\s*=\s*true\s*\}\s*$/;
+                    my $child = $dir_of{$key};
+                    unless ($visited{$child}) {
+                        $visited{$child} = 1;
+                        $parent{$child} = $dir;
+                        push @queue, $child;
                     }
                 }
             }
@@ -741,11 +790,11 @@ let
             return join(" -> ", @chain);
         }
 
-        # ── Assertion 1: the P-A5 boundary ──────────────────────────────────
-        my @forbidden = grep { $visited{$_} } ("rice", "screen", "strillix");
+        # ── Assertion 1: the P-A5 boundary, by crates/ directory ──────
+        my @forbidden = grep { $visited{$_} } ("strillix-rice", "screen", "strillix");
         if (@forbidden) {
             die "aoide check nix-independence FAILED: core closure reaches "
-              . join(", ", map { "aoide-$_ (" . closure_path($_) . ")" } @forbidden)
+              . join(", ", map { "crates/$_ (" . closure_path($_) . ")" } @forbidden)
               . " — the P-A5 split is broken\n";
         }
 

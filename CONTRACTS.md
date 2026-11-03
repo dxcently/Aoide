@@ -1058,11 +1058,13 @@ count.
   is nix-independent (cargo build, no nix shell-outs) — see the HARD
   CONSTRAINT note in the binary-split plan; the secrets broker holds to
   the same constraint (plain unix socket + shell-outs, no nix eval). Held
-  by the `nix-independence` flake check (`lib/checks.nix`), which derives
-  core's crate closure from `pkgs/aoide/Cargo.toml` and asserts it never
-  reaches `strillix-rice`/`aoide-screen`/`strillix` and never shells out to
-  nix. `config`/`config set`, appended newest, task #135 P-C — the portable
-  runtime config file (`$AOIDE_ROOT/config.toml`, `aoide_storage::config`),
+  by the `nix-independence` flake check (`lib/checks.nix`), which walks
+  core's crate closure from `crates/cli` through every path crate,
+  target dependency tables included, and asserts that it never reaches
+  the three Strillix-side crates (`strillix-rice`, `aoide-screen`,
+  `strillix`) and never shells out to nix. `config`/`config set`,
+  appended newest, task #135 P-C — the portable runtime config file
+  (`$AOIDE_ROOT/config.toml`, `aoide_storage::config`),
   the direct consequence of that same portability constraint: a CORE
   command's configuration cannot live in a NixOS option, because on a
   non-nix host that option does not exist and "rebuild to change a grant"
