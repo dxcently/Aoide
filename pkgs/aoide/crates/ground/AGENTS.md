@@ -13,9 +13,11 @@ are in README.md.
   edge from this crate to a crate on either side, `[dev-dependencies]`
   included. Comments and `*.md` files are not counted, so keep them neutral by
   review: say "the daemon" or "the secrets crate", not a product's name or an
-  `aoide_*` path. A fixture takes `ground` for the product word
-  (`ground-peercred-{pid}`, `GROUND_COMMON_DIR_WT`). A test helper is written
-  in this crate and never taken from `aoide-test-support`.
+  `aoide_*` path. The README and this file are the exception: they name the
+  crates that link ground (`aoide-protocol`, `aoide-storage`) and the one a
+  test must not use (`aoide-test-support`). A fixture takes `ground` for the
+  product word (`ground-peercred-{pid}`, `GROUND_COMMON_DIR_WT`). A test helper
+  is written in this crate and never taken from `aoide-test-support`.
 - **A moved item is one item at both paths.** `aoide-protocol` and
   `aoide-storage` re-export a module (`pub use ground::<module>`) or an item
   (`pub use ground::host_name::os_hostname`), under the `cfg` the module has

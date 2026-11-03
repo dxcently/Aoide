@@ -4,9 +4,9 @@ The host seams that name neither product: the local socket, peer credentials,
 OS randomness and the stored-command shell, the git probes, time formatting,
 the host name, the runtime root and the SHA-256 and hex helpers, and, on
 Windows, the process table, the `AF_UNIX` socket and the owner-only policy.
-The crate is a leaf. It names neither product, and it depends on no workspace
-crate: the `boundary` check holds both lines. `aoide-protocol` and
-`aoide-storage` link it and re-export every module at its old path
+The crate is a leaf. No code line in it names either product, and it depends
+on no workspace crate: the `boundary` check holds both lines. `aoide-protocol`
+and `aoide-storage` link it and re-export every module at its old path
 (`pub use ground::<module>`), so `aoide_protocol::peercred::peer_cred` and
 `aoide_storage::git::common_dir` name the same items they always did.
 
