@@ -86,7 +86,7 @@ routed through the desktop, not through `aoided`'s CLI trunk).
                                         ▼            │
    ┌─────────────────────────────────────────────────────────────┐
    │  AGENT INTERFACE            aoide <cmd>   ·   aoide mcp serve │   [[Agent-Interface]]
-   │  ONE schema (aoide schema --json) ──► CLI trunk + MCP façade  │   81 commands · exit 0/1/2/64
+   │  ONE schema (aoide schema --json) ──► CLI trunk + MCP façade  │   exit 0/1/2/64
    └───────────────────────────────┬─────────────────────────────┘
                                     ▼
    ┌─────────────────────────────────────────────────────────────┐
@@ -311,59 +311,54 @@ This is shipped code, now two binaries, per-binary schema
 conducting orchestration is `aoide`'s identity, painting is `strillix`'s:
 
 - **`aoide`/`aoided`** ([[aoide-cli]], [[aoided]]) — the orchestration core.
-  `aoide schema --json` is its machine-readable source of truth; the stdio
-  MCP façade (`aoide mcp serve --stdio`) generates its tool list from it, and
-  the [[A2A-Door]]'s AgentCard is derived from the same schema — all
-  one-to-one. **81 commands** — real (74): `guide`, `schema`,
-  `mcp serve`, `daemon`, `events tail`, `conduct`, `conductor`, `adapter
-  melete`, `identity`, `pair`/`pair reject`/`pair watch` (the whole
-  pairing ceremony behind one smart verb, bare `pair` the interactive
-  pending listing — [[Pairing-Ceremony]]), `mesh`/`mesh pair` (the declared
-  mesh: the read reports where a `[mesh.<name>]` declaration and the live
-  node registry diverge, the converge closes that divergence by driving the
-  same pairing ceremony over every declared node with no verified record —
-  [[Doors-and-Nodes]]), the `melete` group
-  (`status`/`graph`/`call` — the
-  Melete MCP client), the
-  1-command `a2a` door group (`a2a serve` — the outbound client is the `node`
-  group below, not a separate `a2a agent` family),
-  the 10-command `node` group (`node add/remove/pull/status/hub`,
-  `node allow`/`spawn`, the LAN `node discover` listener with its
-  `node advertise on|off` switch, and `node list`, the
-  one-glance mesh roster — cross-device node federation,
-  [[Node-Federation]]; `node status --json` keeps the deep per-node row
-  the roster never duplicates — the pairing ceremony that mints these
-  records lives under `pair`, above), the 17-command `secrets` group
-  (`serve`/`exec`/`add`/`rm`/`grant`/`revoke`/`enroll`/`put`/`set-totp`/
-  `automate`/`expose`/`allow-remote-origin`/`migrate`/`pending`/`approve`/`dismiss`/`watch` — the
+  `aoide schema --json` is its machine-readable source of truth; the stdio MCP
+  façade (`aoide mcp serve --stdio`) generates its tool list from it, and the
+  [[A2A-Door]]'s AgentCard is derived from the same schema — all one-to-one.
+  Among its real commands: `guide`, `schema`, `mcp serve`, `daemon`,
+  `events tail`, `conduct`, `conductor`, `adapter melete`, `identity`, `pair`/
+  `pair reject`/`pair watch` (the whole pairing ceremony behind one smart
+  verb, bare `pair` the interactive pending listing — [[Pairing-Ceremony]]),
+  `mesh`/`mesh pair` (the declared mesh: the read reports where a
+  `[mesh.<name>]` declaration and the live node registry diverge, the converge
+  closes that divergence by driving the same pairing ceremony over every
+  declared node with no verified record — [[Doors-and-Nodes]]), the `melete`
+  group (`status`/`graph`/`call` — the Melete MCP client), the `a2a` door
+  group (`a2a serve` — the outbound client is the `node` group below, not a
+  separate `a2a agent` family), the `node` group
+  (`node add/remove/pull/status/hub`, `node allow`/`spawn`, the LAN
+  `node discover` listener with its `node advertise on|off` switch, and
+  `node list`, the one-glance mesh roster — cross-device node federation,
+  [[Node-Federation]]; `node status --json` keeps the deep per-node row the
+  roster never duplicates — the pairing ceremony that mints these records
+  lives under `pair`, above), the `secrets` group (`serve`/`exec`/`add`/`rm`/
+  `grant`/`revoke`/`enroll`/`put`/`set-totp`/`automate`/`expose`/
+  `allow-remote-origin`/`migrate`/`pending`/`approve`/`dismiss`/`watch` — the
   socket-only credential broker under its own uid, [[Secrets-Broker]]),
   `usage`, `hooks install`, `soundcheck`, `config`/`config set` (the portable
-  runtime config file, `$AOIDE_ROOT/config.toml`), the 3-command `inbox` group (`list`/`read`/`clear`, the
-  durable per-host message store), the 20-command graph/session/project
-  surface (the [[Session-Graph]] DAG viewer + management layer over projects
-  and sessions — bare `graph`/`graph link` the read/analysis lens,
+  runtime config file, `$AOIDE_ROOT/config.toml`), the `inbox` group (`list`/
+  `read`/`clear`, the durable per-host message store), the graph/session/
+  project surface (the [[Session-Graph]] DAG viewer + management layer over
+  projects and sessions — bare `graph`/`graph link` the read/analysis lens,
   `project add/remove/list`, the `session` family
   (`start/phase/end/hook/grant/permit/pending list|approve|deny/prune/reap` —
   `session grant` carries both the `undying` picker and the reaper `exempt`)
   plus bare `session` (the roster listing over this box's sessions and every
-  registered node, which absorbed `who`), and bare `send`/`spawn`/
-  `resurrect` (bare `resurrect` also walks up to a `.aoide/project.json`
-  manifest — [[Session-Graph]]), all real — registering a new
-  conducted session is `conduct` or `spawn`, and jumping to a
-  session's window is a library call the conductor and `shellbridge` reach
-  directly, not a CLI subcommand), and `onboard` — the
-  core half of installation: registers the clone as a graph project, wires the
-  agent harnesses (an interactive pick over `hooks install`, or `--harness
-  a,b`/`--yes` non-interactive), and prints the guide. The desktop half —
-  seeding `rices/preferences.md`, linking `~/rice` to the checkout's `rice/`
-  (never clobbering an existing file or symlink) and the nix half — is
-  `strillix onboard`'s, run after it. Interactive
-  prompts CLI-wide (picker, y/N confirms, hidden input) ride `inquire`
-  behind seams in `crates/protocol/src/pick.rs`; piped/non-tty behavior is
-  unchanged. Stubs (7, exit 64):
-  the 5-command `content` group (`register`/`propose`/`ingest`/`query`/
-  `approve`), `make`, `update`. Core is nix-independent: cargo
-  build, zero nix shell-outs.
+  registered node, which absorbed `who`), and bare `send`/`spawn`/`resurrect`
+  (bare `resurrect` also walks up to a `.aoide/project.json` manifest —
+  [[Session-Graph]]), all real — registering a new conducted session is
+  `conduct` or `spawn`, and jumping to a session's window is a library call
+  the conductor and `shellbridge` reach directly, not a CLI subcommand), and
+  `onboard` — the core half of installation: registers the clone as a graph
+  project, wires the agent harnesses (an interactive pick over
+  `hooks install`, or `--harness a,b`/`--yes` non-interactive), and prints the
+  guide. The desktop half — seeding `rices/preferences.md`, linking `~/rice`
+  to the checkout's `rice/` (never clobbering an existing file or symlink) and
+  the nix half — is `strillix onboard`'s, run after it. Interactive prompts
+  CLI-wide (picker, y/N confirms, hidden input) ride `inquire` behind seams in
+  `crates/protocol/src/pick.rs`; piped/non-tty behavior is unchanged. Stubs
+  (exit 64): the `content` group (`register`/`propose`/`ingest`/`query`/
+  `approve`), `make`, `update`. Core is nix-independent: cargo build, zero nix
+  shell-outs.
 - **`strillix`** — the Strillix paint binary. `strx schema --json` holds the rest of the surface: the same `guide`/`schema`/`mcp serve` trio as their
   `aoide` spellings, over strillix's own registry; the `rice` group
   (`lint`, `stage`, `compose`, the 3-command `rice draft` group, the

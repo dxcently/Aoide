@@ -382,10 +382,9 @@ mod tests {
         // machine but the operator's own performs: one operator key, or one
         // LAN ceremony) — reached 88.
         //
-        // **The running total above is the CHAIN's history, not this list's
-        // **The vec below holds 127 paths** (counted, review F7). This line is
-        // the authority for how many; the chain above is the history of how it
-        // got there and is never the answer.
+        // The running total above is the chain's history and never this
+        // list's size: the vec below is the only authority for which paths
+        // exist.
         let mut expected: Vec<&str> = vec![
             "a2a.serve",
             "adapter.melete",

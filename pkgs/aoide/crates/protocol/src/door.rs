@@ -963,7 +963,7 @@ mod tests {
     /// `commands::all()` — protocol cannot depend on the domain crates that
     /// register the real command tree, so these tests exercise the parser's
     /// own logic (greedy match, flags, `--help`) against a minimal tree
-    /// rather than the golden 87/41 paths (those are covered by the cli/strillix
+    /// rather than the golden paths (those are covered by the cli/strillix
     /// crates' own tests, which call through to this same code).
     fn test_registry() -> Registry {
         let mut r = Registry::new();

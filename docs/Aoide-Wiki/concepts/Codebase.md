@@ -359,7 +359,7 @@ workspace-wide run deadlocks on this machine. Each crate carries its own
 80 paths; `strillix`: 48), plus schema validity, exit-code, and MCP
 tool-list-parity tests; the conduct crate's graph domain
 (`crates/conduct/src/graph/{model,doc,common,commands,window,session_store,
-conduct,send}.rs`) carries handlers for all 20 commands the bare `graph`
+conduct,send}.rs`) carries handlers for the bare `graph`
 render, `graph link`, the `project`/`session` families, bare `session` (the
 roster — grouped by project, or by host under `--hosts`), and bare `send`/`spawn`/`resurrect` register into: cycle
 rejection, anchoring, a
@@ -384,7 +384,7 @@ append, user gate, default-deny event bus); shellbridge (atomic writer, seeded
 stage files, and a live socket accept loop — `focuswindow`); the melete-adapter skeleton (env-driven
 subscription, metadata-only notification boundary); all four theme emitters; the
 QML shell skeleton; the baked Stylix and compositor fan-outs; and the whole
-graph/session/project surface — 20 commands (bare `graph`, `graph link`,
+graph/session/project surface (bare `graph`, `graph link`,
 `project add/remove/list`, `session start/phase/end/hook/grant/permit/
 pending list/approve/deny/prune/reap`, bare `session` (the roster),
 bare `send`/`spawn`/`resurrect`),
