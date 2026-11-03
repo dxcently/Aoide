@@ -157,7 +157,8 @@ pkgs/aoide/
 
 | crate | charter | maps-from (today) | status |
 |---|---|---|---|
-| **protocol** | The single contract: registry, schema doc, `Outcome` envelope + exit codes, `canonical_state`, `Door`, audit event classes, the `feed` primitives (`FeedWriter`/`Follower` — the append-only JSON-lines event-feed spine, same cross-cutting shape as `audit`), the A2A-JSON-RPC / MCP wire types, and the `cmd!`/`arg!`/`flag!` registration macros. Every door depends on it; it depends on nothing aoide-specific. | `registry.rs`, `output.rs`, `daemon.rs`(Door/audit), a2a/mcp wire types, `CONTRACTS.md`, `commands/meta.rs`(schema) | landed (Phase 2); macros + `audit_log_path` folded in (Phase 9) |
+| **protocol** | The single contract: registry, schema doc, `Outcome` envelope + exit codes, `canonical_state`, `Door`, audit event classes, the `feed` primitives (`FeedWriter`/`Follower` — the append-only JSON-lines event-feed spine, same cross-cutting shape as `audit`), the A2A-JSON-RPC / MCP wire types, and the `cmd!`/`arg!`/`flag!` registration macros. Every door depends on it; it has no workspace dependency but `ground`. | `registry.rs`, `output.rs`, `daemon.rs`(Door/audit), a2a/mcp wire types, `CONTRACTS.md`, `commands/meta.rs`(schema) | landed (Phase 2); macros + `audit_log_path` folded in (Phase 9) |
+| **ground** | The neutral host seams: the process table, local sockets, peer credentials, OS randomness, the stored-command shell and the Windows owner-only policy. Names neither Aoide nor Strillix and depends on no workspace crate. `protocol` links it and re-exports each module at its old path. | `protocol`'s `host_shell`, `host_random`, `local_socket`, `peercred` and (Windows) `owner_only`, `win_proc`, `win_unix` | landed; transitional (the old paths stay until callers import `ground`) |
 | **conduct** | The session core: PTY-backed `conduct` wrap, the session DAG, hook ingestion, liveness reaping — plus its CLI commands (`graph *`, `conduct`, `hooks install`). Makes every terminal a tracked, conductable session. | `graph/` (conduct·send·model·doc·window·manage·common), `shellbridge.rs`, `reap.rs`, `commands/graph.rs`, `commands/hooks.rs` | landed (Phase 3b); commands landed (Phase 9) |
 | **server** | `aoided` and the door serve-loops: MCP-over-stdio, A2A JSON-RPC/HTTP/SSE, listeners, sessions, snapshots, the audit sink — plus its CLI commands (`daemon`, `shellbridge`, `a2a serve`). Untrusted input stops here. | `daemon.rs`, `mcp.rs`, `a2a.rs`(serve half), `commands/infra.rs`(server half), `commands/a2a.rs`(serve command) | landed (Phase 4c); commands landed (Phase 9) |
 | **client** | Outbound: the A2A client half (card fetch, signed `message/send` to nodes), the melete adapter (neutral-event consumer), LAN discovery — plus its CLI commands (`node *`, `adapter melete`). Drives node aoides and speaks to `aoided`. | `wire.rs`(A2A client half), `node.rs`, `adapter.rs`, `discover.rs`, `commands.rs`(node commands, adapter command) | landed (Phase 4b); commands landed (Phase 9) |
@@ -337,7 +338,7 @@ The mapping above is the crate split; this is a narrower, later question it
 doesn't answer on its own — how many *binaries* the crates assemble into.
 **Two.** The reasoning is recorded here so that the code keeps to it.
 
-Core keeps `aoide`/`aoided` over `protocol` · `storage` · `client` ·
+Core keeps `aoide`/`aoided` over `ground` · `protocol` · `storage` · `client` ·
 `conduct` · `server` · `secrets` · `conductor` · `upkeep` · `cli`. A second binary —
 **`strillix`** (crate `strillix`, `crates/strillix`) — owns the
 rice/draft/mode/wallpaper/theme/quickshell/screen/shellbridge/notifications command
@@ -349,7 +350,8 @@ surface: everything that paints, or that only a desktop needs.
   `terpsichore` (spends a muse name on a binary — the wrong tier — and at
   12 characters is a poor CLI command prefix); `strillix-rice` (mislabels the
   ~40% of the surface — screen, shellbridge, notifications, quickshell — that
-  isn't rice at all).
+  isn't rice at all). A neutral crate (`ground`) takes no product prefix: it
+  names neither system.
 - **`conductor` stays core.** It is the messaging/orchestration surface a
   headless box needs most, not a painting tool: pure Rust (ratatui), no
   system-closure weight, and conducting orchestration is Aoide's core

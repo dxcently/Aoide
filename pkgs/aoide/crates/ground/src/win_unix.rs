@@ -212,7 +212,7 @@ pub struct UnixStream {
 /// attaching it).
 fn unique_rendezvous_name(tag: &str) -> String {
     static SEQ: AtomicU64 = AtomicU64::new(0);
-    format!("aoide-{tag}-{}-{}", std::process::id(), SEQ.fetch_add(1, Ordering::Relaxed))
+    format!("afunix-{tag}-{}-{}", std::process::id(), SEQ.fetch_add(1, Ordering::Relaxed))
 }
 
 impl UnixStream {
@@ -323,7 +323,7 @@ impl UnixStream {
     }
 
     /// [`pair_in`] at a directory of this function's own choosing, unique per
-    /// CALL (`aoide-pair-<pid>-<seq>`, never a pid-keyed name two parallel
+    /// CALL (`afunix-pair-<pid>-<seq>`, never a pid-keyed name two parallel
     /// callers would share — see [`unique_rendezvous_name`]) and removed again
     /// on the way out: a directory this function invented is its own litter,
     /// not a caller's.
@@ -1006,7 +1006,7 @@ mod tests {
     fn scratch(name: &str) -> PathBuf {
         static SEQ: AtomicU64 = AtomicU64::new(0);
         let dir = std::env::temp_dir().join(format!(
-            "aoide-winunix-{}-{}-{}",
+            "ground-winunix-{}-{}-{}",
             name,
             std::process::id(),
             SEQ.fetch_add(1, Ordering::Relaxed)

@@ -9,8 +9,9 @@ are in README.md.
   `disallowed_types`. Every other member takes the workspace table, which
   forbids the three, so this is the one crate of this workspace where `unsafe`,
   a process start or a signal can appear. Its path dependency aoide-protocol
-  starts processes too (its dialog and host shell do), outside this workspace's
-  lints; door and shell reach it only through exec's `untrusted` re-export.
+  starts processes too (its dialog does, and so does the host shell it
+  re-exports from `ground`), outside this workspace's lints; door and shell
+  reach it only through exec's `untrusted` re-export.
 - Every file this crate compiles lies inside that boundary. The gate holds the
   crate to one source file, `src/lib.rs`: cargo makes a target of any `.rs`
   file under `src/bin`, `tests`, `examples` or `benches`, and this table allows

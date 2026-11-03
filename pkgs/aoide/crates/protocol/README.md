@@ -2,8 +2,9 @@
 
 The single contract every door depends on: "one schema, N doors"
 (`docs/architecture/PACKAGE-LAYOUT.md`, CONTRACTS.md §3) is structural here,
-not conventional. Zero aoide-specific dependencies — the DAG leaf every
-other crate in this workspace sits above.
+not conventional. Its one workspace dependency is `ground`, the neutral host
+crate; beyond that no `aoide-*` crate sits beneath it, and every other
+`aoide-*` crate sits above.
 
 ## Named seams (what it exposes)
 
@@ -83,10 +84,11 @@ other crate in this workspace sits above.
   `aoide-conduct`'s graph views (re-exported as `graph::clean_line`), and
   `aoide-server`'s A2A door.
 - `invocation` — `Invocation`, the parsed call handed to a dispatcher.
-- `local_socket` — `connect_bounded`, a unix connect that cannot hang: a full
-  listen backlog, which makes a bare `UnixStream::connect` wait forever, times
-  out instead. The socket is close-on-exec, as `UnixStream::connect` makes it.
-  On Windows it is `win_unix`'s `connect_timeout`.
+- `host_shell`, `host_random`, `local_socket`, `peercred` and, on Windows,
+  `owner_only`, `win_proc` and `win_unix` — the host seams, re-exported from
+  `ground` (`pub use ground::<module>`), so every `aoide_protocol::<module>`
+  path still resolves. What each holds, and what an edit there must keep, is
+  in `crates/ground`.
 - `output` — `Outcome` + exit codes, the generic envelope every command
   returns; also the taught-error shape (`Outcome::refuse`, `Kind`, `Fix`,
   `io_cause`/`serde_cause`) and the text render of `why`/`fix` and of an
@@ -176,40 +178,6 @@ other crate in this workspace sits above.
   `PathIdentity`, because the identity question is not this module's alone:
   `agents`'s eidolon reader asks it about a journal whose cached cursor must
   never survive a replacement at the same path.
-- `owner_only` (Windows only) — the owner-only policy a native-Windows core
-  attaches to a private file or directory: an explicit, `SE_DACL_PROTECTED`,
-  single-ACE DACL for the current token user, attached AT creation and read
-  back before the first payload byte BY BOTH CONSUMERS (the feed on the
-  handle it just created, `aoide-storage`'s private temp by path), with a
-  reparse point refused as itself and a `chmod` stand-in
-  (`set_dir_access`, owner pinned) plus one idempotent `ensure_private_dir`
-  that refuses a symbolic link or junction by name. Two consumers, one
-  implementation (`AGENTS.md`: no cross-crate copying): `feed`'s Windows
-  writer and `aoide-storage`'s private-write / private-directory half.
-- `host_shell` — the ONE place a stored command LINE is handed to this
-  host's own interpreter: `sh -c` on Unix, `cmd /C` on native Windows with
-  the line handed over VERBATIM (`CommandExt::raw_arg` — `cmd` is not a
-  `CommandLineToArgvW` program and re-applies its own quote rules to `/C`'s
-  remainder, so MSVC-shaped quoting mangles a line carrying inner quotes).
-  Two consumers, one implementation: `aoide-secrets`' backend templates and
-  `aoide-upkeep`'s `verify_command`.
-- `host_random` — OS randomness, one contract per host: `/dev/urandom` on
-  Unix, CNG's `BCryptGenRandom` on native Windows. No pool, no seed, no
-  fallback: a host that cannot hand out OS randomness fails rather than
-  returning something weaker. Its one consumer is `aoide-secrets`'
-  enrollment.
-- `win_proc` (Windows only) — the process table `/proc` would answer, plus the
-  two acts `kill`/`waitpid` perform and the one fact the table does not carry:
-  one `Toolhelp32` snapshot (pid · parent · executable name), a creation-time
-  start time for the pid-reuse defence, the `kill(pid, 0)` liveness reading
-  with the same conservative verdicts, `terminate` (`TerminateProcess` — the
-  only primitive that host has), `wait_for_exit` (`WaitForSingleObject`, whose
-  three verdicts map onto `waitpid`'s), and `command_argv`
-  (`NtQueryInformationProcess(ProcessCommandLineInformation)` + this host's own
-  `CommandLineToArgvW`, for callers that must know WHAT a pid is running before
-  signalling it). Its callers are `aoide-storage::attest`'s ancestry walk,
-  `aoide-storage::fs`'s process acts, `aoide-client::tunnel`'s recycled-pid
-  guard and `dialog::probe_locker_running`.
 - `dialog` — the code-entry dialog substrate: `DialogResult` (a dialog
   child's outcome — approved/dismissed/cancelled/cancelled-externally/
   spawn-error/infra-failure) and `run_entry_dialog` (the generic
@@ -336,14 +304,8 @@ other crate in this workspace sits above.
   (crates.io, minimal `crossterm`-only feature set) is this crate's own
   dependency, and stays that way — every other crate reaches these
   entry points through this seam, never `inquire` directly ("wrap, don't
-  scatter"; the DAG-leaf invariant below still holds, since `inquire` is
+  scatter"; the invariant in `AGENTS.md` still holds, since `inquire` is
   a third-party crate, not an `aoide-*` one).
-- `peercred` — the kernel-truth identity of a connected peer: `peer_cred`
-  (`SO_PEERCRED` on Linux/Android, the peer's token user on native Windows,
-  `None` elsewhere), the `PeerCred` it returns, the `PeerUser` a gate compares
-  (a uid on Unix, a SID on Windows, never one derived from the other), and
-  `own_user`, this process's side of the comparison. The one copy every
-  identity gate in the workspace reads through.
 - `shellbridge` — the socket framework every bridge socket runs: `run_on`
   binds and listens, `serve` accepts behind the cross-uid floor
   (`cross_uid_gate`), and each connection offers a line to the socket's
@@ -356,10 +318,10 @@ other crate in this workspace sits above.
 
 ## What it consumes
 
-Nothing aoide-specific. This is the one crate every other crate in the
-workspace (`storage`, `client`, `conduct`, `screen`, `server`, `rice`,
-`conductor`, `upkeep`, and both app crates) depends on, directly or
-transitively.
+`ground`, the neutral host crate, and nothing else aoide-specific. Beside
+`ground`, this is the one crate every other crate in the workspace (`storage`,
+`client`, `conduct`, `screen`, `server`, `rice`, `conductor`, `upkeep`, and
+both app crates) depends on, directly or transitively.
 
 ## How it composes
 

@@ -109,7 +109,7 @@ pub const DELIVERY_BUDGET: Duration = Duration::from_secs(10);
 /// bounded too. That read budget is the guarantee on either host: a non-blocking
 /// accepted socket would ignore `SO_RCVTIMEO`, so `win_unix::accept` clears the
 /// inherited flag best-effort and its `recv_into` honours the budget itself
-/// (the socket seam's own contract, `crates/protocol/src/win_unix.rs`).
+/// (the socket seam's own contract, `crates/ground/src/win_unix.rs`).
 pub fn accept_one(listener: &UnixListener, what: &str) -> UnixStream {
     listener.set_nonblocking(true).unwrap();
     let deadline = Instant::now() + DELIVERY_BUDGET;

@@ -3,7 +3,7 @@
 # lives at `crates/cli`, single-charter crates under `crates/*`.
 [workspace]
 resolver = "2"
-members = ["crates/protocol", "crates/storage", "crates/conduct", "crates/client", "crates/server", "crates/strillix-rice", "crates/conductor", "crates/test-support", "crates/cli", "crates/upkeep", "crates/screen", "crates/strillix", "crates/secrets", "crates/door"]
+members = ["crates/protocol", "crates/storage", "crates/conduct", "crates/client", "crates/server", "crates/strillix-rice", "crates/conductor", "crates/test-support", "crates/cli", "crates/upkeep", "crates/screen", "crates/strillix", "crates/secrets", "crates/door", "crates/ground"]
 
 # The one release-version source for the whole workspace (User-directed:
 # prebeta is 0.0.X, the patch bumps by one at the end of each completed
@@ -190,6 +190,11 @@ aoide-secrets = { path = "crates/secrets" }
 # by path. No external dependency of its own beyond the workspace's serde, serde_json
 # and libc.
 aoide-door = { path = "crates/door" }
+# `ground` — the neutral host seams: process table, local sockets, peer
+# credentials, randomness, shell, and the Windows owner-only policy. A leaf: it
+# names neither product and depends on no workspace crate. `aoide-protocol`
+# links it and re-exports every item at its old path.
+ground = { path = "crates/ground" }
 
 [profile.release]
 opt-level = "s"

@@ -2,9 +2,10 @@
 
 ## Invariants
 
-- **This crate stays the DAG leaf.** It must never gain a dependency on
-  another `aoide-*` crate — that would create a cycle back into a door this
-  crate is supposed to be beneath. If a type feels like it needs a
+- **This crate stays beneath every other `aoide-*` crate.** Its one workspace
+  dependency is `ground`, the neutral host crate; it must never gain a
+  dependency on another `aoide-*` crate — that would create a cycle back into
+  a door this crate is supposed to be beneath. If a type feels like it needs a
   domain-crate fact, the fact belongs in the caller, not here.
 - **A resume argv is typed by its id space (`ResumeArgs`).** `ById` takes
   the harness's own session id; `ByLog` takes the journal path a ledger
@@ -242,15 +243,6 @@
   unit that runs a popup sets; no crate in this workspace names a desktop
   binary to spawn, and the exit code every dialog child speaks is
   `DIALOG_INFRA_FAILURE_EXIT` (3), shared by zenity and every provider.
-- **A unix connect that must not hang goes through
-  `local_socket::connect_bounded`, never a bare `UnixStream::connect`.** A full
-  listen backlog makes the bare call wait forever. On Linux the socket
-  `connect_bounded` opens is close-on-exec from `socket(2)` on, so a child
-  spawned meanwhile never inherits it; elsewhere the flag is set just after
-  `socket(2)`, and a child spawned in that instant can. Its poll branch
-  (`EINPROGRESS`) has no test: a Linux unix connect never returns
-  `EINPROGRESS`, so only other unix targets reach that branch.
-
 - **The shellbridge loop is generic and has one floor.** `shellbridge::serve`
   refuses every connection whose peer is not this process's own user
   (`cross_uid_gate`, fail-closed on an unidentified peer) before it reads a
@@ -260,10 +252,6 @@
   core_front`); a desktop socket sets `front: None` and serves only its table.
   A `front` that claims a line answers it on the connection itself and returns
   `Flow::Answered` to end the connection, or `Flow::Next` to read on.
-- **There is one peer-credential implementation, here.** `peercred::peer_cred`,
-  `PeerCred`, `PeerUser` and `own_user` are not copied into a consumer. A
-  consumer that needs a display helper beside them (a username, a process
-  name) keeps that helper in its own crate and imports the identity types.
 
 ## Extension points
 
@@ -304,19 +292,10 @@
   primitive beside these two; the module's job stops at "one JSON object
   per line, capped, tailable," and a caller's own record shape and cap
   choice never leak back into it.
-- **A Windows seam another crate also needs is exposed from HERE, never
-  copied into it** (`pkgs/aoide/crates/AGENTS.md`: no cross-crate copying).
-  `owner_only` (the private file/directory policy), `win_proc` (the
-  process table) and `win_unix` (the `AF_UNIX` binding) exist because two or
-  more consumers need the same native implementation and this crate is the
-  leaf both already depend on — `aoide-storage` reaches them through the
-  module, never through a second `windows-sys` call sequence of its own. The
-  same rule covers the host-shaped seams that are NOT Windows-only:
-  `host_shell` (which interpreter runs a stored command line) and
-  `host_random` (this host's OS CSPRNG) each have two consumers and each
-  keeps ONE spelling per host, never a `cfg` in the consumer. The rule cuts
-  both ways: a new primitive with ONE consumer stays private to that
-  consumer.
+- **A host seam another crate also needs goes in `ground`, never in this
+  crate and never copied** (`pkgs/aoide/crates/AGENTS.md`: no cross-crate
+  copying). The rule, and its cut in both directions, is in
+  `crates/ground/AGENTS.md`.
 - **A new bridge socket is a `Socket` of verbs in its own binary.** It names
   its `log`, lists its `Verb`s and leaves `front: None`. A socket that needs a
   hook before its table is the core socket's pattern (`front: Some(...)`), and
@@ -330,7 +309,7 @@
 
 ## Docs update required in the same commit
 
-- This `README.md` when a public module or seam is added or removed — the Windows `owner_only`/`win_proc` entries are a module addition like any other.
+- This `README.md` when a public module or seam is added or removed.
 - `CONTRACTS.md` when a wire/schema shape changes.
 - `pkgs/aoide/crates/AGENTS.md` is the layer above for registry-order and
   golden-discipline invariants that apply to CONSUMERS of this crate's

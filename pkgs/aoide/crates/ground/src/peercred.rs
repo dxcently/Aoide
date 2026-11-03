@@ -218,7 +218,7 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn peer_cred_answers_on_a_connected_socket() {
-        let dir = std::env::temp_dir().join(format!("aoide-peercred-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("ground-peercred-{}", std::process::id()));
         crate::owner_only::ensure_private_dir(&dir).expect("private scratch dir");
         let path = dir.join("l.sock");
         let _ = std::fs::remove_file(&path);

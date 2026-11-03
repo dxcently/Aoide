@@ -9,32 +9,32 @@ pub mod help;
 /// The one place a stored command LINE is handed to this host's own
 /// interpreter (`sh -c`, or `cmd /C` on native Windows) — one seam for the
 /// two crates that run operator-authored command text.
-pub mod host_shell;
+pub use ground::host_shell;
 /// Random bytes from this host's own OS CSPRNG (`/dev/urandom`, or CNG's
 /// `BCryptGenRandom` on native Windows) — no pool, no fallback.
-pub mod host_random;
+pub use ground::host_random;
 pub mod invocation;
-pub mod local_socket;
+pub use ground::local_socket;
 pub mod model;
 /// The owner-only policy a native-Windows core attaches to a private file or
 /// directory — one implementation for `feed`'s writer and `aoide-storage`'s
 /// private-write half. Windows-only by construction: on Unix the same policy
 /// is the mode bits those callers already set.
 #[cfg(windows)]
-pub mod owner_only;
+pub use ground::owner_only;
 pub mod output;
 /// The native process table — snapshot, start time, liveness — for the two
 /// callers that need a fact Unix reads out of `/proc`. Windows-only: the Unix
 /// arm is `/proc` itself.
 #[cfg(windows)]
-pub mod win_proc;
+pub use ground::win_proc;
 /// The native local socket — an `AF_UNIX` listener and stream with the
 /// surface `std::os::unix::net` gives on Unix. Windows-only: the Unix arm is
 /// `std` itself.
 #[cfg(windows)]
-pub mod win_unix;
+pub use ground::win_unix;
 pub mod pick;
-pub mod peercred;
+pub use ground::peercred;
 pub mod policy;
 pub mod registry;
 /// The shellbridge socket framework: the loop every bridge socket runs, and its cross-uid floor.

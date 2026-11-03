@@ -378,7 +378,9 @@ See `tests/README.md` for why Rust's own tests do NOT live here.
   counts, per file, the lines one product's files spend on the other's name
   and every Cargo edge from a crate on one side to a crate on the other; a
   row the golden lacks or exceeds fails the build, and so does a golden row
-  whose crossing is gone, until `scan.pl tighten` shrinks the golden
+  whose crossing is gone, until `scan.pl tighten` shrinks the golden. A
+  neutral crate (`pkgs/aoide/crates/ground/`) may name neither product and
+  depend on no crate of either side, and has no golden row
   (`tests/boundary/README.md`).
 - `vm-boot` — headless NixOS boot of the whole stack (`tests/vm-boot.nix`).
 - `vm-lock-greeter` — the login screen and the screen lock on a graphical VM

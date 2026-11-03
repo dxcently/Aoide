@@ -174,10 +174,10 @@ by decision — no embedded database yet
   source what its target is. The private-file and private-directory policy is
   NOT answered here: `atomic_write_private`'s temp (a leftover of its name is
   removed, then created exclusively at `0600`) and `secure_private_dir` call
-  `aoide_protocol::owner_only`, one implementation exposed from the leaf crate
-  rather than a second copy in this one. The state tree's privacy
-  boundary is `state/`, which `fs::ensure_write_dir` locks; the rule is
-  CONTRACTS.md §4.
+  `ground::owner_only` (re-exported as `aoide_protocol::owner_only`), one
+  implementation in the leaf crate rather than a second copy in this one. The
+  state tree's privacy boundary is `state/`, which `fs::ensure_write_dir`
+  locks; the rule is CONTRACTS.md §4.
   `fs::migrate_root_once` is the one-shot migration for the root layout
   itself: an old host's `~/Aoide/{state,log}` moves into the current root, and
   the peer-era state names are renamed. It is deliberately NOT wired into

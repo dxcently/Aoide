@@ -96,7 +96,7 @@ const CONNECT_RETRY_INTERVAL: Duration = Duration::from_millis(15);
 
 /// A fresh `AF_UNIX` stream socket, close-on-exec. `UnixStream::connect` makes
 /// its socket close-on-exec too, and a process that spawns children while it
-/// connects (aoided does) must not hand them the descriptor. Linux and Android
+/// connects (the daemon does) must not hand them the descriptor. Linux and Android
 /// take `SOCK_CLOEXEC` in `socket(2)`'s type, so the descriptor is never
 /// inheritable, not even for an instant. Elsewhere `FD_CLOEXEC` is set straight
 /// after `socket(2)`. Its `OwnedFd` closes the socket on drop, so no error path
@@ -266,7 +266,7 @@ mod tests {
 
     fn tmp_socket_dir(tag: &str) -> std::path::PathBuf {
         let dir = std::env::temp_dir().join(format!(
-            "aoide-local-socket-{tag}-{}-{}",
+            "ground-local-socket-{tag}-{}-{}",
             std::process::id(),
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
         ));
@@ -275,8 +275,8 @@ mod tests {
     }
 
     /// Runs `f` on its own thread and panics unless it returns within `limit`.
-    /// A panic in `f` panics here too. `aoide-test-support`'s `finishes_within`
-    /// cannot be used: it depends on this crate.
+    /// A panic in `f` panics here too. The test-support crate's `finishes_within`
+    /// cannot be used: this crate depends on no workspace crate.
     fn within<T: Send + 'static>(limit: Duration, f: impl FnOnce() -> T + Send + 'static) -> T {
         let (tx, rx) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
@@ -295,7 +295,7 @@ mod tests {
     // `cfg(unix)`: this reads the UNIX arm's own body
     // (`unix_sockaddr` builds a `libc::sockaddr_un`; the backlog tests
     // call `libc::socket`/`connect` directly), and the Windows side is
-    // `aoide_protocol::win_unix`, tested beside it. A gate with the
+    // `crate::win_unix`, tested beside it. A gate with the
     // reason beats a rewritten test asserting a different mechanism.
     #[cfg(unix)]
     fn unix_sockaddr_rejects_a_path_too_long_for_sun_path() {
@@ -323,7 +323,7 @@ mod tests {
     // `cfg(unix)`: this reads the UNIX arm's own body
     // (`unix_sockaddr` builds a `libc::sockaddr_un`; the backlog tests
     // call `libc::socket`/`connect` directly), and the Windows side is
-    // `aoide_protocol::win_unix`, tested beside it. A gate with the
+    // `crate::win_unix`, tested beside it. A gate with the
     // reason beats a rewritten test asserting a different mechanism.
     #[cfg(unix)]
     fn unix_sockaddr_accepts_sun_path_minus_one_and_rejects_the_width() {
@@ -353,11 +353,11 @@ mod tests {
     // `cfg(unix)`: this reads the UNIX arm's own body
     // (`unix_sockaddr` builds a `libc::sockaddr_un`; the backlog tests
     // call `libc::socket`/`connect` directly), and the Windows side is
-    // `aoide_protocol::win_unix`, tested beside it. A gate with the
+    // `crate::win_unix`, tested beside it. A gate with the
     // reason beats a rewritten test asserting a different mechanism.
     #[cfg(unix)]
     fn unix_sockaddr_reports_offset_plus_path_plus_terminator() {
-        let path = Path::new("/tmp/aoide-secrets-test.sock");
+        let path = Path::new("/tmp/ground-secrets-test.sock");
         let bytes = path.as_os_str().as_bytes();
         let offset = std::mem::offset_of!(libc::sockaddr_un, sun_path);
 
@@ -379,7 +379,7 @@ mod tests {
     // `cfg(unix)`: this reads the UNIX arm's own body
     // (`unix_sockaddr` builds a `libc::sockaddr_un`; the backlog tests
     // call `libc::socket`/`connect` directly), and the Windows side is
-    // `aoide_protocol::win_unix`, tested beside it. A gate with the
+    // `crate::win_unix`, tested beside it. A gate with the
     // reason beats a rewritten test asserting a different mechanism.
     #[cfg(unix)]
     fn unix_sockaddr_null_and_empty_paths_match_std() {
@@ -402,13 +402,13 @@ mod tests {
     // `cfg(unix)`: this reads the UNIX arm's own body
     // (`unix_sockaddr` builds a `libc::sockaddr_un`; the backlog tests
     // call `libc::socket`/`connect` directly), and the Windows side is
-    // `aoide_protocol::win_unix`, tested beside it. A gate with the
+    // `crate::win_unix`, tested beside it. A gate with the
     // reason beats a rewritten test asserting a different mechanism.
     #[cfg(unix)]
     fn connect_bounded_reaches_a_max_length_pathname() {
         let cap = sun_path_capacity();
         let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
-        let base = format!("{}/aoide-cap-{}-{}", std::env::temp_dir().display(), std::process::id(), nanos);
+        let base = format!("{}/ground-cap-{}-{}", std::env::temp_dir().display(), std::process::id(), nanos);
         assert!(base.len() < cap - 1, "temp dir too long to build a max-length pathname ({base})");
         let mut name = base;
         while name.len() < cap - 1 {
@@ -540,7 +540,7 @@ mod tests {
     // `cfg(unix)`: this reads the UNIX arm's own body
     // (`unix_sockaddr` builds a `libc::sockaddr_un`; the backlog tests
     // call `libc::socket`/`connect` directly), and the Windows side is
-    // `aoide_protocol::win_unix`, tested beside it. A gate with the
+    // `crate::win_unix`, tested beside it. A gate with the
     // reason beats a rewritten test asserting a different mechanism.
     #[cfg(unix)]
     fn connect_bounded_retries_through_a_saturated_backlog_until_a_slot_frees() {
@@ -587,7 +587,7 @@ mod tests {
     // `cfg(unix)`: this reads the UNIX arm's own body
     // (`unix_sockaddr` builds a `libc::sockaddr_un`; the backlog tests
     // call `libc::socket`/`connect` directly), and the Windows side is
-    // `aoide_protocol::win_unix`, tested beside it. A gate with the
+    // `crate::win_unix`, tested beside it. A gate with the
     // reason beats a rewritten test asserting a different mechanism.
     #[cfg(unix)]
     fn connect_bounded_times_out_when_the_backlog_stays_saturated() {

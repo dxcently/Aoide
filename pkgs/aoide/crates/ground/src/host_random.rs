@@ -1,8 +1,8 @@
 //! Random bytes, one contract on both hosts: fill the caller's buffer from the
 //! operating system's CSPRNG, or return the error. Nothing here keeps a pool,
 //! a seed, or a fallback — a caller that cannot get OS randomness must fail,
-//! never quietly get something weaker (`pkgs/aoide/crates/AGENTS.md`: a
-//! missing capability is never an empty success).
+//! never quietly get something weaker (the workspace rule: a missing
+//! capability is never an empty success).
 //!
 //! Unix: `/dev/urandom`, read directly. `/dev/urandom` never blocks once the
 //! kernel CSPRNG is seeded, which is true well before userspace runs — the
@@ -10,9 +10,8 @@
 //! Windows: `BCryptGenRandom` with `BCRYPT_USE_SYSTEM_PREFERRED_RNG`, the CNG
 //! entry point that asks the system's own preferred RNG and holds no provider
 //! handle of its own. Two spellings, one question asked of the host — the same
-//! seam shape `owner_only`/`win_proc`/`win_unix` hold, and it lives here
-//! because the one consumer below it (`aoide-secrets`' `enroll`) already
-//! depends on this crate.
+//! seam shape `owner_only`/`win_proc`/`win_unix` hold, and it lives beside
+//! them. Its one consumer is the secrets crate's enrollment.
 use std::io;
 
 /// Fill `buf` entirely, or return the host's error without having promised
@@ -44,7 +43,7 @@ pub fn fill(buf: &mut [u8]) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     /// Native Windows only: the Unix arm is `/dev/urandom`, read by the
-    /// `aoide-secrets` enrollment tests this seam exists for. What needs its
+    /// secrets crate's enrollment tests this seam exists for. What needs its
     /// own assertion is the arm this crate introduces — a real fill that
     /// differs across calls, and the zero-length no-op a caller may rely on.
     #[cfg(windows)]

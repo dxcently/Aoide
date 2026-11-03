@@ -1261,11 +1261,12 @@
   `lock_exclusive` and `try_lock_exclusive` are `pub(crate)` because
   `outbox`'s `.bsy` guard takes the same lock rather than a second one.
 - **A private file or directory policy shared with another crate is CALLED,
-  never copied.** `aoide_protocol::owner_only` is the one implementation of
-  the owner-only DACL, so `atomic_write_private`'s temp and
-  `secure_private_dir` reach for it rather than writing a `windows-sys` call
-  sequence of their own — and a test that asks whether a file is private asks
-  through `fs::assert_private_file`/`assert_private_dir`, which read the
+  never copied.** `ground::owner_only` (re-exported as
+  `aoide_protocol::owner_only`) is the one implementation of the owner-only
+  DACL, so `atomic_write_private`'s temp and `secure_private_dir` reach for it
+  rather than writing a `windows-sys` call sequence of their own — and a test
+  that asks whether a file is private asks through
+  `fs::assert_private_file`/`assert_private_dir`, which read the
   HOST's own answer (`mode` on Unix, the DACL on Windows). A privacy check
   is never skipped on a host where it is inconvenient; a test that asserts a
   Linux fact (`/proc`, a `umask`, a symlink fixture) is `cfg`-gated with the

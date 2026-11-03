@@ -7397,7 +7397,7 @@ below for the separate, orthogonal fact it DOES add.
 
 **Peer identity (`SO_PEERCRED`, task #73).** Every accepted connection's
 kernel-truth `uid`/`gid`/`pid` is read once, at connection start, via
-`SO_PEERCRED` (`crates/protocol/src/peercred.rs`) — the connecting
+`SO_PEERCRED` (`crates/ground/src/peercred.rs`) — the connecting
 process's REAL uid, verified by the kernel, independent of anything the
 wire request itself claims. A read failure is an UNIDENTIFIED connection
 (`None`), never a panic, never a fabricated uid; every decision keyed on it

@@ -37,14 +37,16 @@ rustPlatform.buildRustPackage {
   version = (builtins.fromTOML (builtins.readFile ./crates/shell/Cargo.toml)).package.version;
 
   # This directory, and the paths its build reads outside it: pkgs/aoide's
-  # root manifest (protocol inherits its workspace fields), protocol, which
-  # is exec's path dependency, and the door, which is shell's.
+  # root manifest (protocol and ground inherit its workspace fields),
+  # protocol, which is exec's path dependency, ground, which is protocol's,
+  # and the door, which is shell's.
   src = lib.fileset.toSource {
     root = ./..;
     fileset = lib.fileset.unions [
       ./.
       ../aoide/Cargo.toml
       ../aoide/crates/protocol
+      ../aoide/crates/ground
       ../aoide/crates/door
     ];
   };

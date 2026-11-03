@@ -12,6 +12,7 @@ path = "src/lib.rs"
 [dependencies]
 serde = { workspace = true }
 serde_json = { workspace = true }
+ground = { workspace = true }
 # Minimal feature set for the interactive prompt substrate (ONBOARD.md
 # decision 9): crossterm is the terminal backend inquire needs to render
 # anything at all on a tty; macros/one-liners/fuzzy are all convenience

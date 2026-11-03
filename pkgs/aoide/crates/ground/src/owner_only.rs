@@ -21,7 +21,7 @@
 //! **A creation is a request, not a fact.** A filesystem that does not
 //! persist ACLs accepts the descriptor and ignores it, so every caller reads
 //! the object back before the first payload byte — the feed through
-//! [`file_refusal`] on the handle it just created, `aoide_storage::fs`'
+//! [`file_refusal`] on the handle it just created, the storage layer's
 //! private temp through [`file_privacy`] by path — and a link at either path
 //! is refused AS ITSELF by the same readers ([`reject_reparse_point`]), never
 //! read or written as the target. [`ensure_private_dir`] is the one place
@@ -31,12 +31,11 @@
 //! directory down); a symbolic link or junction at that path is refused by
 //! name, and the tightened directory's policy is read back before it returns.
 //!
-//! Who consumes it: `crate::feed`'s Windows writer (create-if-absent,
-//! validate-before-append) and `aoide_storage::fs`'s private-write and
-//! private-directory half. `pkgs/aoide/crates/AGENTS.md`'s "no cross-crate
-//! copying" is why it lives here and is `pub`: `aoide-protocol` is the leaf
-//! every domain crate already depends on, so exposing it adds no dependency
-//! edge and creates no second copy.
+//! Who consumes it: the append-only feed writer in the protocol crate
+//! (create-if-absent, validate-before-append) and the storage layer's
+//! private-write and private-directory half. "No cross-crate copying" is why
+//! it lives here and is `pub`: this crate is the leaf both already depend on,
+//! so exposing it adds no dependency edge and creates no second copy.
 
 use std::ffi::c_void;
 use std::fs::File;
@@ -105,7 +104,7 @@ pub const READ_ONLY_MASK: u32 =
 /// owner-only: the whole [`OWNER_ONLY_MASK`], so an object this module
 /// created always validates and a write-only one (which its own reader could
 /// not open) never does.
-pub(crate) const REQUIRED_ACCESS: u32 = OWNER_ONLY_MASK;
+pub const REQUIRED_ACCESS: u32 = OWNER_ONLY_MASK;
 
 /// The directory half of the private policy — the native spelling of `0o700`,
 /// which on Unix is read + write + EXECUTE for the owner. Two of those three
@@ -128,7 +127,7 @@ pub const PRIVATE_DIR_MASK: u32 = OWNER_ONLY_MASK | FILE_EXECUTE | FILE_DELETE_C
 
 /// The access a validated open asks for on a FILE: enough to read its policy
 /// and its bytes, and — for the create-if-absent caller — to append.
-pub(crate) const APPEND_ACCESS: u32 =
+pub const APPEND_ACCESS: u32 =
     FILE_APPEND_DATA | FILE_WRITE_DATA | FILE_READ_DATA | FILE_READ_ATTRIBUTES | READ_CONTROL | SYNCHRONIZE;
 
 /// What this module asks for when it opens an object only to read its policy
@@ -138,7 +137,7 @@ pub(crate) const APPEND_ACCESS: u32 =
 const PRIVACY_ACCESS: u32 = FILE_READ_ATTRIBUTES | READ_CONTROL | WRITE_DAC | SYNCHRONIZE;
 
 
-pub(crate) struct LocalAlloc(pub(crate) *mut c_void);
+pub struct LocalAlloc(pub *mut c_void);
 
 impl Drop for LocalAlloc {
     fn drop(&mut self) {
@@ -301,7 +300,7 @@ impl TokenUserSid {
 /// A path as a NUL-terminated wide string. An embedded NUL is refused
 /// rather than truncated: `CreateFileW` takes a C string, so a path carrying
 /// one would silently name a DIFFERENT file than the caller asked for.
-pub(crate) fn wide(path: &Path) -> io::Result<Vec<u16>> {
+pub fn wide(path: &Path) -> io::Result<Vec<u16>> {
     let mut out: Vec<u16> = path.as_os_str().encode_wide().collect();
     if out.contains(&0) {
         return Err(io::Error::new(io::ErrorKind::InvalidInput, "the path contains an embedded NUL"));
@@ -311,7 +310,7 @@ pub(crate) fn wide(path: &Path) -> io::Result<Vec<u16>> {
 }
 
 /// The last-error code of a failed call, as an `io::Error`.
-pub(crate) fn last_error() -> io::Error {
+pub fn last_error() -> io::Error {
     io::Error::last_os_error()
 }
 
@@ -588,15 +587,15 @@ pub fn ensure_private_dir(path: &Path) -> io::Result<()> {
 
 /// What the DACL and owner of one object actually are, read from the OBJECT's
 /// own handle — never from the path, and never from a second open.
-pub(crate) struct SecurityFacts {
-    pub(crate) dacl_present: bool,
-    pub(crate) dacl_protected: bool,
-    pub(crate) ace_count: u32,
+pub struct SecurityFacts {
+    pub dacl_present: bool,
+    pub dacl_protected: bool,
+    pub ace_count: u32,
     /// Every ACE is an `ACCESS_ALLOWED_ACE_TYPE` for the current token user.
-    pub(crate) all_aces_are_current_user_allows: bool,
+    pub all_aces_are_current_user_allows: bool,
     /// The union of the allow masks found.
-    pub(crate) covered_mask: u32,
-    pub(crate) owner_is_current_user: bool,
+    pub covered_mask: u32,
+    pub owner_is_current_user: bool,
 }
 
 impl SecurityFacts {
@@ -605,7 +604,7 @@ impl SecurityFacts {
     /// this with the mask of the OBJECT it is looking at — a file's
     /// [`OWNER_ONLY_MASK`], a directory's [`PRIVATE_DIR_MASK`] — so the same
     /// walk answers for both without a second implementation.
-    pub(crate) fn covers(&self, required: u32) -> bool {
+    pub fn covers(&self, required: u32) -> bool {
         self.dacl_present
             && self.dacl_protected
             && self.ace_count > 0
@@ -618,7 +617,7 @@ impl SecurityFacts {
 /// Read the facts above out of `file`'s handle. `GetSecurityInfo` returns a
 /// `WIN32_ERROR` (zero is success), not a BOOL — its failure code is the
 /// return value, never `GetLastError`.
-pub(crate) fn security_facts(file: &File) -> io::Result<SecurityFacts> {
+pub fn security_facts(file: &File) -> io::Result<SecurityFacts> {
     let sid = TokenUserSid::current()?;
     let mut owner: PSID = null_mut();
     let mut dacl: *mut ACL = null_mut();
@@ -762,7 +761,7 @@ fn refusal(file: &File, required: u32) -> io::Result<Option<String>> {
 
 /// A file's refusal, with the file mask: what `feed` reads back after it
 /// creates or opens one.
-pub(crate) fn file_refusal(file: &File) -> io::Result<Option<String>> {
+pub fn file_refusal(file: &File) -> io::Result<Option<String>> {
     refusal(file, REQUIRED_ACCESS)
 }
 
@@ -805,7 +804,7 @@ pub fn dir_privacy(path: &Path) -> io::Result<Option<String>> {
 /// refused as itself instead of being silently followed. `dir` adds
 /// `FILE_FLAG_BACKUP_SEMANTICS`, which is what lets the same call open a
 /// directory handle.
-pub(crate) fn open_existing(path: &Path, access: u32, dir: bool) -> io::Result<File> {
+pub fn open_existing(path: &Path, access: u32, dir: bool) -> io::Result<File> {
     let wide_path = wide(path)?;
     let mut flags = FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT;
     if dir {
@@ -830,7 +829,7 @@ pub(crate) fn open_existing(path: &Path, access: u32, dir: bool) -> io::Result<F
 
 /// Refuse a reparse point: a caller validates the object it holds, and a
 /// link's target is a different object than the link the path names.
-pub(crate) fn reject_reparse_point(file: &File) -> io::Result<Option<String>> {
+pub fn reject_reparse_point(file: &File) -> io::Result<Option<String>> {
     let mut info = FILE_ATTRIBUTE_TAG_INFO::default();
     if unsafe {
         GetFileInformationByHandleEx(

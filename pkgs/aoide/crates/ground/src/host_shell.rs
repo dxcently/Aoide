@@ -5,7 +5,7 @@
 //! that is, is a fact about the HOST, never about the caller: `sh -c` on Unix,
 //! `cmd /C` on native Windows, which has no `sh`. Two crates ask the same
 //! question of the same host, so the answer lives here, once
-//! (`pkgs/aoide/crates/AGENTS.md`: expose, never copy).
+//! (the workspace rule: expose, never copy).
 //!
 //! **The line goes over VERBATIM on Windows.** `cmd` is not a
 //! `CommandLineToArgvW` program: it re-applies its own quote rules to `/C`'s

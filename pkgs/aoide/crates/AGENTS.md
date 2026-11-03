@@ -1,9 +1,9 @@
 # AGENTS.md — invariants across every crate in `pkgs/aoide/crates/`
 
 Cross-crate rules only. A crate's own `AGENTS.md` holds what's local to it;
-this file holds what would otherwise be repeated in all eleven. Points up to
-the root `AGENTS.md` for the core-vs-strillix/Strillix boundary and the house
-rules that govern the whole repo.
+this file holds what would otherwise be repeated in every one of them. Points
+up to the root `AGENTS.md` for the core-vs-strillix/Strillix boundary and the
+house rules that govern the whole repo.
 
 ## Registry order is load-bearing
 
@@ -193,6 +193,11 @@ listings_fit_and_hang}` hold both binaries to it.
   members`, give it a `commands` module with `register(&mut Registry)`, wire
   that into the owning app crate's `commands::all()` (core → `cli`, paint →
   `strillix`), and add its golden README/AGENTS pair here.
+- **A new neutral crate** (a host seam both products need, `ground`'s kind):
+  it takes no `aoide-` prefix, is listed in `tests/boundary/scan.pl`'s
+  `side_of`, names neither product, and depends on no workspace crate. It
+  has no `commands` module and no golden here. It is added to the `members`
+  list and to `[workspace.dependencies]` like any crate.
 - **A new command on an existing crate**: add a `cmd!`/`arg!`/`flag!` entry
   (`aoide-protocol::registry`) inside that crate's own `commands` module;
   the two app crates never need an edit for a command that isn't moving

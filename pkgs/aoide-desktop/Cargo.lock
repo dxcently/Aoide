@@ -79,6 +79,7 @@ dependencies = [
 name = "aoide-protocol"
 version = "0.0.26"
 dependencies = [
+ "ground",
  "inquire",
  "libc",
  "serde",
@@ -1165,6 +1166,14 @@ dependencies = [
  "glib-sys",
  "libc",
  "system-deps",
+]
+
+[[package]]
+name = "ground"
+version = "0.0.26"
+dependencies = [
+ "libc",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

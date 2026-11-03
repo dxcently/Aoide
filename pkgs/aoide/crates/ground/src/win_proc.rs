@@ -11,11 +11,11 @@
 //! | end a pid | `kill(pid, SIGTERM\|SIGKILL)` | `TerminateProcess` |
 //! | wait for a pid's end | `waitpid(pid, …, WNOHANG)` | `WaitForSingleObject(h, 0)` |
 //!
-//! Three callers, one implementation (`pkgs/aoide/crates/AGENTS.md`: no
-//! cross-crate copying): `aoide_storage::attest`'s pid-ancestry walk and
-//! pid-reuse defence, `aoide_storage::fs`'s process acts, and `crate::dialog`'s
-//! locker probe. It lives in this crate because `aoide-protocol` is the DAG
-//! leaf all of them already depend on.
+//! Three callers, one implementation (the workspace rule: no cross-crate
+//! copying): the storage layer's attestation walk (pid ancestry and the
+//! pid-reuse defence), its process acts, and the locker probe of the linking
+//! crate's dialog module. It lives in this crate because this crate is the
+//! DAG leaf all of them already depend on.
 //!
 //! **Liveness keeps the Unix reading, one-for-one.** `ERROR_INVALID_PARAMETER`
 //! (and `ERROR_NOT_FOUND`) is the one absent verdict — the exact stand-in for
@@ -114,8 +114,8 @@ fn exe_name(entry: &PROCESSENTRY32W) -> String {
     String::from_utf16_lossy(&entry.szExeFile[..end])
 }
 
-/// `pid`'s ancestry, self first, nearest ancestor first — the walk
-/// `aoide_storage::attest::pid_ancestry` performs over `/proc`, done from ONE
+/// `pid`'s ancestry, self first, nearest ancestor first — the walk the
+/// attestation layer performs over `/proc`, done from ONE
 /// snapshot rather than one lookup per level. Bounded by `limit`, stops at the
 /// root (the System process's parent is `0`, which names no process), and
 /// returns what it has if the pid is not in the table at all.
@@ -450,7 +450,7 @@ fn sid_of_pid_with(pid: u32, mut read_start_time: impl FnMut(u32) -> Option<u64>
 
 /// The account behind a SID, as `DOMAIN\name` — the spelling `whoami` uses —
 /// or an error when the SID names no account this host can resolve. This is
-/// DISPLAY DATA (`aoide_secrets::peercred::username_for`'s origin line), so a
+/// DISPLAY DATA (the origin line of the secrets broker's user lookup), so a
 /// failure is reported, never guessed at: no name is invented for a SID that
 /// has none.
 ///
@@ -648,7 +648,7 @@ mod tests {
         let mut child = std::process::Command::new("cmd")
             // The marker is what the assertion hunts for; the two arguments
             // around it are the interesting shapes.
-            .args(["aoide-argvo-marker", "two words", "1234:127.0.0.1:8710"])
+            .args(["ground-argvo-marker", "two words", "1234:127.0.0.1:8710"])
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
@@ -659,7 +659,7 @@ mod tests {
         let args = command_argv(pid).expect("a live child's command line");
 
         assert!(args.len() >= 4, "a spawned line keeps its arguments: {args:?}");
-        assert_eq!(args[args.len() - 3], "aoide-argvo-marker", "{args:?}");
+        assert_eq!(args[args.len() - 3], "ground-argvo-marker", "{args:?}");
         assert_eq!(args[args.len() - 2], "two words", "an argument with a space stays one argument: {args:?}");
         assert_eq!(args[args.len() - 1], "1234:127.0.0.1:8710", "{args:?}");
         let head = args[0].to_ascii_lowercase();

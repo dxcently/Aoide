@@ -71,7 +71,8 @@ and its invariants are in that crate's AGENTS.md.
   that a libc call in exec could reach. Exec's own table allows the three, so
   exec is the one crate of this workspace where `unsafe`, a process start or a
   signal can appear; aoide-protocol, its path dependency, starts processes
-  outside it.
+  outside it, and so does `ground`, which protocol depends on (the host shell
+  is there).
 - `clippy.toml` lists the std paths that start a process or send a signal:
   `Command` (the type), `Command::new`, `CommandExt::pre_exec`,
   `CommandExt::exec` and `Child::kill`, which sends SIGKILL. In shell, a call
@@ -148,10 +149,9 @@ and its invariants are in that crate's AGENTS.md.
   template. A target whose path lies outside it would change a golden manifest.
 - Dependencies are not linted. The lints and the scan cover the members only.
   `aoide-protocol` is a path dependency outside this workspace, and it starts
-  processes of its own; its `#[path]` module `feed.rs:62` is compiled under
-  protocol's own table, not this one. The app reaches it only through the exec
-  crate's
-  `untrusted` re-export.
+  processes of its own, as does `ground`, which it depends on; its `#[path]`
+  module `feed.rs:62` is compiled under protocol's own table, not this one.
+  The app reaches it only through the exec crate's `untrusted` re-export.
 - A run outside the sandbox sets its own environment; the deciding run's is the
   nix sandbox's. No test scans the environment for words. The config test reads
   `NIX_BUILD_TOP`, `CARGO_HOME` and `HOME`.

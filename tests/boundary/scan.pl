@@ -6,16 +6,21 @@
 # OS: the modules, the paint, the strillix binary) share one repo and name each
 # other in many places. This script counts those places as ROWS and holds them
 # against crossings.golden, so a crossing the golden lacks fails and a removed one
-# is locked in:
+# is locked in. A third side, the neutral crates, may name neither product and
+# may depend on no crate of either side; the golden holds no row for it, so any
+# row it would need is a failure:
 #
 #   perl tests/boundary/scan.pl check   <repo-root> <golden>
 #   perl tests/boundary/scan.pl tighten <repo-root> <golden>
 #
 # SIDES. A file's side is decided by its path and nothing else:
 #
+#   Neutral side
+#     - pkgs/aoide/crates/ground/
 #   Aoide side
-#     - pkgs/aoide/**, except pkgs/aoide/crates/strillix/,
-#       pkgs/aoide/crates/strillix-rice/ and pkgs/aoide/crates/screen/
+#     - pkgs/aoide/**, except pkgs/aoide/crates/ground/,
+#       pkgs/aoide/crates/strillix/, pkgs/aoide/crates/strillix-rice/ and
+#       pkgs/aoide/crates/screen/
 #     - pkgs/aoide-desktop/**
 #     - these modules/dendrites/ files: aoided.nix, aoide-config.nix,
 #       aoide-nix.nix, aoide-packages.nix, aoide-secrets.nix, melete.nix,
@@ -29,11 +34,11 @@
 #     - lib/strillix.nix, lib/rice.nix, lib/rices.nix, lib/rices-merge.nix,
 #       lib/theme.nix, lib/wallpaper-seed.sh
 #     - rices/**
-#   Neutral, not scanned: everything else. That includes flake.nix, the other
+#   Unscanned: everything else. That includes flake.nix, the other
 #   lib/ files, tests/, docs/, hosts/, users/, templates/, evals/, wallpapers/,
 #   the other pkgs/ and the top-level files.
 #
-#   On both sides, every *.md file and every binary file (perl's -B test) is
+#   On every side, every *.md file and every binary file (perl's -B test) is
 #   skipped, and so is a symlink. The files are the ones a flake build sees:
 #   the tracked ones. A checkout asks git for them, so build output and stray
 #   files never count; the build sandbox has no .git and its source holds only
@@ -44,9 +49,11 @@
 #   name <side> <path> <count>
 #     <count> lines of <path> name the other product; <side> is the file's own.
 #     An Aoide-side file names Strillix on a line matching /strillix|\bstrx\b/i,
-#     a Strillix-side file names Aoide on a line matching /aoide/i. A full-line
-#     comment does not count. What a comment is depends on the extension (in
-#     Rust `#[...]` is an attribute, not a comment):
+#     a Strillix-side file names Aoide on a line matching /aoide/i, and a
+#     neutral-side file names either on a line matching
+#     /aoide|strillix|\bstrx\b/i. A full-line comment does not count. What a
+#     comment is depends on the extension (in Rust `#[...]` is an attribute,
+#     not a comment):
 #       .rs .qml .js                   first non-space characters `//`, `/*`, `*`
 #       .nix .toml .sh .yaml .yml .py  first non-space character `#`
 #       any other extension            no comment rule
@@ -54,7 +61,9 @@
 #
 #   dep <from-crate> <to-crate> <section>
 #     a Cargo dependency edge from a crate on one side to a crate whose
-#     directory is on the other. Every Cargo.toml on either side is read:
+#     directory is on the other, or from a neutral crate to a crate on either
+#     side; an edge into a neutral crate is no crossing and has no row. Every
+#     Cargo.toml on any scanned side is read:
 #     [dependencies], [dev-dependencies], [build-dependencies] and their
 #     target-specific forms. A dependency's directory is its `path` (relative
 #     to the manifest) or, for `workspace = true`, the path its
@@ -111,6 +120,7 @@ my %STRILLIX_LIB = map { ("lib/$_" => 1) } qw(
 
 sub side_of {
     my ($p) = @_;
+    return 'neutral'  if $p =~ m{^pkgs/aoide/crates/ground/};
     return 'strillix' if $p =~ m{^pkgs/aoide/crates/(?:strillix|strillix-rice|screen)/};
     return 'aoide'    if $p =~ m{^pkgs/aoide(?:-desktop)?/};
     return 'strillix' if $p =~ m{^pkgs/strillix-(?:shell|rices)/};
@@ -150,7 +160,7 @@ my %COMMENT = (
     (map { $_ => qr{^\s*(?://|/\*|\*)} } qw(rs qml js)),
     (map { $_ => qr{^\s*#} } qw(nix toml sh yaml yml py)),
 );
-my %NAMES = (aoide => qr/strillix|\bstrx\b/i, strillix => qr/aoide/i);
+my %NAMES = (aoide => qr/strillix|\bstrx\b/i, strillix => qr/aoide/i, neutral => qr/aoide|strillix|\bstrx\b/i);
 
 my (%now, %row_side);    # row key -> count, row key -> the side that does the naming
 
@@ -335,8 +345,8 @@ for my $p (sort keys %side) {
         }
         defined $props->{path} or next;    # a registry crate has no directory here
         my $to_dir  = resolve_dir($base, $props->{path}, $p);
-        my $to_side = side_of(manifest_file($to_dir)) or next;    # neutral: not scanned
-        next if $to_side eq $side{$p};
+        my $to_side = side_of(manifest_file($to_dir)) or next;    # unscanned
+        next if $to_side eq $side{$p} || $to_side eq 'neutral';
         -f "$root/" . manifest_file($to_dir)
           or die "boundary: $p: `$dep->{name}` points at $to_dir, which holds no Cargo.toml\n";
         my $to = manifest($to_dir)->{name}
@@ -359,7 +369,7 @@ sub read_golden {
         chomp $line;
         next if $line =~ /^#/ || $line !~ /\S/;
         my ($key, $count);
-        if    ($line =~ /^(name (?:aoide|strillix) .+) (\d+)$/) { ($key, $count) = ($1, $2) }
+        if    ($line =~ /^(name (?:aoide|strillix|neutral) .+) (\d+)$/) { ($key, $count) = ($1, $2) }
         elsif ($line =~ /^(dep \S+ \S+ .+)$/)                  { ($key, $count) = ($1, 1) }
         else { die "boundary: $golden_file:$.: not a row: $line\n" }
         die "boundary: $golden_file:$.: a second row for: $key\n" if exists $gold{$key};
@@ -419,4 +429,4 @@ if (@stale) {
 my %tally;
 $tally{ (/^(\w+)/)[0] . " $row_side{$_}" }++ for keys %now;
 printf "aoide check boundary: ok (%s)\n",
-  join ', ', map { "$_ " . ($tally{$_} // 0) } ('name aoide', 'name strillix', 'dep aoide', 'dep strillix');
+  join ', ', map { "$_ " . ($tally{$_} // 0) } ('name aoide', 'name strillix', 'name neutral', 'dep aoide', 'dep strillix', 'dep neutral');

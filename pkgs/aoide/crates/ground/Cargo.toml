@@ -1,0 +1,32 @@
+[package]
+name = "ground"
+version.workspace = true
+edition = "2021"
+license = "MIT"
+description = "The neutral host seams: process table, local sockets, peer credentials, randomness, shell, and the Windows owner-only policy."
+
+[lib]
+name = "ground"
+path = "src/lib.rs"
+
+# `local_socket`, `peercred`: fcntl, socket, getsockopt, geteuid.
+[target.'cfg(unix)'.dependencies]
+libc = { workspace = true }
+
+# Native sockets, process table, owner-only DACLs, CNG randomness; only Windows
+# needs these APIs.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = [
+    "Wdk_System_Threading",
+    "Win32_Foundation",
+    "Win32_Networking_WinSock",
+    "Win32_Security",
+    "Win32_Security_Authorization",
+    "Win32_Security_Cryptography",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Diagnostics_ToolHelp",
+    "Win32_System_IO",
+    "Win32_System_SystemServices",
+    "Win32_System_Threading",
+    "Win32_UI_Shell",
+] }
