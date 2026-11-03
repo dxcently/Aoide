@@ -305,27 +305,6 @@ mod tests {
         aoide_test_support::registry_walk::suggestion_or_list("strillix", &crate::commands::all());
     }
 
-    /// The cross-binary hint reads a static head list (`door::AOIDE_ONLY_HEADS`);
-    /// this pins this binary's heads to the registry, so a head moving between
-    /// binaries fails here instead of misdirecting a typo. Core names no desktop
-    /// head, so the desktop's own list lives here.
-    #[test]
-    fn cross_binary_heads_match_the_registry() {
-        use aoide_protocol::door::{AOIDE_ONLY_HEADS, SHARED_HEADS};
-        let r = crate::commands::all();
-        let mut heads: Vec<&str> = r.commands().map(|c| c.path[0]).collect();
-        heads.sort();
-        heads.dedup();
-        let desktop: &[&str] = &[
-            "apps", "clipboard", "component", "wallpaper", "element", "notifications", "icon", "theme",
-            "lock", "focus", "preview", "quickshell", "reload", "rice", "screen", "shellbridge", "migrate",
-        ];
-        let mut expected: Vec<&str> = desktop.iter().chain(SHARED_HEADS).copied().collect();
-        expected.sort();
-        assert_eq!(heads, expected, "the desktop heads + SHARED_HEADS must be exactly this binary's heads");
-        assert!(AOIDE_ONLY_HEADS.iter().all(|h| !heads.contains(h)), "AOIDE_ONLY_HEADS must not appear here");
-    }
-
     /// The declarative fields are additive (CONTRACTS.md §3): the migrated
     /// `preview shot --what` carries its closed value set and default, and an
     /// unmigrated flag grows no key.

@@ -799,9 +799,7 @@ Contract guarantees:
   before the door renders.
 - **Exit codes and the refusal shape.** `2` means the invocation can never be
   valid whatever the world looks like: a missing, unknown or ill-typed
-  argument, flag or value, or a command typed at the wrong binary (`strx spawn …` names `aoide spawn …`
-  when the core program resolves to a file named `aoide` (`AOIDE_CORE_BIN`, else the sibling binary, else
-  `PATH`), and says aoide is not installed when none does; `aoide` has
+  argument, flag or value, or a command typed at the wrong binary (`aoide` has
   no strillix verbs, so `aoide rice …` is an unknown command). `1` means a valid invocation the world refused: not
   found, unreachable, locked, not paired. `64` is a stub. A refusal is
   `[status] command: what` followed by `why:` and `fix:` lines; `--json`

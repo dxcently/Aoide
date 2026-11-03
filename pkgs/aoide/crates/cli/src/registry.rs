@@ -1065,21 +1065,6 @@ mod tests {
         aoide_test_support::registry_walk::suggestion_or_list("aoide", &crate::commands::all());
     }
 
-    /// The cross-binary hint reads a static head list (`door::*_HEADS`); this
-    /// pins this binary's half of it to the registry, so a head moving
-    /// between binaries fails here instead of misdirecting a typo.
-    #[test]
-    fn cross_binary_heads_match_the_registry() {
-        use aoide_protocol::door::{AOIDE_ONLY_HEADS, SHARED_HEADS};
-        let r = crate::commands::all();
-        let mut heads: Vec<&str> = r.commands().map(|c| c.path[0]).collect();
-        heads.sort();
-        heads.dedup();
-        let mut expected: Vec<&str> = AOIDE_ONLY_HEADS.iter().chain(SHARED_HEADS).copied().collect();
-        expected.sort();
-        assert_eq!(heads, expected, "AOIDE_ONLY_HEADS + SHARED_HEADS must be exactly this binary's heads");
-    }
-
     /// The declarative fields are additive (CONTRACTS.md §3): a command that
     /// declares none serializes without their keys, and the three migrated
     /// commands carry exactly what they declare.

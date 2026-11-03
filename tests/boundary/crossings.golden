@@ -40,7 +40,7 @@ name aoide pkgs/aoide/crates/conduct/src/commands/hooks.rs 5
 name aoide pkgs/aoide/crates/conduct/src/graph/grant.rs 1
 name aoide pkgs/aoide/crates/conduct/src/graph/send.rs 3
 name aoide pkgs/aoide/crates/conduct/src/shellbridge.rs 4
-name aoide pkgs/aoide/crates/protocol/src/door.rs 22
+name aoide pkgs/aoide/crates/protocol/src/door.rs 12
 name aoide pkgs/aoide/crates/protocol/tests/no_hand_enforcement.rs 9
 name aoide pkgs/aoide/crates/server/src/a2a.rs 12
 name aoide pkgs/aoide/crates/storage/src/charter.rs 2
@@ -167,7 +167,7 @@ name strillix pkgs/aoide/crates/strillix/src/hypr/tests.rs 103
 name strillix pkgs/aoide/crates/strillix/src/hypr/testutil.rs 12
 name strillix pkgs/aoide/crates/strillix/src/lib.rs 3
 name strillix pkgs/aoide/crates/strillix/src/output.rs 1
-name strillix pkgs/aoide/crates/strillix/src/registry.rs 19
+name strillix pkgs/aoide/crates/strillix/src/registry.rs 17
 name strillix pkgs/aoide/crates/strillix/src/xdg/mod.rs 3
 name strillix pkgs/aoide/crates/strillix/tests/boot.rs 6
 name strillix pkgs/aoide/crates/strillix/tests/core_state.rs 17
