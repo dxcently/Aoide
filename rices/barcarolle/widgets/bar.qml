@@ -622,7 +622,7 @@ Item {
         source: src ? (src.indexOf("/") === 0 ? "file://" + src + root.bust : src) : ""
         sourceSize: Qt.size(64, 64)
         smooth: true
-        asynchronous: true
+        asynchronous: false
         fillMode: Image.PreserveAspectFit
         visible: src.length > 0
     }

@@ -194,3 +194,34 @@ in git; `git log --follow -- rices/default/` finds it.
   a laptop they pointed at the battery cell. The bar publishes the battery
   cell's width in `Kit.hub.batteryShift`, and the balloon adds it, re-read on
   its tick.
+
+## Provider icons load on the main thread (barcarolle's icons, 2026-11-03)
+
+- **An `Image` that may show a Quickshell provider URL is synchronous.** The
+  providers are `image://icon/`, `image://qspixmap/` and `image://qsimage/`:
+  theme icons, the tray's pixmaps, and images such as menu icons.
+  Asynchronous, Qt runs the provider on its image reader thread, and all five
+  Quickshell crash reports on record, from two machines, happened there: three
+  `std::bad_alloc` in `IconImageProvider::requestPixmap` on a laptop after
+  sleep or unlock, and two segfaults on a desktop, in the same provider and in
+  the tray's `TrayImageHandle::requestPixmap`. The suspected cause is state
+  the GUI thread changes: the theme provider reads Qt's theme icon lookup, and
+  the pixmap and image providers read Quickshell's map of live image handles,
+  which has no lock. The crash was not reproduced. Quickshell's own
+  `IconImage` is synchronous by default.
+- **`Quickshell.iconPath` returns an `image://icon/` URL, not a file path.**
+  Its `check` argument only tests that the theme has the icon, so an app icon
+  from `iconPath` is a provider load like a tray icon.
+- **Don't make `asynchronous` follow the source.** When `src` changes, the
+  `source` and `asynchronous` bindings both re-evaluate, and the load starts
+  with whatever `asynchronous` holds then. On Qt 6.11 the binding declared
+  first runs first, an order Qt leaves unspecified: with `source` above it,
+  `asynchronous: src.indexOf("image://icon/") !== 0` loaded every change from
+  an empty source, a file or a pixmap into a theme icon on the reader thread.
+- **A synchronous load is paid on the GUI thread.** About a millisecond for
+  each 32px SVG file not yet in Qt's pixmap cache on warm runs (measured
+  offscreen; a cold first run took about five), and a theme icon adds the
+  theme lookup, which was not timed. A long list pays it as new rows come in.
+  And `onStatusChanged` runs inside the `source` write: a fallback chain that
+  advances there on `Error` re-enters its own binding, so with two failing
+  candidates in a row it stops on the second, with a binding-loop warning.

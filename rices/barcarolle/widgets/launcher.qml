@@ -2006,7 +2006,7 @@ PanelWindow {
                 source: cell.iconUrl
                 sourceSize: Qt.size(32, 32)
                 fillMode: Image.PreserveAspectFit
-                asynchronous: true
+                asynchronous: false
                 smooth: true
             }
             Rectangle {

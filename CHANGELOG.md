@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### barcarolle loads app and tray icons on the main thread
+
+- barcarolle's bar and launcher load app and tray icons on the GUI thread, not on Qt's image reader thread. All five Quickshell crash reports on record, from two machines, happened inside one of Quickshell's image providers on that thread: three `std::bad_alloc` in the theme icon provider on a laptop after sleep or unlock, and two segfaults on a desktop, one in the same provider and one in the tray's pixmap provider. The crash was not reproduced, so this removes what the crashes share rather than a proven cause.
+- Everything the bar draws through its `Icon` component now loads synchronously, the tray's small SVG glyphs included, and the launcher spends a little GUI-thread time on each app icon it hasn't drawn yet. Images that never come from an image provider (wallpapers, pictures, album art, the launcher's thumbnails) still load in the background.
+
 ### The battery cell shows its percentage and opens a flyout
 
 - barcarolle's battery cell is a small smoked-glass battery with a glossy fill coloured by charge: green from 50%, yellow from 20% and red below, from the theme's base0B, base0A and base08; the white fill that turned urgent orange below 15% is gone. The rounded percentage sits inside it, dark over the fill and white past it, and the charging bolt sits beside the nub, so it never covers the number. The cell is 38px wide.
