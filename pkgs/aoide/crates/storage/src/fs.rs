@@ -3195,7 +3195,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&base);
 
         type Creator = fn(&std::path::Path) -> std::io::Result<()>;
-        let cases: [(&str, Creator); 13] = [
+        let cases: [(&str, Creator); 15] = [
             ("create_new_private", |s| create_new_private(&s.join("a.json")).map(drop)),
             ("edits::append", |_| {
                 crate::edits::append(&crate::edits::EditLine::default())
@@ -3241,6 +3241,11 @@ mod tests {
                 std::env::set_var("AOIDE_STAGE_DIR", s.join("stage"));
                 with_stage_lock(|| ());
                 Ok(())
+            }),
+            ("atomic_write_bytes", |s| atomic_write_bytes(&s.join("b.bin"), b"x")),
+            ("try_stage_lock", |s| {
+                std::env::set_var("AOIDE_STAGE_DIR", s.join("stage"));
+                try_stage_lock(|| ()).map_err(std::io::Error::other)
             }),
         ];
         // Every case runs, so one run names each creator that fails, not only the first.
