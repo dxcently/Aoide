@@ -2,13 +2,16 @@
 
 The host seams that name neither product: the local socket, peer credentials,
 OS randomness and the stored-command shell, the git probes, time formatting,
-the host name, the runtime root and the SHA-256 and hex helpers, and, on
-Windows, the process table, the `AF_UNIX` socket and the owner-only policy.
+the host name, the runtime root, the SHA-256 and hex helpers, the atomic
+write and lock family and the stage reader, and, on Windows, the process
+table, the `AF_UNIX` socket and the owner-only policy.
 The crate is a leaf. No code line in it names either product, and it depends
 on no workspace crate: the `boundary` check holds both lines. `aoide-protocol`
 and `aoide-storage` link it and re-export every module at its old path
 (`pub use ground::<module>`), so `aoide_protocol::peercred::peer_cred` and
-`aoide_storage::git::common_dir` name the same items they always did.
+`aoide_storage::git::common_dir` name the same items they always did. `fs`
+and `stage` go by item: `aoide-storage` keeps its own modules of those names,
+wraps the `fs` family and re-exports the rest.
 
 Code on either side of the product line can use a host seam here without
 linking the other side. The re-exports keep every old path valid until the
@@ -16,6 +19,34 @@ importers name `ground` themselves.
 
 ## Seams
 
+- `fs.rs`: the write and lock family.
+  - The atomic write (`atomic_write`, `atomic_write_bytes`): a counter-named
+    temp, renamed over the target inside the live write watches
+    (`watch_writes`, `WriteWatch`), with dead writers' temps swept.
+  - Its private form (`atomic_write_private`; `write_temp_file` creates the
+    temp owner-only before its first byte).
+  - The private create and append (`create_new_private`,
+    `open_private_append`), and the owner-only directory
+    (`secure_private_dir`).
+  - The migration copy (`migrate_dir`, `migrate_file`, `copy_dir_recursive`)
+    and the registry seed (`seed_if_absent`).
+  - The lock files (`with_lock_in`, `try_lock_in`, `lock_path`,
+    `lock_held_in`, and the `lock_exclusive`, `try_lock_exclusive`, `unlock`
+    trio).
+  - The process probe and acts (`pid_is_alive`, `terminate`,
+    `wait_for_exit`).
+  - The host seams `detach`, `link_dir`, `atomic_symlink`, `path_is_under`
+    and `looks_absolute_any_host`.
+  - On Unix, `open_dir_nofollow`: a directory opened read-only, refusing a
+    link at its last component.
+
+  **Every member that makes a directory for a write, a copy or a lock file
+  takes the directory step, `make_dir: fn(&Path) -> io::Result<()>`, and
+  calls it where it makes that directory. None has a form without it.** Two
+  creations sit outside the step. `atomic_symlink` makes its link's parent
+  with a plain create. `secure_private_dir`'s Windows arm makes its leaf
+  owner-only through `owner_only::ensure_private_dir`, after the step on the
+  parent. The Windows spellings are in `fs_windows.rs`, a submodule of `fs`.
 - `git.rs`: the git seam. `installed` (`git --version`), `toplevel` (the root
   of the working tree a path sits in) and `status_under` (a path's uncommitted
   lines, `status --porcelain`, read-only) run `git`. `common_dir` is the one
@@ -54,6 +85,9 @@ importers name `ground` themselves.
   `$XDG_RUNTIME_DIR` when it is set and not empty, else this host's own answer
   (`/run/user/<euid>` on Unix, `%LOCALAPPDATA%` on native Windows, the temp dir
   when that variable is absent). Each owner appends its own segment.
+- `stage.rs`: `load_stage`, which reads one JSON registry file into its type.
+  A missing file reads as the type's default. An unreadable one is an error
+  string that names the path.
 - `time.rs`: ISO-8601 UTC time as `YYYY-MM-DDTHH:MM:SSZ`, hand-rolled so the
   offline lock never grows a time crate: `now_iso_utc`, `iso_utc_from_epoch`,
   `shift_iso_utc` and `parse_iso_utc`, the exact inverse of the formatters.
@@ -61,11 +95,11 @@ importers name `ground` themselves.
   attaches to a private file or directory: an explicit, `SE_DACL_PROTECTED`,
   single-ACE DACL for the current token user, attached AT creation and read
   back before the first payload byte BY BOTH CONSUMERS (the feed writer on the
-  handle it just created, the storage crate's private temp by path), with a
+  handle it just created, `fs`'s private temp by path), with a
   reparse point refused as itself and a `chmod` stand-in (`set_dir_access`,
   owner pinned) plus one idempotent `ensure_private_dir` that refuses a
   symbolic link or junction by name. Two consumers, one implementation: the
-  feed writer and the storage layer's private-write and private-directory half.
+  feed writer and `fs`'s private-write and private-directory half.
 - `win_proc.rs` (Windows only): the process table `/proc` would answer, plus
   the two acts `kill` and `waitpid` perform and the one fact the table does not
   carry: one `Toolhelp32` snapshot (pid, parent, executable name), a
@@ -76,8 +110,8 @@ importers name `ground` themselves.
   `command_argv` (`NtQueryInformationProcess(ProcessCommandLineInformation)`
   and this host's own `CommandLineToArgvW`, for callers that must know WHAT a
   pid is running before signalling it). Its callers are the storage layer's
-  attestation walk and process acts, the client's recycled-pid guard and the
-  protocol crate's dialog locker probe.
+  attestation walk, `fs`'s process probe and acts, the client's recycled-pid
+  guard and the protocol crate's dialog locker probe.
 - `win_unix.rs` (Windows only): the local socket, natively: `AF_UNIX`
   (Winsock, Windows 10 1803+) behind the surface `std::os::unix::net` gives
   Unix callers (`UnixStream`, `UnixListener`, `Incoming`, `SocketAddr`), with
@@ -87,10 +121,12 @@ importers name `ground` themselves.
 
 ## What it consumes
 
-`libc` on Unix (`fcntl`, `socket`, `getsockopt`, `geteuid`, `gethostname`, and
-the `O_NOFOLLOW` and `O_NONBLOCK` flags of the git file open), `windows-sys` on
-Windows, and `sha2` for `hash`. No workspace crate: a `dep` row from a neutral
-crate to either side is a failure of the `boundary` check.
+`libc` on Unix (`fcntl`, `socket`, `getsockopt`, `geteuid`, `gethostname`, the
+`O_NOFOLLOW` and `O_NONBLOCK` flags of the git file open, and `flock`, `kill`,
+`waitpid`, `setsid`, `renameat2` and `O_DIRECTORY` for `fs`), `windows-sys` on
+Windows, `sha2` for `hash`, and `serde` and `serde_json` for
+`stage::load_stage` and `fs::seed_if_absent`. No workspace crate: a `dep` row
+from a neutral crate to either side is a failure of the `boundary` check.
 
 ## How it composes
 
@@ -104,7 +140,8 @@ crate to either side is a failure of the `boundary` check.
                |  host_shell  host_random         |   libc      [unix]
                |  local_socket  peercred          |   windows-sys [windows]
                |  git  time  host_name            |   sha2
-               |  runtime_dir  hash               |
+               |  runtime_dir  hash               |   serde  serde_json
+               |  fs (fs_windows)  stage          |
                |  [windows] owner_only            |
                |            win_proc  win_unix    |
                +----------------------------------+
@@ -115,6 +152,11 @@ crate to either side is a failure of the `boundary` check.
   hold the stateless halves of three storage modules; storage keeps the rest of
   each and re-exports the moved item beside it (`display::os_hostname`,
   `runtime_dir::runtime_root`, `seal::{hex_encode, sha256}`).
+- `aoide-storage`'s `fs` keeps a wrapper with the old name and signature for
+  each member that takes the step, and passes its own `state/` guard
+  (`ensure_write_dir`). It re-exports the rest by an explicit list, and
+  `stage` re-exports `load_stage`. A caller of an old path is guarded as
+  before.
 - On Windows, `local_socket` and `peercred` reach `win_unix` and `win_proc`.
   `win_proc` reads the token user through `owner_only`, and `win_unix::pair_in`
   makes its rendezvous directory with `owner_only::ensure_private_dir`.

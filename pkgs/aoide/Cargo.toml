@@ -191,10 +191,10 @@ aoide-secrets = { path = "crates/secrets" }
 # and libc.
 aoide-door = { path = "crates/door" }
 # `ground` — the neutral host seams: process table, local sockets, peer
-# credentials, randomness, shell, git probes, time, the Windows owner-only
-# policy. A leaf: it names neither product and depends on no workspace crate.
-# `aoide-protocol` and `aoide-storage` link it and re-export every item at its
-# old path.
+# credentials, randomness, shell, git probes, time, the atomic write and lock
+# family, the stage reader, the Windows owner-only policy. A leaf: it names
+# neither product and depends on no workspace crate. `aoide-protocol` and
+# `aoide-storage` link it and re-export every item at its old path.
 ground = { path = "crates/ground" }
 
 [profile.release]

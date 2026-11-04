@@ -13,9 +13,9 @@
 //!
 //! Three callers, one implementation (the workspace rule: no cross-crate
 //! copying): the storage layer's attestation walk (pid ancestry and the
-//! pid-reuse defence), its process acts, and the locker probe of the linking
-//! crate's dialog module. It lives in this crate because this crate is the
-//! DAG leaf all of them already depend on.
+//! pid-reuse defence), `fs`'s process probe and acts, and the locker probe of
+//! the linking crate's dialog module. It lives in this crate because this
+//! crate is the DAG leaf all of them already depend on.
 //!
 //! **Liveness keeps the Unix reading, one-for-one.** `ERROR_INVALID_PARAMETER`
 //! (and `ERROR_NOT_FOUND`) is the one absent verdict — the exact stand-in for

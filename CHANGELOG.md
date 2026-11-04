@@ -25,6 +25,7 @@
 - The pre-image git helpers in `aoide-storage::git` (`hash_object_write`, `hash_object`, `cat_file_blob`, `anchor`) are gone: nothing called them.
 - On native Windows the temporary name a `UnixStream::pair` rendezvous binds begins `afunix-`, not `aoide-`.
 - The `boundary` check has a third side: a neutral crate may name neither product and may depend on no crate of either side.
+- `ground` also holds `aoide-storage`'s write and lock family: the atomic and private writes, the private create and append, the owner-only directory, the migration copy, the registry seed, the lock files, the process probe and acts and their Windows half (`ground::fs`), and the stage reader `load_stage` (`ground::stage`). Each member that creates a directory takes that step as an argument. `aoide-storage` keeps every old name and signature and passes its `state/` guard, so the old paths still work and stay guarded. The six warnings `migrate_dir`, `migrate_file` and `seed_if_absent` print no longer begin `aoide: `.
 
 ### Strillix serves no MCP
 

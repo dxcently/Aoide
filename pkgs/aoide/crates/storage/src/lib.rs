@@ -13,9 +13,11 @@
 //! call site changes.
 //!
 //! The git seam (`git`), time formatting (`time`), the host name
-//! (`display::os_hostname`), the runtime root (`runtime_dir::runtime_root`)
-//! and the hash helpers (`seal::{sha256, hex_encode}`) live in `ground` and
-//! are re-exported here at their old paths.
+//! (`display::os_hostname`), the runtime root (`runtime_dir::runtime_root`),
+//! the hash helpers (`seal::{sha256, hex_encode}`), the write and lock family
+//! of `fs` and the stage reader `stage::load_stage` live in `ground` and are
+//! re-exported here at their old paths; `fs` keeps a wrapper, passing its
+//! `state/` guard, for each family member that creates a directory.
 //!
 //! `petname` and `display` (petnames plan, P1) are likewise new: the
 //! `adjective-noun` wordlist + mint, and the render-time-only

@@ -21,7 +21,7 @@
 //! **A creation is a request, not a fact.** A filesystem that does not
 //! persist ACLs accepts the descriptor and ignores it, so every caller reads
 //! the object back before the first payload byte — the feed through
-//! [`file_refusal`] on the handle it just created, the storage layer's
+//! [`file_refusal`] on the handle it just created, `fs`'s
 //! private temp through [`file_privacy`] by path — and a link at either path
 //! is refused AS ITSELF by the same readers ([`reject_reparse_point`]), never
 //! read or written as the target. [`ensure_private_dir`] is the one place
@@ -32,7 +32,7 @@
 //! name, and the tightened directory's policy is read back before it returns.
 //!
 //! Who consumes it: the append-only feed writer in the protocol crate
-//! (create-if-absent, validate-before-append) and the storage layer's
+//! (create-if-absent, validate-before-append) and `fs`'s
 //! private-write and private-directory half. "No cross-crate copying" is why
 //! it lives here and is `pub`: this crate is the leaf both already depend on,
 //! so exposing it adds no dependency edge and creates no second copy.

@@ -135,29 +135,45 @@ by decision — no embedded database yet
   shell source path (`STRILLIX_SHELL_SRC`) live in `strillix-rice`'s `paths`.
   `atomic_symlink` is the retarget: a temp link renamed over the link.
 
-  **The write seam (`fs::watch_writes`).** Every atomic write (`atomic_write`,
-  `atomic_write_bytes`, `atomic_write_private`) to a watched path runs its
-  rename inside the live `WriteWatch`es registered for that path, outermost
-  first: `around_write` is called once with the rename as a closure, and returns
-  the rename's result. The registry is one process-wide list that holds each
-  watch weakly, so a registration lasts as long as the watch's last `Arc`; a
-  dead entry is dropped by the next write that scans the list. A watch sees the
-  path the caller passed, before symlink resolution. It calls `rename` exactly
-  once and never writes a watched path from inside it. A stage write that does
-  not go through `atomic_write` is invisible to the seam, so a watcher reads it
-  as a hand edit. `fs::seed_if_absent`'s absent-path seed is one such write: it
-  renames a `<stem>.<n>.seed.<pid>` temp into place with `rename_no_replace`, and it runs
-  before `aoided` registers its watch, so the baseline takes it.
+  **What lives in `ground`.** The write and lock family is `ground::fs`: the
+  atomic and private writes, the migration copy, the seed, the lock files,
+  the process probe and acts, the host seams, and their Windows half
+  (`fs_windows.rs`). The stage reader `load_stage` is `ground::stage`. This
+  crate keeps the Aoide half of `fs`: the root, `state_dir`, the conducting
+  stage, the session logs, `flake_root`, the root's own migration, and the
+  `state/` guard `ensure_write_dir`. It keeps every old path. Each family
+  member that creates a directory has a wrapper here, with its old name and
+  signature, that passes `ensure_write_dir` as ground's directory step.
+  `with_stage_lock`, `stage_lock_held` and `try_stage_lock` name the
+  conducting stage's directory for ground's `with_lock_in`, `lock_held_in`
+  and `try_lock_in`. The rest is re-exported by an explicit list, and `stage`
+  re-exports `load_stage`.
+
+  **The write seam (`fs::watch_writes`, ground's, re-exported here).** Every
+  atomic write (`atomic_write`, `atomic_write_bytes`, `atomic_write_private`)
+  to a watched path runs its rename inside the live `WriteWatch`es registered
+  for that path, outermost first: `around_write` is called once with the
+  rename as a closure, and returns the rename's result. The registry is one
+  process-wide list that holds each watch weakly, so a registration lasts as
+  long as the watch's last `Arc`; a dead entry is dropped by the next write
+  that scans the list. A watch sees the path the caller passed, before symlink
+  resolution. It calls `rename` exactly once and never writes a watched path
+  from inside it. A stage write that does not go through `atomic_write` is
+  invisible to the seam, so a watcher reads it as a hand edit.
+  `fs::seed_if_absent`'s absent-path seed is one such write: it renames a
+  `<stem>.<n>.seed.<pid>` temp into place with `rename_no_replace`, and it
+  runs before `aoided` registers its watch, so the baseline takes it.
 
   **The host split inside `fs`.** Two places, and both are seams rather than
   branches at the call sites: the private-write primitives keep their Windows
-  spellings in `fs_windows.rs`, beside `fs.rs` the way
+  spellings in ground's `fs_windows.rs`, beside its `fs.rs` the way
   `aoide-protocol`'s `feed_windows.rs` sits beside `feed.rs`
   (`flock(LOCK_EX)`/`LOCK_EX|LOCK_NB` become `LockFileEx` on the same lock
   files — and a lock that belongs to the HANDLE, so a second handle in the
   same process blocks exactly as a second process's does, the property
-  `with_stage_lock`'s re-entrancy flag exists for), and `fs.rs` itself now
-  carries FIVE public seams whose two arms are answers for one question:
+  `with_stage_lock`'s re-entrancy flag exists for), and ground's `fs` carries
+  FIVE public seams, re-exported here, whose two arms are answers for one
+  question:
   `detach` (the detached-spawn posture: `setsid` in a `pre_exec`, or
   `DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP`), `link_dir` (a directory link:
   `symlink(2)`, or `symlink_dir`), `path_is_under` (a project-prefix question,
@@ -174,10 +190,9 @@ by decision — no embedded database yet
   source what its target is. The private-file and private-directory policy is
   NOT answered here: `atomic_write_private`'s temp (a leftover of its name is
   removed, then created exclusively at `0600`) and `secure_private_dir` call
-  `ground::owner_only` (re-exported as `aoide_protocol::owner_only`), one
-  implementation in the leaf crate rather than a second copy in this one. The
-  state tree's privacy boundary is `state/`, which `fs::ensure_write_dir`
-  locks; the rule is CONTRACTS.md §4.
+  `ground::owner_only` from inside ground. The state tree's privacy boundary
+  is `state/`, which `fs::ensure_write_dir` locks, and every wrapper above
+  passes it; the rule is CONTRACTS.md §4.
   `fs::migrate_root_once` is the one-shot migration for the root layout
   itself: an old host's `~/Aoide/{state,log}` moves into the current root, and
   the peer-era state names are renamed. It is deliberately NOT wired into
@@ -223,20 +238,22 @@ by decision — no embedded database yet
   owner-only policy on a new one, so a native binder creates it through
   `aoide_protocol::owner_only::ensure_private_dir`. A PURE resolution: it
   creates and chmods nothing.
-- `fs::pid_is_alive` — the one process-liveness probe (POSIX `kill(pid, 0)`:
-  `0`/`EPERM` live, `ESRCH` absent, any other errno conservatively live; `0`
-  and `pid > pid_t::MAX` refused before the syscall, both naming a process
-  group). Live is not identity. Backs the stale-temp sweep, is re-exported as
+- `fs::pid_is_alive` (ground's `fs`, re-exported here) — the one
+  process-liveness probe (POSIX `kill(pid, 0)`: `0`/`EPERM` live, `ESRCH`
+  absent, any other errno conservatively live; `0` and `pid > pid_t::MAX`
+  refused before the syscall, both naming a process group). Live is not
+  identity. Backs the stale-temp sweep, is re-exported as
   `aoide_conduct::reap::proc_exists`, and is imported by `aoide-client`.
-- `fs::terminate` / `fs::wait_for_exit` (`Waited`) — the two process ACTS, in
-  the same module for the same reason the probe is: one seam, two hosts. Unix
-  sends `SIGTERM` and really waits (`waitpid`, `WNOHANG` or blocking); native
-  Windows `TerminateProcess`es and waits on the process handle
-  (`aoide_protocol::win_proc`). **The arms do not promise the same thing** —
-  Unix's is a request a trapped or hung child can survive, Windows' cannot be
-  caught at all — so the docs state the degradation and callers are written for
-  the weaker arm; `aoide-client::tunnel`'s record-keeping (a survivor keeps its
-  record) is the one caller, always behind its own argv guard.
+- `fs::terminate` / `fs::wait_for_exit` (`Waited`; ground's `fs`, re-exported
+  here) — the two process ACTS, in the same module for the same reason the
+  probe is: one seam, two hosts. Unix sends `SIGTERM` and really waits
+  (`waitpid`, `WNOHANG` or blocking); native Windows `TerminateProcess`es and
+  waits on the process handle (`aoide_protocol::win_proc`). **The arms do not
+  promise the same thing** — Unix's is a request a trapped or hung child can
+  survive, Windows' cannot be caught at all — so the docs state the
+  degradation and callers are written for the weaker arm;
+  `aoide-client::tunnel`'s record-keeping (a survivor keeps its record) is the
+  one caller, always behind its own argv guard.
 - `records::Project` — a project is a set of anchor roots, not one
   directory: `path` is always the first root, mirrored at `roots[0]`;
   `roots` is the FULL ordered root list, always written by

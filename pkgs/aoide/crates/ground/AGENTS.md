@@ -24,6 +24,120 @@ are in README.md.
   here. A consumer never gets a copy (`pkgs/aoide/crates/AGENTS.md`: no
   cross-crate copying). A signature change here changes both old paths, so
   check the whole workspace (`cargo check --workspace --all-targets`).
+- **The write and lock family has no unguarded form.** Each `fs` item that
+  makes a directory for a write, a copy or a lock file takes the directory
+  step, `make_dir: fn(&Path) -> io::Result<()>`, and calls it exactly where it
+  makes that directory, on that directory. In a write that is after the
+  symlink is resolved, so a write through a link prepares the directory it
+  lands in. None has a twin without the argument. A linking crate passes its
+  own guard (`aoide-storage` passes `ensure_write_dir`); a caller that wants
+  no guard says so at its own call site, with a plain create. `atomic_symlink`
+  is the one creator with no step: it makes its link's parent with a plain
+  `create_dir_all`. `secure_private_dir`'s Windows arm takes the step on the
+  parent and makes its leaf owner-only through
+  `owner_only::ensure_private_dir`. A new member that makes a directory takes
+  the step the same way. `std::fs::create_dir_all` is generic and does not
+  coerce to the step's type: pass a closure (`|d| std::fs::create_dir_all(d)`)
+  or a named function. Why: a twin with storage's name and signature would let
+  a mechanical import switch drop the guard without a compile error.
+- **`fs::pid_is_alive` is the shared liveness probe** — a POSIX
+  `kill(pid, 0)` where `ESRCH` alone is absent and every other errno (including
+  `EPERM`) reads live, so an unanswerable probe never reaps or unlinks. `0` and
+  `pid > pid_t::MAX` are refused BEFORE the syscall: both name a process group.
+  Live is NOT identity, so a caller about to SIGNAL a pid still checks its own
+  argv/port. Callers re-export or import this probe; never fork a `/proc` copy.
+- **The two process ACTS live beside the probe and promise DIFFERENT things per
+  host** — `fs::terminate` is `SIGTERM` (a request a trapped or hung child can
+  survive) on Unix and `TerminateProcess` (uncatchable) on native Windows, and
+  `fs::wait_for_exit` is `waitpid` there and `WaitForSingleObject` here. An
+  agent editing either must keep the doc's table honest and keep callers
+  written for the WEAKER arm; the one caller, the client crate's tunnel, reaches
+  `terminate` only through its argv guard, which is what makes the hard arm
+  safe. Never add a second kill/wait path: this is the seam.
+- **The atomic-write temps carry a per-write counter.** `temp_path` takes the
+  next value of a process-wide `AtomicU64` (`TEMP_SEQ`) and forms
+  `<stem>.<n>.tmp.<pid>` for `atomic_write*`, `<n>.migrate-tmp.<pid>` for
+  `migrate_dir`'s copy, and `<n>.seed.<pid>` for `seed_if_absent`. Two
+  writes in one process, threads included, never share one of these, so a
+  rename never finds another writer's temp already moved. The counter sits
+  before `.tmp.`, so the sweep, which reads the pid after the last `.tmp.`,
+  still reads the pid. One temp does not carry it: `atomic_symlink`'s
+  `.{name}.tmp-{pid}` at `fs.rs:234`, which the counter does not cover.
+  The counter adds `1 + digits(n)` bytes to each temp's name, so a target
+  whose name is within that margin of `NAME_MAX` (255 bytes on Linux) now
+  fails at create, where the `<stem>.tmp.<pid>` form still fit.
+- **`fs::atomic_write`'s temp cleanup is directory-wide, and every failing
+  half unlinks its own temp.** `sweep_stale_temps` reclaims any sibling
+  `<stem>.<n>.tmp.<pid>` whose pid is dead, not only temps sharing the target's
+  stem — a stem-scoped sweep can only ever reclaim a temp whose own file is
+  written again, which never happens for a write-once name (an outbox entry
+  is keyed by a msgid minted once; 1519 zero-byte orphans accumulated in one
+  node's `state/outbox/` that way). The `read_dir` was already paid on every
+  write, so widening the predicate costs nothing. Match `.tmp.` as a whole
+  separator: `migrate_dir`'s `<n>.migrate-tmp.<pid>` and `seed_if_absent`'s
+  `<n>.seed.<pid>` are deliberately distinct shapes and must stay out of the
+  sweep. A new temp-file shape in this crate picks a separator that is NOT
+  `.tmp.` unless it wants this sweep to own it.
+- **Every atomic write to a watched path renames inside its watch.**
+  `fs::watch_writes` registers a `WriteWatch` for a list of paths.
+  `atomic_write_bytes_impl` runs its rename inside each live watch for the path
+  the caller passed, before symlink resolution, the first registered outermost.
+  A watch calls `rename` exactly once and returns its result. It never writes a
+  watched path from inside `rename`, and it never writes through storage while
+  holding its own lock, since the rename runs inside that call. The registry
+  lock is released before any watch runs, and a poisoned one is recovered. The
+  temp, its removal on failure and the stale-temp sweep stay outside the seam,
+  so a write whose temp cannot be created never reaches a watch. A stage write
+  that does not go through `atomic_write` is invisible to the seam, so a watcher
+  reads it as a hand edit. `fs::seed_if_absent`'s absent-path seed is one such
+  write, and it runs before the daemon registers its watch.
+- **`fs.rs` carries five PUBLIC seams, each with one answer per host**, and a
+  caller asks one of them rather than spelling a platform: `detach` (the
+  detached-spawn posture — `setsid` in a `pre_exec`, or
+  `DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP`), `link_dir` (a directory link —
+  `symlink(2)` or `symlink_dir`, with a refused creation surfacing its own
+  error), `path_is_under` (a project-prefix question, component-wise, with the
+  `\\?\` verbatim prefix stripped; case-SENSITIVE on both hosts, stated as a
+  limit), `looks_absolute_any_host` (a remote node's root judged by the grammar
+  of the node it names) and `create_new_private` (write-once, the policy
+  attached at creation, and an unlink before any refusal so a caller never
+  inherits a "stale" file this process just made). The lock trio is `pub` for
+  the same reason: the conduct crate probes with it instead of a second
+  `flock`. Each of these has a native test on both hosts, or states its limit.
+- **`fs::atomic_write_private` is the ONE way a sensitive file gets written**
+  (the storage crate's identity key is its first caller). The
+  TEMP is created ALREADY at `0600` (`OpenOptions::mode`, never
+  `File::create`-then-`chmod`), so the `rename(2)` onto the live path never
+  passes a wider-mode window, mirroring the secrets crate's
+  `save_policies`/`save_totp_secret` (secure the temp BEFORE the rename,
+  never the final path after it). A leftover temp of the same name is
+  removed first and the create is exclusive (`O_EXCL`): `O_TRUNC` would keep
+  the leftover's wider mode, and `O_EXCL` refuses a link planted at that
+  name. Never write a sensitive file as a `File::create` + post-rename
+  `set_permissions` pair. The temp's mode is pinned directly, not just the
+  end state, by
+  `fs::tests::the_private_temp_is_created_already_0600_before_any_rename`,
+  and a leftover at the temp's name is pinned by
+  `fs::tests::write_temp_file_never_keeps_a_leftovers_wider_mode`.
+- **`fs::secure_private_dir` locks the DIRECTORY a sensitive file lives
+  in, not only the file** (the storage crate's identity `mint()` calls it on
+  its identity directory before writing anything into it). A `0600` file in a
+  `0755` directory still leaves that directory's entries world-listable.
+  The directory is created through the directory step. On Unix the chmod acts
+  on a descriptor opened `O_NOFOLLOW`, never on the name: a directory that is
+  a symlink is refused and its target keeps its mode, and a `dir` with a `..`
+  in it is refused before anything is created, since the directory it climbs
+  to is not one this call was asked to own. A future sensitive file in its OWN
+  new subdirectory calls this on that subdirectory the same way, before the
+  first `atomic_write_private` into it.
+- **The family's Windows spellings live in `fs_windows.rs`**, a submodule of
+  `fs` (the shape the protocol crate's `feed_windows.rs` set): every Unix-only
+  primitive gets its Windows spelling there, and `fs.rs` keeps the one
+  function each caller names with two `cfg` bodies. `write_temp_file`'s
+  Windows arm reads the private temp back through `owner_only::file_privacy`
+  BEFORE its first payload byte, because a `SECURITY_ATTRIBUTES` descriptor
+  is a request and a volume that ignores ACLs would otherwise accept a
+  private key at whatever policy it likes.
 - **`git` stays a root module of this crate.**
   `common_dir_answers_with_git_absent_from_path` re-runs its own test binary in
   a child, filtered `--exact` on its own path under `git::tests`. Under a
@@ -82,6 +196,11 @@ are in README.md.
   crate's `display` and `runtime_dir` modules, and reach the items through the
   re-exports. `runtime_dir::euid` and `runtime_dir::host_default` are `pub`
   for those tests and for no other caller.
+- Whether a linking crate's guard reaches each `fs` member: the tests here
+  pass a plain create as the step. `aoide-storage`'s fs tests hold its
+  wrappers to its guard.
+- `stage` has no test module. Storage's stage test reads through the
+  re-export.
 
 ## Extension points
 
@@ -90,6 +209,9 @@ are in README.md.
   stays in that product's crate. Add `pub mod <name>;` to `src/lib.rs` under
   its `cfg`, a bullet to README.md, and a `pub use ground::<name>;` line to the
   crate that re-exports it.
+- **A new member of the `fs` family that creates a directory** takes
+  `make_dir`. The crate that links it adds a wrapper that passes its guard,
+  and a test that fails when the wrapper passes a plain create instead.
 - **A new neutral crate** is named in `tests/boundary/scan.pl`'s `side_of`; see
   `pkgs/aoide/crates/AGENTS.md`.
 
@@ -101,3 +223,6 @@ are in README.md.
   `docs/architecture/PACKAGE-LAYOUT.md`.
 - A change to what the `boundary` check holds of a neutral crate updates
   `tests/boundary/README.md` and the header of `tests/boundary/scan.pl`.
+- An `fs` or `stage` item added, removed or re-signed updates
+  `aoide-storage`'s `fs.rs` wrappers and shim list, and its README and
+  AGENTS.

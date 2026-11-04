@@ -3,7 +3,7 @@ name = "ground"
 version.workspace = true
 edition = "2021"
 license = "MIT"
-description = "The neutral host seams: process table, local sockets, peer credentials, randomness, shell, git probes, time, hashing, and the Windows owner-only policy."
+description = "The neutral host seams: process table, local sockets, peer credentials, randomness, shell, git probes, time, hashing, the atomic write and lock family, the stage reader, and the Windows owner-only policy."
 
 [lib]
 name = "ground"
@@ -12,14 +12,20 @@ path = "src/lib.rs"
 [dependencies]
 # `hash`. 0.10, not the workspace's 0.11: the desktop lock holds sha2 0.10.9 only.
 sha2 = "0.10"
+# `stage::load_stage`: the reader's `DeserializeOwned` bound and
+# `serde_json::from_str`; `fs::seed_if_absent`: `serde_json::Value`, to tell a
+# live registry from a corrupt one.
+serde = { workspace = true }
+serde_json = { workspace = true }
 
-# `local_socket`, `peercred`, `git`, `host_name`, `runtime_dir`: fcntl, socket,
-# getsockopt, geteuid, gethostname, open flags.
+# `local_socket`, `peercred`, `git`, `host_name`, `runtime_dir`, `fs`: fcntl,
+# socket, getsockopt, geteuid, gethostname, open flags, flock, kill, waitpid,
+# setsid, renameat2.
 [target.'cfg(unix)'.dependencies]
 libc = { workspace = true }
 
-# Native sockets, process table, owner-only DACLs, CNG randomness, host name;
-# only Windows needs these APIs.
+# Native sockets, process table, owner-only DACLs, CNG randomness, host name,
+# and `fs`'s lock files and no-clobber rename; only Windows needs these APIs.
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61.2", features = [
     "Wdk_System_Threading",

@@ -514,103 +514,20 @@
   `a_request_signature_never_verifies_as_an_answer_and_back`. Any new
   signed answer form needs its own tag and vector, never a reuse of
   `answer_string`'s.
-- **`fs::pid_is_alive` is the shared liveness probe in core** — a POSIX
-  `kill(pid, 0)` where `ESRCH` alone is absent and every other errno (including
-  `EPERM`) reads live, so an unanswerable probe never reaps or unlinks. `0` and
-  `pid > pid_t::MAX` are refused BEFORE the syscall: both name a process group.
-  Live is NOT identity, so a caller about to SIGNAL a pid still checks its own
-  argv/port. Callers re-export or import this probe; never fork a `/proc` copy.
-- **The two process ACTS live beside the probe and promise DIFFERENT things per
-  host** — `fs::terminate` is `SIGTERM` (a request a trapped or hung child can
-  survive) on Unix and `TerminateProcess` (uncatchable) on native Windows, and
-  `fs::wait_for_exit` is `waitpid` there and `WaitForSingleObject` here. An
-  agent editing either must keep the doc's table honest and keep callers
-  written for the WEAKER arm; the one caller, `aoide-client::tunnel`, reaches
-  `terminate` only through its argv guard, which is what makes the hard arm
-  safe. Never add a second kill/wait path: this is the seam.
 - **A node name this box gives itself is `display::local_node_name()`, never
   `local_host_name()`** — an address grammar (`^[a-z0-9][a-z0-9-]*$`) is
   lowercase and an OS host name need not be (native Windows' DNS name is
   conventionally upper-case). Any new site that stamps, declares or compares
   this box as a NODE uses the folded form; the raw name stays for display and
   for an ssh target.
-- **The atomic-write temps carry a per-write counter.** `temp_path` takes the
-  next value of a process-wide `AtomicU64` (`TEMP_SEQ`) and forms
-  `<stem>.<n>.tmp.<pid>` for `atomic_write*`, `<n>.migrate-tmp.<pid>` for
-  `migrate_dir`'s copy, and `<n>.seed.<pid>` for `seed_if_absent`. Two
-  writes in one process, threads included, never share one of these, so a
-  rename never finds another writer's temp already moved. The counter sits
-  before `.tmp.`, so the sweep, which reads the pid after the last `.tmp.`,
-  still reads the pid. One temp does not carry it: `atomic_symlink`'s
-  `.{name}.tmp-{pid}` at `fs.rs:470`, which the counter does not cover.
-  The counter adds `1 + digits(n)` bytes to each temp's name, so a target
-  whose name is within that margin of `NAME_MAX` (255 bytes on Linux) now
-  fails at create, where the `<stem>.tmp.<pid>` form still fit.
-- **`fs::atomic_write`'s temp cleanup is directory-wide, and every failing
-  half unlinks its own temp.** `sweep_stale_temps` reclaims any sibling
-  `<stem>.<n>.tmp.<pid>` whose pid is dead, not only temps sharing the target's
-  stem — a stem-scoped sweep can only ever reclaim a temp whose own file is
-  written again, which never happens for a write-once name (an outbox entry
-  is keyed by a msgid minted once; 1519 zero-byte orphans accumulated in one
-  node's `state/outbox/` that way). The `read_dir` was already paid on every
-  write, so widening the predicate costs nothing. Match `.tmp.` as a whole
-  separator: `migrate_dir`'s `<n>.migrate-tmp.<pid>` and `seed_if_absent`'s
-  `<n>.seed.<pid>` are deliberately distinct shapes and must stay out of the
-  sweep. A new temp-file shape in this crate picks a separator that is NOT
-  `.tmp.` unless it wants this sweep to own it.
-- **Every atomic write to a watched path renames inside its watch.**
-  `fs::watch_writes` registers a `WriteWatch` for a list of paths.
-  `atomic_write_bytes_impl` runs its rename inside each live watch for the path
-  the caller passed, before symlink resolution, the first registered outermost.
-  A watch calls `rename` exactly once and returns its result. It never writes a
-  watched path from inside `rename`, and it never writes through storage while
-  holding its own lock, since the rename runs inside that call. The registry
-  lock is released before any watch runs, and a poisoned one is recovered. The
-  temp, its removal on failure and the stale-temp sweep stay outside the seam,
-  so a write whose temp cannot be created never reaches a watch. A stage write
-  that does not go through `atomic_write` is invisible to the seam, so a watcher
-  reads it as a hand edit. `fs::seed_if_absent`'s absent-path seed is one such
-  write, and it runs before `aoided` registers its watch.
-- **`fs.rs` carries five PUBLIC seams, each with one answer per host**, and a
-  caller asks one of them rather than spelling a platform: `detach` (the
-  detached-spawn posture — `setsid` in a `pre_exec`, or
-  `DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP`), `link_dir` (a directory link —
-  `symlink(2)` or `symlink_dir`, with a refused creation surfacing its own
-  error), `path_is_under` (a project-prefix question, component-wise, with the
-  `\\?\` verbatim prefix stripped; case-SENSITIVE on both hosts, stated as a
-  limit), `looks_absolute_any_host` (a remote node's root judged by the grammar
-  of the node it names) and `create_new_private` (write-once, the policy attached
-  at creation, and an unlink before any refusal so a caller never inherits a
-  "stale" file this process just made). The lock trio is `pub` for the same
-  reason: `aoide-conduct` probes with it instead of a second `flock`. Each of
-  these has a native test on both hosts, or states its limit.
-- **`fs::atomic_write_private` is the ONE way a sensitive file gets written
-  in this crate** (`identity.rs`'s `ed25519.key` is its first caller). The
-  TEMP is created ALREADY at `0600` (`OpenOptions::mode`, never
-  `File::create`-then-`chmod`), so the `rename(2)` onto the live path never
-  passes a wider-mode window, mirroring `aoide-secrets/src/store.rs`'s
-  `save_policies`/`save_totp_secret` (secure the temp BEFORE the rename,
-  never the final path after it). A leftover temp of the same name is
-  removed first and the create is exclusive (`O_EXCL`): `O_TRUNC` would keep
-  the leftover's wider mode, and `O_EXCL` refuses a link planted at that
-  name. Never write a sensitive file as a `File::create` + post-rename
-  `set_permissions` pair. The temp's mode is pinned directly, not just the
-  end state, by
-  `fs::tests::the_private_temp_is_created_already_0600_before_any_rename`,
-  and a leftover at the temp's name is pinned by
-  `fs::tests::a_private_write_never_publishes_a_leftover_temps_wider_mode`.
-- **`fs::secure_private_dir` locks the DIRECTORY a sensitive file lives
-  in, not only the file** (`identity.rs`'s `mint()` calls it on
-  `identity_dir()` before writing anything into it). A `0600` file in a
-  `0755` directory still leaves that directory's entries world-listable.
-  The directory is created through `ensure_write_dir`, so one under
-  `state/` locks `state/` first. On Unix the chmod acts on a descriptor
-  opened `O_NOFOLLOW`, never on the name: a directory that is a symlink is
-  refused and its target keeps its mode, and a `dir` with a `..` in it is
-  refused before anything is created, since the directory it climbs to is
-  not one this call was asked to own. A future sensitive file in its OWN
-  new subdirectory calls this on that subdirectory the same way, before the
-  first `atomic_write_private` into it.
+- **The write and lock family lives in `ground::fs`; this crate holds its
+  guard.** Each family member that creates a directory has a wrapper here,
+  with its old name and signature, that passes `ensure_write_dir` as ground's
+  directory step. Every other `fs` item ground holds is re-exported by an
+  explicit list, never a glob: a glob would hand core any later ground item
+  without anyone choosing it. A new wrapper passes `ensure_write_dir` and gets
+  a row in `every_creator_makes_state_owner_only_on_a_fresh_tree`. What an
+  edit to the family must keep is in `pkgs/aoide/crates/ground/AGENTS.md`.
 - **`state/` is the privacy boundary for the state tree** (CONTRACTS.md §4
   states what the lock checks and what it does not cover). Every storage
   creator whose directory lies under `state/` goes through
@@ -1244,12 +1161,11 @@
 
 - **A Windows arm keeps the Unix contract or refuses by name — never an
   `Ok(())`, a `true`, or an empty collection standing in for a guarantee.**
-  The host split lives in one sibling file, `src/fs_windows.rs`, beside
-  `fs.rs` (the shape `aoide_protocol::feed`'s `feed_windows.rs` set): every
-  Unix-only primitive gets its Windows spelling there, and `fs.rs` keeps the
-  one function each caller names with two `cfg` bodies. `unlock`,
-  `lock_exclusive` and `try_lock_exclusive` are `pub(crate)` because
-  `outbox`'s `.bsy` guard takes the same lock rather than a second one.
+  The write and lock family's host split is ground's `fs_windows.rs`. This
+  crate's own Windows arms (the `state/` guard's `owner_only_state`) keep the
+  same rule. `unlock`, `lock_exclusive` and `try_lock_exclusive` are
+  re-exported here because `outbox`'s `.bsy` guard takes the same lock rather
+  than a second one.
 - **A private file or directory policy shared with another crate is CALLED,
   never copied.** `ground::owner_only` (re-exported as
   `aoide_protocol::owner_only`) is the one implementation of the owner-only
@@ -1260,17 +1176,14 @@
   HOST's own answer (`mode` on Unix, the DACL on Windows). A privacy check
   is never skipped on a host where it is inconvenient; a test that asserts a
   Linux fact (`/proc`, a `umask`, a symlink fixture) is `cfg`-gated with the
-  reason in place. The readback obligation is not the test's alone:
-  `write_temp_file`'s Windows arm reads the private temp back through
-  `owner_only::file_privacy` BEFORE its first payload byte, because a
-  `SECURITY_ATTRIBUTES` descriptor is a request and a volume that ignores
-  ACLs would otherwise accept a private key at whatever policy it likes.
+  reason in place.
 
 ## Docs update required in the same commit
 
 - This `README.md` when a new module or stage-file shape is added.
-- `fs::WriteWatch` and `fs::watch_writes` (the write seam): the server crate's
-  README and AGENTS, and AOIDED.md's hand-edit section, in the same commit.
+- `fs::WriteWatch` and `fs::watch_writes` (the write seam; ground's `fs`,
+  re-exported here): the server crate's README and AGENTS, and AOIDED.md's
+  hand-edit section, in the same commit.
 - `CONTRACTS.md §4`/`§7` when a stage-file or node-registry wire shape
   changes — including `config.toml`'s own subsection when `config::SCHEMA`
   gains or loses a section/key, plus `modules/dendrites/aoide-config.nix` when the nix authoring front-end's

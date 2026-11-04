@@ -1,6 +1,6 @@
 //! The Windows half of [`super`]'s FS substrate — the two primitives whose
 //! Unix shape has no Windows equivalent, kept in one sibling file the way
-//! `aoide-protocol`'s `feed_windows.rs` sits beside `feed.rs`.
+//! the protocol crate's `feed_windows.rs` sits beside `feed.rs`.
 //!
 //! | concern | Unix | here |
 //! | --- | --- | --- |
@@ -14,7 +14,7 @@
 //! and therefore no promise to keep. What `LockFileEx` gives instead: the
 //! lock belongs to the HANDLE, so a second handle in the same process blocks
 //! exactly as a second process's does (Windows locks are per-handle, not
-//! per-process) — which is what [`super::with_stage_lock`]'s re-entrancy flag
+//! per-process) — which is what [`super::with_lock_in`]'s re-entrancy flag
 //! exists to survive on Unix and what makes it necessary here too. `flock`'s
 //! advisory half is the ONE difference worth naming: a Windows byte-range
 //! lock is MANDATORY, so another process that tried to read or write the
@@ -47,7 +47,7 @@ const WHOLE_FILE_LOW: u32 = u32::MAX;
 const WHOLE_FILE_HIGH: u32 = u32::MAX;
 
 /// Take the exclusive lock, blocking until it is free — the shape
-/// [`super::lock_path`] and `super::with_stage_lock` both need (a concurrent
+/// [`super::lock_path`] and `super::with_lock_in` both need (a concurrent
 /// opener waits rather than races).
 pub(crate) fn lock_exclusive(file: &File) -> io::Result<()> {
     lock(file, LOCKFILE_EXCLUSIVE_LOCK)
@@ -155,7 +155,7 @@ mod tests {
     use super::*;
 
     fn tmp(tag: &str) -> PathBuf {
-        std::env::temp_dir().join(format!("aoide-fs-win-{tag}-{}", std::process::id()))
+        std::env::temp_dir().join(format!("ground-fs-win-{tag}-{}", std::process::id()))
     }
 
     #[test]

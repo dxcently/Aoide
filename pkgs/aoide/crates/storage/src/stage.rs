@@ -1,5 +1,6 @@
 //! Stage-file I/O (missing file → empty registry; writes atomic) and the
-//! four CONDUCTING stage-file paths.
+//! four CONDUCTING stage-file paths. The reader, `load_stage`, is
+//! `ground::stage`'s, re-exported here.
 //!
 //! Moved from `graph/model.rs` (Phase 3a restructure,
 //! docs/architecture/PACKAGE-LAYOUT.md); re-exported at the old path so every
@@ -35,18 +36,7 @@ pub fn graph_path() -> std::path::PathBuf {
     conducting_stage_dir().join("graph.json")
 }
 
-/// Load one stage file; a missing file is an empty registry (tolerated), a
-/// corrupt one is a structured error string.
-pub fn load_stage<T: serde::de::DeserializeOwned + Default>(
-    path: &std::path::Path,
-) -> Result<T, String> {
-    match std::fs::read_to_string(path) {
-        Ok(s) => serde_json::from_str(&s)
-            .map_err(|e| format!("{}: unreadable stage file: {e}", path.display())),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(T::default()),
-        Err(e) => Err(format!("{}: {e}", path.display())),
-    }
-}
+pub use ground::stage::load_stage;
 
 /// Atomic write of one stage file (write-temp-then-rename, CONTRACTS.md §4).
 pub fn write_stage<T: Serialize>(path: &std::path::Path, value: &T) -> Result<(), String> {

@@ -1173,6 +1173,8 @@ name = "ground"
 version = "0.0.26"
 dependencies = [
  "libc",
+ "serde",
+ "serde_json",
  "sha2",
  "windows-sys 0.61.2",
 ]
