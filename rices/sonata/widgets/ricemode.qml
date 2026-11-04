@@ -36,8 +36,10 @@
 //                          land in the draft, in declarative nothing is unsaved)
 // Marks: a full dot for the rice staged now and for the declarative row while it
 // is locked, in that mode's colour; a ring on the last-staged rice while locked;
-// a dot on the current draft. The marked rows only close the menu. In draft mode
-// the drafted rice's row is live: it leaves the draft for plain staging.
+// a dot on the current draft. The rice staged now is the one stage/mode.json
+// names and the stage shows (theme.riceName). The marked rows only close the
+// menu. In draft mode the drafted rice's row is live: it leaves the draft for
+// plain staging.
 // A stage, a declarative, an enter and a new each change what is live, so the
 // word reads `…` and every click is swallowed until theme.riceMode, the draft
 // name or the rice changes, or 10s pass: the double click that sent two
@@ -338,7 +340,7 @@ Item {
                             id: riceEntry
                             width: parent ? parent.width : 0
                             required property var modelData
-                            readonly property bool here: root.ready && root.mode === "staging" && modelData.name === root.answer.rice
+                            readonly property bool here: root.ready && root.mode === "staging" && modelData.name === root.answer.rice && modelData.name === root.rice
                             readonly property bool last: root.ready && root.mode === "declarative" && modelData.name === root.answer.stagingRice
                             PickRow {
                                 live: !!riceEntry.modelData.ok

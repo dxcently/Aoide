@@ -225,3 +225,17 @@ in git; `git log --follow -- rices/default/` finds it.
   And `onStatusChanged` runs inside the `source` write: a fallback chain that
   advances there on `Error` re-enters its own binding, so with two failing
   candidates in a row it stops on the second, with a binding-loop warning.
+
+## The staged mark follows the screen (the RICE menu, 2026-11-04)
+
+- **A rice row is marked staged only while the stage shows it.** `answer.rice`
+  is what `stage/mode.json` names and `theme.riceName` is what
+  `stage/theme.json` shows. They part when the reload that brings the staged
+  rice back after a login or a switch fails: the activation has laid the
+  declared rice down while `stage/mode.json` still names the staged one. A
+  mark that read `answer.rice` alone marked the staged rice, and a marked
+  row's click only closes the menu, so the staged rice's own row could not
+  even try the stage again (chiyo, 2026-11-03: a leftover user drop-in on
+  the reload unit overrode its `STRILLIX_TEMPLATES` with an old template
+  tree). Nothing on screen says the reload failed, and a stage that fails
+  still fails when its row is clicked.

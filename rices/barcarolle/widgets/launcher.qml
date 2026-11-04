@@ -973,7 +973,7 @@ PanelWindow {
     Timer { id: afterSave; interval: 1500; onTriggered: if (root.shown && root.view === "rices") root.askRice() }
     readonly property var riceItems: {
         if (!Rice.ready(root.answer)) return []
-        return Rice.switchRows(root.answer, root.riceMode).filter(function (r) { return r.kind !== "" }).map(function (r) {
+        return Rice.switchRows(root.answer, root.riceMode, root.theme.riceName).filter(function (r) { return r.kind !== "" }).map(function (r) {
             return { kind: "rice", name: r.label, row: r, icon: root.g3Dir + (r.kind === "declarative" ? "finder-declarative.svg" : "finder-folder.svg") + root.bust }
         }).concat([{ kind: "folder", key: "drafts", name: "Drafts", icon: root.g3Dir + "finder-folder-drafts.svg" + root.bust }])
     }
@@ -982,7 +982,7 @@ PanelWindow {
     })
     readonly property var riceRows: {
         var out = []
-        Rice.switchRows(root.answer, root.riceMode).forEach(function (r) {
+        Rice.switchRows(root.answer, root.riceMode, root.theme.riceName).forEach(function (r) {
             if (r.kind === "declarative" && out.length > 0) out.push({ sep: true })
             out.push({ label: r.label, live: r.live, check: r.mark === "✓", ring: r.mark === "○", act: function () { root.riceAct(r) } })
         })

@@ -33,7 +33,7 @@ Item {
 
     readonly property var rows: !root.canMenu
         ? [{ label: "Switching needs a newer shell", mark: "", live: false, kind: "", name: "", here: false }]
-        : root.pending ? [Rice.waiting(null)] : Rice.switchRows(root.answer, root.theme.riceMode)
+        : root.pending ? [Rice.waiting(null)] : Rice.switchRows(root.answer, root.theme.riceMode, root.theme.riceName)
 
     function toggle() {
         if (root.open) { root.open = false; return }

@@ -25,8 +25,9 @@
 // The lamp column marks what is live: a full lamp for the rice staged now (in
 // the staging colour), for the declarative row while it is locked, and for the
 // current draft; a hollow lamp, dim, on the last-staged rice while locked. The
-// marked rows only close the menu. In draft mode the drafted rice's row is live:
-// it leaves the draft for plain staging.
+// rice staged now is the one stage/mode.json names and the stage shows
+// (theme.riceName). The marked rows only close the menu. In draft mode the
+// drafted rice's row is live: it leaves the draft for plain staging.
 // A stage, a declarative, an enter and a new each change what is live, so the
 // word reads a dim `…` and every click is swallowed until theme.riceMode, the
 // draft name or the rice changes, or 10s pass: the double click that sent two
@@ -225,7 +226,7 @@ Item {
                 Column {
                     id: riceEntry
                     required property var modelData
-                    readonly property bool here: root.ready && root.mode === "staging" && modelData.name === root.answer.rice
+                    readonly property bool here: root.ready && root.mode === "staging" && modelData.name === root.answer.rice && modelData.name === root.rice
                     readonly property bool last: root.ready && root.mode === "declarative" && modelData.name === root.answer.stagingRice
                     PickRow {
                         live: !!riceEntry.modelData.ok
@@ -327,7 +328,7 @@ Item {
                 Component.onCompleted: setSource(root.kit.helper("Pane"), {
                     kit: Qt.binding(() => root.kit),
                     title: "rice",
-                    stat: Qt.binding(() => root.answer && root.answer.ok ? "" + (root.answer.rice || "no rice") : ""),
+                    stat: Qt.binding(() => root.answer && root.answer.ok ? "" + (root.rice || "no rice") : ""),
                     focused: true,
                     animateOnCreate: true,
                     innerGlow: false,

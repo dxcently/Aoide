@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### The RICE menu marks the staged rice only while it is on screen
+
+- barcarolle's, cadenza's and sonata's RICE menus mark a rice as staged now only while the stage shows it, not just while `stage/mode.json` names it. When the reload that brings a staged rice back after a login or a switch failed, the declared rice was on screen but the menu still marked the staged rice, and a click on a marked row only closes the menu, so the staged rice's own row could not even try the stage again. Now no rice is marked then, and a click on the staged rice's row tries the stage again; a stage that fails still fails. Nothing on screen says the reload failed.
+- cadenza's RICE menu header names the rice on screen, as cadenza's design has it, not the rice `stage/mode.json` names.
+
 ### barcarolle loads app and tray icons on the main thread
 
 - barcarolle's bar and launcher load app and tray icons on the GUI thread, not on Qt's image reader thread. All five Quickshell crash reports on record, from two machines, happened inside one of Quickshell's image providers on that thread: three `std::bad_alloc` in the theme icon provider on a laptop after sleep or unlock, and two segfaults on a desktop, one in the same provider and one in the tray's pixmap provider. The crash was not reproduced, so this removes what the crashes share rather than a proven cause.

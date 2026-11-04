@@ -2,7 +2,7 @@
 
 // The RICE menu's rows, for every surface that offers them (the G3, the Start menu).
 // A surface paints rows and calls act(); it never decides what a row means.
-// `answer` is bridge.riceMenu's reply, `mode` is theme.riceMode.
+// `answer` is bridge.riceMenu's reply, `mode` is theme.riceMode, `shown` is theme.riceName (the rice the stage shows).
 // A row: { label, mark ("✓" in force, "○" where staging returns, ""), live, kind, name, here }.
 // A row of kind "" is an inert note (never live).
 
@@ -15,14 +15,15 @@ function waiting(answer) {
 }
 
 // every rice in the runtime rices, a "rice.nix changed" note under one whose rice.nix differs from the build's copy;
-// then the declared build (kind "declarative"), and a "next rebuild: <rice>" note when the host file declares another rice
-function switchRows(answer, mode) {
+// then the declared build (kind "declarative"), and a "next rebuild: <rice>" note when the host file declares another rice.
+// A rice is here only in staging mode, while answer.rice (stage/mode.json) names it and the stage shows it
+function switchRows(answer, mode, shown) {
     if (!ready(answer)) return [waiting(answer)]
     var rows = []
     var rices = Array.isArray(answer.rices) ? answer.rices : []
     for (var i = 0; i < rices.length; i++) {
         var name = "" + rices[i].name
-        var here = mode === "staging" && name === answer.rice
+        var here = mode === "staging" && name === answer.rice && name === shown
         var back = mode === "declarative" && name === answer.stagingRice
         rows.push({ label: rices[i].ok ? name + (rices[i].pending === true ? " · pending" : "") : name + " · unreadable",
                     mark: here ? "✓" : (back ? "○" : ""), live: !!rices[i].ok, kind: "stage", name: name, here: here })

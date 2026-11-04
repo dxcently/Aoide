@@ -2526,7 +2526,7 @@ Item {
                     readonly property string riceKey: root.theme.riceMode + "/" + root.theme.riceName + "/" + ((root.theme.modeRaw && root.theme.modeRaw.draft) || "")
                     onRiceKeyChanged: sm.ricePending = false
                     Timer { interval: 10000; running: sm.ricePending; onTriggered: sm.ricePending = false }
-                    readonly property var stageRows: sm.ricePending ? [Rice.waiting(null)] : Rice.switchRows(sm.riceAnswer, root.theme.riceMode)
+                    readonly property var stageRows: sm.ricePending ? [Rice.waiting(null)] : Rice.switchRows(sm.riceAnswer, root.theme.riceMode, root.theme.riceName)
                     readonly property var draftRows: sm.ricePending || !Rice.ready(sm.riceAnswer) ? [] : [{
                         head: "drafts" + (sm.riceAnswer.draftsRice ? " · " + sm.riceAnswer.draftsRice : ""),
                         label: "", mark: "", live: false, kind: "", name: "", here: false
