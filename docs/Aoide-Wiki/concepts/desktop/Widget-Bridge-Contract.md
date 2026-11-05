@@ -212,24 +212,31 @@ no session id.)
 
 ## The trace query — a READ the bridge answers
 
-`{cmd:"sessiontrace", sessionId, lines, clip:"line"|"detail"}` asks for ONE
-session's emitted blocks: what it THOUGHT, SAID, called and got back. The daemon
-re-execs the existing CLI (`aoide session trace <id> --tail N --clip … --json`,
+`{cmd:"sessiontrace", sessionId, lines, clip:"line"|"detail", turn}` asks for
+ONE session's emitted blocks: what it THOUGHT, SAID, called and got back, and
+the span tree of one of its turns (the newest, or the one the optional `turn`
+string names). The daemon re-execs the existing CLI (`aoide session trace <id>
+--tail N --clip … --json`, plus `--turn <turn>` when one is named,
 [[Eidolon-Trace]]) and answers one JSON line:
 
 ```json
 {"ok":true,"sessionId":"…","clip":"line","lines":12,"trace":"…jsonl",
- "at":1789985394295,"steps":[…],"stepsOmitted":0}
+ "at":1789985394295,"steps":[…],"stepsOmitted":0,
+ "turns":[…],"turnsOmitted":0,"spans":{…},"spansOmitted":0}
 {"ok":false,"sessionId":"…","clip":"line","lines":12,
  "reason":"no-trace","message":"`…` has no readable trace at …"}
 ```
 
 Each step is `{ id, ts, kind, text, error, clipped }`, `kind` ∈ `thinking · say ·
 tool · result · settled · user · other`, `id`/`ts` the trace record's own and
-`clipped` true when the text is a kept prefix. `message` is the CLI's OWN taught
-refusal, carried verbatim (`reason ∈ no-trace · no-presence · unknown-agent ·
-remote-target · not-found · ambiguous`, plus the door's own `no-answer` /
-`bad-request`) — so a widget paints a reason instead of guessing at one.
+`clipped` true when the text is a kept prefix. `turns` lists the window's turns
+and `spans` is one turn's tree (`null` when the window holds none); both are
+read from the whole trace window, never the `lines` cut, both carry no content,
+and their shapes are the conduct crate's README's. `message` is the CLI's OWN
+taught refusal, carried verbatim (`reason ∈ no-trace · no-trace-capability ·
+no-presence · no-turn · unknown-agent · remote-target · not-found · ambiguous`,
+plus the door's own `no-answer` / `bad-request`) — so a widget paints a reason
+instead of guessing at one.
 
 **It is a snapshot, never a stream, and the widget may not imply otherwise.**
 There is no token stream to subscribe to: each answer is a read of the harness's

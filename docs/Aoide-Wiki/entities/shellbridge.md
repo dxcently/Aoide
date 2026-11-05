@@ -56,18 +56,21 @@ gadget and the [[Terminal-Commander]] roster call on a row click — QML
 issues the socket command, never shells out. The command set is narrow (jump
 only; prune remains an open thread, see below).
 
-**The read-only trace query** (`{cmd:"sessiontrace", sessionId, lines, clip}`)
-is one of the socket's two READs (the RICE menu's `ricemenu`, below, is the
-other): it re-execs the existing CLI —
-`aoide session trace <id> --tail N --clip line|detail --json`,
+**The read-only trace query** (`{cmd:"sessiontrace", sessionId, lines, clip,
+turn}`) is one of the socket's two READs (the RICE menu's `ricemenu`, below, is
+the other): it re-execs the existing CLI —
+`aoide session trace <id> --tail N --clip line|detail --json [--turn <turn>]`,
 [[Eidolon-Trace]] — and replies with one JSON line of STEPS (one object per
 emitted content block: thinking · say · tool · result · settled · user · other),
-or with the CLI's own taught refusal verbatim (`no-trace`, `no-presence`,
-`unknown-agent`, `remote-target`, `not-found`, `ambiguous`, plus this door's
+the window's TURNS and one turn's SPAN tree (the newest, or the one `turn`
+names), or with the CLI's own taught refusal verbatim (`no-trace`,
+`no-trace-capability`, `no-presence`, `no-turn`, `unknown-agent`,
+`remote-target`, `not-found`, `ambiguous`, plus this door's
 `no-answer`/`bad-request`). It writes nothing, resolves nothing itself, and is
 bounded by the door rather than by the caller: `lines` is defaulted to 12 and
-clamped to 40 from above, a nonsense `lines` or an unknown `clip` is refused
-(never silently widened — a line naming this verb that fails its own gate is
+clamped to 40 from above, and a nonsense `lines`, an unknown `clip` or a `turn`
+that is not a plain id string (empty, flag-shaped, or holding whitespace) is
+refused (never silently widened — a line naming this verb that fails its own gate is
 still ANSWERED, because its caller is parked on a reply), and the re-exec'd
 child is killed and reaped at a 10 s wall clock with its pipes read by
 slot-counted reader threads, so a DESCENDANT holding a pipe open costs a slot

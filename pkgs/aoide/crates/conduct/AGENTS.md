@@ -885,7 +885,7 @@ in the message.
 - **The span view reads the WHOLE window, never the `--tail` cut.**
   `session_trace` builds `Turns` from every readable line `read_trace` returned
   (the 1 MiB tail), and `--tail` only shapes `lines` and `steps`. A turn the
-  tail cuts reads as `partial`, never as a shorter turn.
+  1 MiB window cuts reads as `partial`, never as a shorter turn.
 - **`--turn` is JSON-only, never follows, and never falls back.** The usage
   errors (`turn-with-follow`, then `turn-needs-json`) are checked before any
   read. A named turn the window does not hold is a taught `no-turn` refusal

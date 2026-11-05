@@ -854,7 +854,7 @@ aoide session find [<query>…] [--related <ref>] [--all] [--json]
 ### aoide session trace
 
 ```
-aoide session trace <id> [--tail N] [--follow] [--json]
+aoide session trace <id> [--tail N] [--clip line|detail] [--follow] [--json] [--turn <turn>]
 ```
 
 - **Reads:** `state/stage/sessions.json` (for `<id>`'s own record — its
@@ -887,20 +887,37 @@ aoide session trace <id> [--tail N] [--follow] [--json]
   `ContextSize{tokens}` each render their one salient field; a kind aoide has
   never heard of renders its own payload rather than vanishing, and a line
   that is not a readable record renders flagged `#?  --:--:--  ?  …`.
-  `--json` passes the raw trace lines through **unchanged**, byte for byte,
-  as `data.lines`, beside `sessionId`/`trace`/`tail`/`records`.
+  `--json` carries the window's lines as `data.lines`, each stripped of the
+  characters no terminal may be handed, beside `sessionId`/`trace`/`tail`/
+  `records`, and three projections of them: `data.steps` (one object per
+  emitted content block, clipped to `--clip`, with `stepsOmitted`),
+  `data.turns` (every turn in the window, oldest first, with `turnsOmitted`)
+  and `data.spans` (one turn's span tree in OTel GenAI names: `invoke_agent`,
+  then `step <n>`, then `chat <model>` and `execute_tool <name>`; names, ids,
+  times, status and token counts, never content; with `spansOmitted`). Turns
+  and spans are read from the whole window, the trace's last 1 MiB, never
+  from the `--tail` cut. The shapes are in the conduct crate's README.
 - **Flags:** `--tail N` shows the last N records (a non-numeric or zero value
   is a usage error, never a silently empty listing). `--follow` re-reads the
   trace every 500ms and prints new records as they land, blocking until
   Ctrl-C — **CLI-only** (a follow that parks a connection makes no sense over
   MCP/A2A/the daemon socket, the same stance `events tail` takes).
+  `--clip line|detail` sets how much of each block `data.steps` carries:
+  `line` (the default, and the terminal's own one-line spelling) or `detail`
+  (each block's own line breaks, a few hundred characters, plus a tool call's
+  arguments). `--turn <turn>` picks the turn whose tree `data.spans` carries
+  (the newest without it); it needs `--json` and never combines with
+  `--follow`. The usage errors (exit 2: `bad-tail`, `bad-clip`,
+  `turn-with-follow`, `turn-needs-json`) are checked before anything is read.
 - **Errors (exit 1), each naming WHY:** `not-found` (`<id>` matches no local
   session), `ambiguous`, `remote-target` (a `node/<rest>` target — a trace is
   a file on the node that wrote it; run the command there), `unknown-agent`
   (no profile for the record's `agent`), `no-trace-capability` (the harness
   keeps no trace at all — `eidolon` is the one that does today),
   `no-presence` (the presence metadata is gone), `no-trace` (the presence
-  names no trace file, or names one that is not there — an older eidolon).
+  names no trace file, or names one that is not there — an older eidolon),
+  `no-turn` (`--turn` names no turn in the window; the refusal lists the
+  newest turn ids and the command that names the latest).
   A trace that EXISTS and holds no records yet is an honest `0 record(s)`,
   not an error.
 - **Notes:** the trace is a contract aoide READS and the harness owns — file,
