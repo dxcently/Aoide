@@ -1125,13 +1125,16 @@ blank one is refused too.
   a decoded line holds untrusted strings; a consumer shows `data.steps`, and
   `data.turns`/`data.spans` are the span view below),
   `--follow` re-reads every 500ms until Ctrl-C (CLI-only), `--tail N` shows the
-  last N (default 50). A follow resumes after the last record it printed, keyed
-  by the record's own id (a line's hash when it is not a trace record), never by
-  a line count: the window is a 1 MiB tail, so a count stops tracking the end
-  once the trace outgrows it. A trace replaced by another file (a new device and
-  inode, so its ids may repeat the printed ones) prints the new file's window
-  whole and counts one gap. A tick whose window no longer holds the cursor
-  record (records fell out between ticks) prints the window and counts one gap,
+  last N (default 50). A tick prints every line whose identity the last window it read did not
+  hold: a record's own journal id, or a line's hash when it is not a trace
+  record or its id is unreadable. Identity, not a line count, is what it
+  tracks: a window is a bounded tail, so a count stops tracking the end once
+  the trace outgrows it. A record that lands before the last one printed (a
+  response's later block, written ahead of its settle line) prints on the next
+  tick. A trace replaced by another file (a new device and inode, so its ids
+  may repeat the printed ones) prints the new file's window whole and counts
+  one gap. A tick whose window holds none of the last window's identities
+  (records fell out between ticks) prints the window and counts one gap,
   named on stderr and in `data.gaps`. The dim follows CONTRACTS's color rule (a tty only, never
   for `NO_COLOR`, `TERM=dumb` or `--json`, and only at the CLI door); the door's
   `--color` does not reach it, since the trace builds its text before the door

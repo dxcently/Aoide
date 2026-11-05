@@ -892,6 +892,12 @@ in the message.
   `session_trace` builds `Turns` from every readable line `read_trace` returned
   (the 1 MiB tail), and `--tail` only shapes `lines` and `steps`. A turn the
   1 MiB window cuts reads as `partial`, never as a shorter turn.
+- **`--follow` prints by identity, never by a line count.** `follow_trace`
+  keeps the keys of the last window it read and prints each line whose key is
+  not among them (`follow_tick`). A record's key is its journal id; an
+  id-less record's, or a non-record line's, is its line's hash, so two of them
+  never share a key. A window that holds none of the keys is a gap, and an
+  empty window keeps the set.
 - **`--turn` is JSON-only, never follows, and never falls back.** The usage
   errors (`turn-with-follow`, then `turn-needs-json`) are checked before any
   read. A named turn the window does not hold is a taught `no-turn` refusal

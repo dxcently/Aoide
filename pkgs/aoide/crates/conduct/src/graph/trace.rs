@@ -1106,12 +1106,13 @@ fn followed_line(line: &str, json_mode: bool, dim: bool) -> String {
     }
 }
 
-/// The identity a follow resumes after: a trace record's own journal id when the
-/// line parses as one, else a hash of the whole line.
+/// The identity a follow prints a line by: a trace record's own journal id, else
+/// a hash of the whole line. A record whose id is unreadable (`?`) is keyed by its
+/// line, so two of them never share a key.
 fn record_cursor(line: &str) -> String {
     match eidolon_trace_record(line) {
-        Some(rec) => format!("#{}", rec.id),
-        None => {
+        Some(rec) if rec.id != "?" => format!("#{}", rec.id),
+        _ => {
             let mut hasher = std::collections::hash_map::DefaultHasher::new();
             std::hash::Hash::hash(line, &mut hasher);
             format!("h{:x}", std::hash::Hasher::finish(&hasher))
@@ -1125,27 +1126,38 @@ pub(super) fn file_identity(path: &Path) -> Option<(u64, u64)> {
     std::fs::metadata(path).ok().map(|m| (m.dev(), m.ino()))
 }
 
-/// The lines one follow tick prints, and whether records were skipped. Without
-/// a cursor (nothing printed yet) the whole window is new. With one, the lines
-/// after its record are new. A cursor that is not in a non-empty window has
-/// fallen out of it, or the trace was replaced: the whole window is new and
-/// the skip is a gap.
-fn follow_tick<'a>(window: &'a [String], cursor: Option<&str>) -> (&'a [String], bool) {
-    match cursor {
-        None => (window, false),
-        Some(c) => match window.iter().rposition(|l| record_cursor(l) == c) {
-            Some(i) => (&window[i + 1..], false),
-            None => (window, !window.is_empty()),
-        },
+/// The lines one follow tick prints, and whether the window skipped records. A
+/// line is new when its key (`keys`, one per line of the window) is not in
+/// `seen`, the keys of the window the last tick read. With nothing seen the whole
+/// window is new. A non-empty `seen` that no line of the window carries has
+/// fallen out of it, or the trace was replaced: the whole window is new, and the
+/// skip is a gap.
+fn follow_tick<'a>(
+    window: &'a [String],
+    keys: &[String],
+    seen: &HashSet<String>,
+) -> (Vec<&'a str>, bool) {
+    if seen.is_empty() {
+        return (window.iter().map(String::as_str).collect(), false);
     }
+    if !keys.iter().any(|k| seen.contains(k)) {
+        return (window.iter().map(String::as_str).collect(), !window.is_empty());
+    }
+    let fresh = window
+        .iter()
+        .zip(keys)
+        .filter(|(_, k)| !seen.contains(*k))
+        .map(|(line, _)| line.as_str())
+        .collect();
+    (fresh, false)
 }
 
 /// `--follow`: print the current window, then re-read the trace every
-/// [`FOLLOW_POLL`] and print whatever comes after the last record it printed,
-/// until Ctrl-C. Re-reading the window each tick keeps this on the SAME reader
-/// as the one-shot path. What it resumes after is a record's identity
-/// ([`record_cursor`]), never a line count: the window is a bounded 1 MiB tail,
-/// so once a trace outgrows it a count stops tracking the end.
+/// [`FOLLOW_POLL`] and print each line the last window did not hold, until
+/// Ctrl-C. Re-reading the window each tick keeps this on the SAME reader as the
+/// one-shot path. What it tells lines apart by is a record's identity
+/// ([`record_cursor`]), never a line count: a window is a bounded tail, so once a
+/// trace outgrows it a count stops tracking the end.
 #[allow(clippy::too_many_arguments)]
 fn follow_trace(
     cmd: &str,
@@ -1166,7 +1178,7 @@ fn follow_trace(
         let _ = std::io::stdout().flush();
     };
 
-    let mut cursor: Option<String> = None;
+    let mut seen: HashSet<String> = HashSet::new();
     let mut printed = 0usize;
     let mut gaps = 0usize;
     let mut ident = file_identity(path);
@@ -1175,7 +1187,7 @@ fn follow_trace(
             emit(line);
             printed += 1;
         }
-        cursor = lines.last().map(|l| record_cursor(l));
+        seen = lines.iter().map(|l| record_cursor(l)).collect();
     }
     while !INTERRUPTED.load(Ordering::SeqCst) {
         std::thread::sleep(FOLLOW_POLL);
@@ -1186,14 +1198,15 @@ fn follow_trace(
             continue; // the file is momentarily not there — keep waiting
         };
         // A new file (a new inode) starts over: its ids may repeat the ones
-        // printed, so the old cursor means nothing in it.
+        // printed, so the old keys mean nothing in it.
         let now = file_identity(path);
         let replaced = ident.is_some() && now.is_some() && now != ident;
         ident = now;
+        let keys: Vec<String> = lines.iter().map(|l| record_cursor(l)).collect();
         let (fresh, gap) = if replaced {
-            (&lines[..], true)
+            (lines.iter().map(String::as_str).collect(), true)
         } else {
-            follow_tick(&lines, cursor.as_deref())
+            follow_tick(&lines, &keys, &seen)
         };
         if gap {
             gaps += 1;
@@ -1203,8 +1216,8 @@ fn follow_trace(
             emit(line);
             printed += 1;
         }
-        if let Some(last) = lines.last() {
-            cursor = Some(record_cursor(last));
+        if !keys.is_empty() {
+            seen = keys.into_iter().collect();
         }
     }
     Outcome::ok(cmd, format!("followed {printed} record(s) · {name}"))
@@ -2523,6 +2536,89 @@ mod tests {
             INTERRUPTED.store(true, Ordering::SeqCst);
         }
         aoide_protocol::agents::eidolon_trace_tail(path)
+    }
+
+    /// A trace line whose kind is a unit variant, with journal id `id`.
+    fn cancelled_line(id: usize) -> String {
+        format!(r#"{{"id":{id},"parent":null,"ts_ms":{id},"kind":"Cancelled"}}"#)
+    }
+
+    static INSERT_CALLS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+    /// The first read holds ids 0 to 2. From the first tick on, id 3 is written
+    /// ahead of id 2, as a response's later block lands ahead of its settle line.
+    fn record_lands_before_the_last_printed(_path: &std::path::Path) -> Option<Vec<String>> {
+        let call = INSERT_CALLS.fetch_add(1, Ordering::SeqCst);
+        let mut lines = vec![cancelled_line(0), cancelled_line(1), cancelled_line(2)];
+        if call >= 1 {
+            lines.insert(2, cancelled_line(3));
+        }
+        if call == 2 {
+            INTERRUPTED.store(true, Ordering::SeqCst);
+        }
+        Some(lines)
+    }
+
+    /// A record that lands before the last one printed is printed once, on the
+    /// next tick. Red on the base: the follow resumes after id 2, which now sits
+    /// behind id 3, so id 3 is never printed (printed stays 3).
+    #[test]
+    fn a_record_landing_before_the_last_one_printed_is_printed_once() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let root = unique_stage("trace-follow-insert");
+        let path = root.join("trace.jsonl");
+        INSERT_CALLS.store(0, Ordering::SeqCst);
+        INTERRUPTED.store(false, Ordering::SeqCst);
+
+        let out = follow_trace("session.trace", "Aoide-insert", "insert", &path, record_lands_before_the_last_printed, 5, true, false);
+        assert_eq!(out.status, Status::Ok, "msg: {}", out.message);
+        let data = out.data.clone().unwrap();
+        assert_eq!(data["printed"], 4, "ids 0 to 2 first, then 3 once: {data}");
+        assert_eq!(data["gaps"], 0, "{data}");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    static ID_LESS_CALLS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+    /// A trace line with no readable journal id: its record reads the id `?`.
+    fn id_less_line(ts: usize) -> String {
+        format!(r#"{{"ts_ms":{ts},"kind":"Cancelled"}}"#)
+    }
+
+    /// The first read holds two id-less records; from the first tick on, a third
+    /// lands between them.
+    fn id_less_record_lands_between(_path: &std::path::Path) -> Option<Vec<String>> {
+        let call = ID_LESS_CALLS.fetch_add(1, Ordering::SeqCst);
+        let mut lines = vec![id_less_line(10), id_less_line(20)];
+        if call >= 1 {
+            lines.insert(1, id_less_line(15));
+        }
+        if call == 2 {
+            INTERRUPTED.store(true, Ordering::SeqCst);
+        }
+        Some(lines)
+    }
+
+    /// Id-less records are keyed by their lines, so the one that lands between
+    /// two others prints once. Red on the base, where every id-less record shares
+    /// the key `#?` and the follow resumes after the last of them (printed 2).
+    /// A mutation that keys them all `#?` under the set rule prints 2 too.
+    #[test]
+    fn an_id_less_record_landing_between_two_is_printed_once() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let root = unique_stage("trace-follow-id-less");
+        let path = root.join("trace.jsonl");
+        ID_LESS_CALLS.store(0, Ordering::SeqCst);
+        INTERRUPTED.store(false, Ordering::SeqCst);
+
+        let out = follow_trace("session.trace", "Aoide-id-less", "id-less", &path, id_less_record_lands_between, 5, true, false);
+        assert_eq!(out.status, Status::Ok, "msg: {}", out.message);
+        let data = out.data.clone().unwrap();
+        assert_eq!(data["printed"], 3, "the two first, then the one between them: {data}");
+        assert_eq!(data["gaps"], 0, "{data}");
+
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
