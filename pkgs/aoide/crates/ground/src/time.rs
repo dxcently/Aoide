@@ -81,3 +81,87 @@ pub fn parse_iso_utc(s: &str) -> Option<i64> {
     let days = era * 146097 + doe - 719468;
     Some(days * 86400 + hour * 3600 + min * 60 + sec)
 }
+
+/// `YYYY-MM-DDTHH:MM:SS`, an optional `.` and 1 to 9 digits, then `Z`, as UTC
+/// epoch milliseconds. The fraction is cut to milliseconds. Any other shape,
+/// or a clock field out of range, is `None`: an offset such as `+02:00` is
+/// refused, never read as UTC.
+pub fn parse_iso_utc_ms(s: &str) -> Option<i64> {
+    const SHAPE: &[u8] = b"dddd-dd-ddTdd:dd:dd";
+    let body = s.strip_suffix('Z')?;
+    let (whole, millis) = match body.split_once('.') {
+        None => (body, 0),
+        Some((whole, digits)) => {
+            if !(1..=9).contains(&digits.len()) || !digits.bytes().all(|b| b.is_ascii_digit()) {
+                return None;
+            }
+            (whole, format!("{digits:0<3}")[..3].parse::<i64>().ok()?)
+        }
+    };
+    let shaped = whole.len() == SHAPE.len()
+        && whole.bytes().zip(SHAPE.iter()).all(|(b, &want)| match want {
+            b'd' => b.is_ascii_digit(),
+            _ => b == want,
+        });
+    if !shaped {
+        return None;
+    }
+    let clock = |at: usize| whole[at..at + 2].parse::<u8>().ok();
+    if clock(11)? > 23 || clock(14)? > 59 || clock(17)? > 59 {
+        return None;
+    }
+    Some(parse_iso_utc(whole)? * 1000 + millis)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const BASE: &str = "2026-03-01T12:34:56";
+
+    fn base_ms() -> i64 {
+        parse_iso_utc(BASE).unwrap() * 1000
+    }
+
+    #[test]
+    fn a_stamp_without_a_fraction_is_its_whole_second_in_milliseconds() {
+        assert_eq!(parse_iso_utc_ms(&format!("{BASE}Z")), Some(base_ms()));
+    }
+
+    #[test]
+    fn a_fraction_of_one_to_nine_digits_is_cut_to_milliseconds() {
+        assert_eq!(parse_iso_utc_ms(&format!("{BASE}.5Z")), Some(base_ms() + 500));
+        assert_eq!(parse_iso_utc_ms(&format!("{BASE}.05Z")), Some(base_ms() + 50));
+        assert_eq!(parse_iso_utc_ms(&format!("{BASE}.123Z")), Some(base_ms() + 123));
+        assert_eq!(parse_iso_utc_ms(&format!("{BASE}.1234Z")), Some(base_ms() + 123));
+        assert_eq!(parse_iso_utc_ms(&format!("{BASE}.123456789Z")), Some(base_ms() + 123));
+        assert_eq!(parse_iso_utc_ms(&format!("{BASE}.000000001Z")), Some(base_ms()));
+    }
+
+    #[test]
+    fn an_offset_is_refused_and_never_read_as_utc() {
+        assert_eq!(parse_iso_utc_ms(&format!("{BASE}+02:00")), None);
+        assert_eq!(parse_iso_utc_ms(&format!("{BASE}-05:00")), None);
+        assert_eq!(parse_iso_utc_ms(&format!("{BASE}.5+02:00")), None);
+        assert_eq!(parse_iso_utc_ms(&format!("{BASE}+02:00Z")), None);
+    }
+
+    #[test]
+    fn garbage_and_a_stamp_without_its_z_are_refused() {
+        for bad in [
+            "",
+            "not a time",
+            "2026-03-01T12:34:56",
+            "2026-03-01T12:34:56.5",
+            "2026-03-01T12:34:56.Z",
+            "2026-03-01T12:34:56.1234567890Z",
+            "2026-03-01T12:34:56.12x Z",
+            "2026-03-01 12:34:56Z",
+            "2026-03-01T25:00:00Z",
+            "2026-03-01T12:60:00Z",
+            "2026-03-01T+1:34:56Z",
+        ] {
+            assert_eq!(parse_iso_utc_ms(bad), None, "{bad:?} must be refused");
+        }
+    }
+}

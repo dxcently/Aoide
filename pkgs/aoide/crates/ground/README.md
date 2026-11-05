@@ -91,6 +91,9 @@ importers name `ground` themselves.
 - `time.rs`: ISO-8601 UTC time as `YYYY-MM-DDTHH:MM:SSZ`, hand-rolled so the
   offline lock never grows a time crate: `now_iso_utc`, `iso_utc_from_epoch`,
   `shift_iso_utc` and `parse_iso_utc`, the exact inverse of the formatters.
+  `parse_iso_utc_ms` reads the same shape to the millisecond: an optional
+  fraction of 1 to 9 digits, then `Z`. Any other shape, an offset included,
+  is `None`.
 - `owner_only.rs` (Windows only): the owner-only policy a native-Windows core
   attaches to a private file or directory: an explicit, `SE_DACL_PROTECTED`,
   single-ACE DACL for the current token user, attached AT creation and read
