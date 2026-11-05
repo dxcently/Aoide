@@ -24,6 +24,12 @@
 //! its id; a call that never got one ends at the `Cancelled` that closed its
 //! turn, or is `running` in the open turn.
 //!
+//! **Sub-agents.** A tool call that started a sub-agent nests the sub-agent's
+//! turns as its children, each an `invoke_agent` root one level down, when every
+//! timed record of the sub-agent is at or before the call's end. Otherwise the
+//! call is linked: no children, and `aoide.subagent = "linked"`. The caller reads
+//! the files into a [`Subagents`] map; this module reads none.
+//!
 //! **Limits, stated.** Records follow line order, so a fork's abandoned branch
 //! is not separated. A model call still in flight has no record yet, so it has
 //! no chat span. Turn ids are record ids: a window whose records carry
@@ -36,6 +42,7 @@
 use super::trace::one_line_clip;
 use aoide_protocol::agents::TraceRecord;
 use serde_json::{json, Map, Value};
+use std::borrow::Cow;
 use std::collections::HashMap;
 
 /// Turns `data.turns` lists: the newest, with the rest counted in `turnsOmitted`.
@@ -43,6 +50,15 @@ pub(in crate::graph) const MAX_TURNS: usize = 100;
 /// Spans one turn's tree may carry, its root included. Whole steps are kept,
 /// newest first, and `spansOmitted` counts the spans of the steps left out.
 pub(in crate::graph) const MAX_SPANS: usize = 1000;
+
+/// Sub-agent levels a tree places. A turn's own tool calls are level 1, the calls of a
+/// sub-agent one of them started are level 2, and a call at a deeper level is a plain
+/// tool span.
+pub(in crate::graph) const MAX_SUBAGENT_DEPTH: usize = 2;
+/// Spans one nested sub-agent turn may carry, its root included: [`MAX_SPANS`] one
+/// level down. The spans it leaves out count toward `spansOmitted`.
+pub(in crate::graph) const MAX_NESTED_SPANS: usize = 100;
+
 /// Turn ids a `no-turn` refusal lists.
 pub(in crate::graph) const NEWEST_IDS: usize = 20;
 /// Characters a producer's string may carry into a span, after the strip.
@@ -150,51 +166,79 @@ impl<'a> Turns<'a> {
     }
 
     /// Turn `index`'s span tree and how many of its spans the bound left out.
-    /// `agent` and `conversation` are the session's, as the caller resolved them.
+    /// `agent` and `conversation` are the session's, as the caller resolved them, and
+    /// `subagents` holds the sub-agent records read for this turn's calls.
     pub(in crate::graph) fn tree(
         &self,
         index: usize,
         agent: &str,
         conversation: &str,
+        subagents: &Subagents,
     ) -> (Value, usize) {
         let Some(turn) = self.turns.get(index) else {
             return (Value::Null, 0);
         };
-        let (root, omitted) = self.root(turn, &clip(agent), &clip(conversation));
+        let (agent, conversation) = (clip(agent), clip(conversation));
+        let scope = Scope { agent: &agent, conversation: &conversation, subagents, level: 1 };
+        let (root, omitted) = self.root(turn, scope, MAX_SPANS);
         (root.json(), omitted)
     }
 
-    /// The root `invoke_agent` span over the turn's steps. The newest whole steps
-    /// are kept within [`MAX_SPANS`]; the second value counts the spans left out.
-    fn root(&self, turn: &Turn, agent: &str, conversation: &str) -> (Span, usize) {
+    /// The records of turn `index`, from its opener through its closer.
+    pub(in crate::graph) fn turn_records(&self, index: usize) -> &'a [TraceRecord] {
+        match self.turns.get(index) {
+            Some(turn) => &self.records[turn.first..=turn.last],
+            None => &[],
+        }
+    }
+
+    /// Every turn of the window as a root, oldest first, each bounded by
+    /// [`MAX_NESTED_SPANS`]: a sub-agent's turns, under the call that started it. The
+    /// second value sums the spans those roots left out.
+    fn nested_roots(&self, scope: Scope<'_>) -> (Vec<Span>, usize) {
+        let mut roots = Vec::new();
+        let mut left = 0;
+        for turn in &self.turns {
+            let (root, omitted) = self.root(turn, scope, MAX_NESTED_SPANS);
+            left += omitted;
+            roots.push(root);
+        }
+        (roots, left)
+    }
+
+    /// The root `invoke_agent` span over the turn's steps. The newest whole steps are
+    /// kept within `bound`; the second value counts the spans left out, the nested
+    /// ones included.
+    fn root(&self, turn: &Turn, scope: Scope<'_>, bound: usize) -> (Span, usize) {
         let records = self.records;
         let calls = model_calls(records, turn.first, turn.last);
-        let steps: Vec<Span> = calls
+        let built: Vec<(Span, usize)> = calls
             .iter()
             .enumerate()
-            .map(|(n, call)| self.step(turn, call, n + 1, agent, conversation))
+            .map(|(n, call)| self.step(turn, call, n + 1, scope))
             .collect();
 
-        let total = 1 + steps.iter().map(Span::count).sum::<usize>();
+        let total = 1 + built.iter().map(|(step, left)| step.count() + left).sum::<usize>();
         let mut kept = 0;
-        let mut first_kept = steps.len();
-        for (i, step) in steps.iter().enumerate().rev() {
+        let mut first_kept = built.len();
+        for (i, (step, _)) in built.iter().enumerate().rev() {
             let size = step.count();
-            if kept + size > MAX_SPANS - 1 {
+            if kept + size > bound - 1 {
                 break;
             }
             kept += size;
             first_kept = i;
         }
         let shown = 1 + kept;
-        let children: Vec<Span> = steps.into_iter().skip(first_kept).collect();
+        let children: Vec<Span> =
+            built.into_iter().skip(first_kept).map(|(step, _)| step).collect();
 
         let model_at = calls.first().map_or(turn.last, |call| call[0]);
         let (provider, model) = model_parts(self.in_force[model_at]);
         let mut attributes = Map::new();
         put(&mut attributes, "gen_ai.operation.name", json!("invoke_agent"));
-        put(&mut attributes, "gen_ai.agent.name", json!(agent));
-        put(&mut attributes, "gen_ai.conversation.id", json!(conversation));
+        put(&mut attributes, "gen_ai.agent.name", json!(scope.agent));
+        put(&mut attributes, "gen_ai.conversation.id", json!(scope.conversation));
         if let Some(provider) = provider {
             put(&mut attributes, "gen_ai.provider.name", json!(provider));
         }
@@ -208,7 +252,7 @@ impl<'a> Turns<'a> {
 
         let root = Span {
             id: format!("turn-{}", turn.id),
-            name: format!("invoke_agent {agent}"),
+            name: format!("invoke_agent {}", scope.agent),
             kind: "internal",
             start: records[turn.first].ts_ms,
             end: turn.end(records),
@@ -220,8 +264,9 @@ impl<'a> Turns<'a> {
     }
 
     /// One model call: its `chat`, then one `execute_tool` per `tool_use` block of
-    /// any of its records. `call` lists the records of one response, in order.
-    fn step(&self, turn: &Turn, call: &[usize], n: usize, agent: &str, conversation: &str) -> Span {
+    /// any of its records. `call` lists the records of one response, in order. The
+    /// second value counts the spans the calls' sub-agents left out.
+    fn step(&self, turn: &Turn, call: &[usize], n: usize, scope: Scope<'_>) -> (Span, usize) {
         let records = self.records;
         let (first, last) = (call[0], call[call.len() - 1]);
         let chat_start = match self.input_before(turn, first) {
@@ -237,7 +282,7 @@ impl<'a> Turns<'a> {
         if let Some(model) = &model {
             put(&mut attributes, "gen_ai.request.model", json!(model));
         }
-        put(&mut attributes, "gen_ai.conversation.id", json!(conversation));
+        put(&mut attributes, "gen_ai.conversation.id", json!(scope.conversation));
         let blocks = block_types(call.iter().map(|&r| &records[r])).join(",");
         put(&mut attributes, "aoide.blocks", json!(blocks));
         let chat = Span {
@@ -254,26 +299,29 @@ impl<'a> Turns<'a> {
             children: Vec::new(),
         };
 
-        let mut children = vec![chat];
+        let mut kids = vec![chat];
+        let mut left = 0;
         for &r in call {
             for (index, block) in content(&records[r]).iter().enumerate() {
                 if block_type(block) == "tool_use" {
-                    children.push(self.tool(turn, r, index, block, agent, conversation));
+                    let (tool, omitted) = self.tool(turn, r, index, block, scope);
+                    kids.push(tool);
+                    left += omitted;
                 }
             }
         }
-        let status = if children.iter().any(|c| c.status == "running") {
+        let status = if kids.iter().any(|c| c.status == "running") {
             "running"
-        } else if children.iter().any(|c| c.status == "cancelled") {
+        } else if kids.iter().any(|c| c.status == "cancelled") {
             "cancelled"
         } else {
             "ok"
         };
         let end = match status {
             "running" => None,
-            _ => children.iter().filter_map(|c| c.end).max(),
+            _ => kids.iter().filter_map(|c| c.end).max(),
         };
-        Span {
+        let step = Span {
             id: format!("step-{}", record_id(&records[first])),
             name: format!("step {n}"),
             kind: "internal",
@@ -281,22 +329,17 @@ impl<'a> Turns<'a> {
             end,
             status,
             attributes: json!({ "aoide.step": n }),
-            children,
-        }
+            children: kids,
+        };
+        (step, left)
     }
 
     /// One `tool_use` block of record `r`, paired with the `ToolResult` that carries
     /// its call id after that record. A block with no call id gets a positional id
-    /// and no pair.
-    fn tool(
-        &self,
-        turn: &Turn,
-        r: usize,
-        index: usize,
-        block: &Value,
-        agent: &str,
-        conversation: &str,
-    ) -> Span {
+    /// and no pair. A call whose id the scope's sub-agents name is nested under the
+    /// call or linked (see [`nested_records`]); the second value counts the spans
+    /// its sub-agent's roots left out.
+    fn tool(&self, turn: &Turn, r: usize, index: usize, block: &Value, scope: Scope<'_>) -> (Span, usize) {
         let records = self.records;
         let call = block.get("id").and_then(Value::as_str).filter(|s| !s.is_empty());
         let name = block.get("name").and_then(Value::as_str).map(clip).filter(|s| !s.is_empty());
@@ -325,12 +368,36 @@ impl<'a> Turns<'a> {
             put(&mut attributes, "gen_ai.tool.call.id", json!(clip(call)));
         }
         put(&mut attributes, "gen_ai.tool.type", json!("function"));
-        put(&mut attributes, "gen_ai.agent.name", json!(agent));
-        put(&mut attributes, "gen_ai.conversation.id", json!(conversation));
+        put(&mut attributes, "gen_ai.agent.name", json!(scope.agent));
+        put(&mut attributes, "gen_ai.conversation.id", json!(scope.conversation));
         if let Some(error) = error {
             put(&mut attributes, "error.type", json!(error));
         }
-        Span {
+
+        let mut children = Vec::new();
+        let mut left = 0;
+        let sub = call
+            .and_then(|call| scope.subagents.get(call))
+            .filter(|_| scope.level <= MAX_SUBAGENT_DEPTH);
+        if let Some(sub) = sub {
+            match nested_records(sub, status, end) {
+                Some(nested) => {
+                    let agent = clip(&sub.agent);
+                    let child = Scope {
+                        agent: &agent,
+                        conversation: scope.conversation,
+                        subagents: scope.subagents,
+                        level: scope.level + 1,
+                    };
+                    let (roots, omitted) = Turns::new(&nested).nested_roots(child);
+                    children = roots;
+                    left = omitted;
+                }
+                None => put(&mut attributes, "aoide.subagent", json!("linked")),
+            }
+        }
+
+        let span = Span {
             id: match call {
                 Some(call) => clip(call),
                 None => format!("tool-{}-{index}", record_id(&records[r])),
@@ -344,8 +411,9 @@ impl<'a> Turns<'a> {
             end,
             status,
             attributes: Value::Object(attributes),
-            children: Vec::new(),
-        }
+            children,
+        };
+        (span, left)
     }
 
     /// The last input record before `a` in the turn: the record whose time starts
@@ -353,6 +421,76 @@ impl<'a> Turns<'a> {
     fn input_before(&self, turn: &Turn, a: usize) -> Option<usize> {
         (turn.first..a).rev().find(|&j| is_input(&self.records[j]))
     }
+}
+
+/// A sub-agent's records, read from the file its call started. `agent` is the
+/// sub-agent's own type, stripped of unsafe characters.
+pub(in crate::graph) struct Subagent {
+    pub(in crate::graph) agent: String,
+    pub(in crate::graph) records: Vec<TraceRecord>,
+}
+
+/// The sub-agents a tree may place, by the id of the call that started each.
+pub(in crate::graph) type Subagents = HashMap<String, Subagent>;
+
+/// What a span reads from its caller: the session's agent and conversation as the
+/// caller resolved them, the sub-agents it may place, and the level of the tool calls
+/// being built (a turn's own calls are level 1).
+#[derive(Clone, Copy)]
+struct Scope<'c> {
+    agent: &'c str,
+    conversation: &'c str,
+    subagents: &'c Subagents,
+    level: usize,
+}
+
+/// The call ids of the `tool_use` blocks among `records` whose name is one of
+/// `names`, newest first. The caller reads the names from the harness profile.
+pub(in crate::graph) fn named_calls(records: &[TraceRecord], names: &[&str]) -> Vec<String> {
+    records
+        .iter()
+        .rev()
+        .flat_map(|record| content(record).iter().rev())
+        .filter(|block| {
+            block_type(block) == "tool_use"
+                && block
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .is_some_and(|name| names.contains(&name))
+        })
+        .filter_map(|block| block.get("id").and_then(Value::as_str).filter(|id| !id.is_empty()))
+        .map(str::to_string)
+        .collect()
+}
+
+/// The records a sub-agent's turns are read from under its call, or `None` when it
+/// is linked. A sub-agent with no timed record, one that runs past its call's end,
+/// or a call with no end to nest in is linked. Under a running call the records are
+/// read as they are. Under an ended call they get one more `Cancelled` at the call's
+/// end, so an open turn is cut there and a closed one is left as it was.
+fn nested_records<'s>(
+    sub: &'s Subagent,
+    status: &str,
+    end: Option<i64>,
+) -> Option<Cow<'s, [TraceRecord]>> {
+    if sub.records.iter().all(|record| record.ts_ms.is_none()) {
+        return None;
+    }
+    if status == "running" {
+        return Some(Cow::Borrowed(sub.records.as_slice()));
+    }
+    let end = end?;
+    if sub.records.iter().filter_map(|record| record.ts_ms).any(|ts| ts > end) {
+        return None;
+    }
+    let mut records = sub.records.clone();
+    records.push(TraceRecord {
+        id: "call-end".to_string(),
+        ts_ms: Some(end),
+        kind: "Cancelled".to_string(),
+        payload: None,
+    });
+    Some(Cow::Owned(records))
 }
 
 /// The model in force at each record: the latest `SessionStart` or `ModelChanged`
@@ -713,7 +851,7 @@ mod tests {
     fn the_root_span_names_the_agent_its_conversation_and_its_usage() {
         let w = window(&[SESSION_START, U1, A2, R3, A4, T5, U6, A7, R8, A9, T10]);
         let turns = Turns::new(&w);
-        let (root, omitted) = turns.tree(1, "eidolon", "Aoide-x");
+        let (root, omitted) = turns.tree(1, "eidolon", "Aoide-x", &Subagents::new());
         assert_eq!(omitted, 0);
         assert_eq!(root["id"], "turn-6");
         assert_eq!(root["name"], "invoke_agent eidolon");
@@ -748,7 +886,7 @@ mod tests {
     fn a_chat_starts_at_the_previous_input_and_a_tool_pairs_with_its_result_by_id() {
         let w = window(&[SESSION_START, U1, A2, R3, A4, T5, U6, A7, R8, A9, T10]);
         let turns = Turns::new(&w);
-        let (root, _) = turns.tree(1, "eidolon", "Aoide-x");
+        let (root, _) = turns.tree(1, "eidolon", "Aoide-x", &Subagents::new());
         let chat = &root["children"][0]["children"][0];
         assert_eq!(chat["id"], "chat-7");
         assert_eq!(chat["name"], "chat deepseek-v4.1-flash");
@@ -792,7 +930,7 @@ mod tests {
     fn the_first_turn_carries_its_thinking_text_and_tool_blocks_in_order() {
         let w = window(&[SESSION_START, U1, A2, R3, A4, T5, U6, A7, R8, A9, T10]);
         let turns = Turns::new(&w);
-        let (root, _) = turns.tree(0, "eidolon", "Aoide-x");
+        let (root, _) = turns.tree(0, "eidolon", "Aoide-x", &Subagents::new());
         assert_eq!(root["id"], "turn-1");
         assert_eq!(root["attributes"]["gen_ai.provider.name"], "ollama");
         assert_eq!(root["attributes"]["gen_ai.usage.input_tokens"], 150, "100 + 50 cache read");
@@ -814,7 +952,7 @@ mod tests {
         let w = window(&[P0, P1, P2, P3, P4, P5]);
         let turns = Turns::new(&w);
         assert_eq!(turns.count(), 1);
-        let (root, _) = turns.tree(0, "eidolon", "Aoide-x");
+        let (root, _) = turns.tree(0, "eidolon", "Aoide-x", &Subagents::new());
         let step = &root["children"][0];
         assert_eq!(kids(step), 3, "one chat and one span per tool_use: {step}");
         assert_eq!(step["children"][1]["id"], "c1");
@@ -833,7 +971,7 @@ mod tests {
         assert_eq!(listed.len(), 1, "{listed:?}");
         assert_eq!(listed[0]["failed"], 1);
         assert_eq!(listed[0]["tools"], 1);
-        let (root, _) = turns.tree(0, "eidolon", "Aoide-x");
+        let (root, _) = turns.tree(0, "eidolon", "Aoide-x", &Subagents::new());
         assert_eq!(root["status"], "ok", "a failed tool does not fail the turn");
         let tool = &root["children"][0]["children"][1];
         assert_eq!(tool["status"], "error");
@@ -850,7 +988,7 @@ mod tests {
         assert_eq!(listed.len(), 1, "{listed:?}");
         assert_eq!(listed[0]["status"], "running");
         assert!(listed[0]["end"].is_null());
-        let (root, _) = turns.tree(0, "eidolon", "Aoide-x");
+        let (root, _) = turns.tree(0, "eidolon", "Aoide-x", &Subagents::new());
         assert_eq!(root["status"], "running");
         assert!(root["end"].is_null());
         assert_eq!(root["attributes"]["gen_ai.provider.name"], "anthropic");
@@ -873,7 +1011,7 @@ mod tests {
         assert_eq!(listed.len(), 1, "{listed:?}");
         assert_eq!(listed[0]["status"], "cancelled");
         assert_eq!(listed[0]["end"], 300);
-        let (root, _) = turns.tree(0, "eidolon", "Aoide-x");
+        let (root, _) = turns.tree(0, "eidolon", "Aoide-x", &Subagents::new());
         assert_eq!(root["status"], "cancelled");
         assert_eq!(root["end"], 300);
         let step = &root["children"][0];
@@ -898,7 +1036,7 @@ mod tests {
         assert_eq!(listed[1]["id"], "2");
         assert_eq!(listed[1]["partial"], false);
         assert_eq!(listed[1]["start"], 100);
-        let (root, _) = turns.tree(0, "eidolon", "Aoide-x");
+        let (root, _) = turns.tree(0, "eidolon", "Aoide-x", &Subagents::new());
         assert_eq!(root["id"], "turn-0");
         assert_eq!(root["start"], 50);
         assert_eq!(root["children"][0]["children"][0]["start"], 50, "no input before it: its own time");
@@ -909,15 +1047,15 @@ mod tests {
         let w = window(&[M0, M1, M2, M3, M4, M5, M6, M7, M8, M9, M10, M11]);
         let turns = Turns::new(&w);
         assert_eq!(turns.count(), 3);
-        let (first, _) = turns.tree(0, "eidolon", "Aoide-x");
+        let (first, _) = turns.tree(0, "eidolon", "Aoide-x", &Subagents::new());
         assert_eq!(first["attributes"]["gen_ai.provider.name"], "ollama");
         assert_eq!(first["attributes"]["gen_ai.request.model"], "m-one");
         assert_eq!(first["children"][0]["children"][0]["name"], "chat m-one");
-        let (second, _) = turns.tree(1, "eidolon", "Aoide-x");
+        let (second, _) = turns.tree(1, "eidolon", "Aoide-x", &Subagents::new());
         assert!(second["attributes"].get("gen_ai.provider.name").is_none(), "no colon, no provider");
         assert_eq!(second["attributes"]["gen_ai.request.model"], "bare-model");
         assert_eq!(second["children"][0]["children"][0]["name"], "chat bare-model");
-        let (third, _) = turns.tree(2, "eidolon", "Aoide-x");
+        let (third, _) = turns.tree(2, "eidolon", "Aoide-x", &Subagents::new());
         assert!(third["attributes"].get("gen_ai.provider.name").is_none());
         assert!(third["attributes"].get("gen_ai.request.model").is_none(), "a null model is none in force");
         assert_eq!(third["children"][0]["children"][0]["name"], "chat");
@@ -928,7 +1066,7 @@ mod tests {
     fn a_window_with_no_model_at_all_leaves_both_model_keys_out() {
         let w = window(&[H0, H1, H2]);
         let turns = Turns::new(&w);
-        let (root, _) = turns.tree(0, "eidolon", "Aoide-x");
+        let (root, _) = turns.tree(0, "eidolon", "Aoide-x", &Subagents::new());
         assert!(root["attributes"].get("gen_ai.provider.name").is_none());
         assert!(root["attributes"].get("gen_ai.request.model").is_none());
         assert_eq!(root["children"][0]["children"][0]["name"], "chat");
@@ -939,12 +1077,12 @@ mod tests {
         let w = window(&[H0, H1, H2, H3, H4, H5]);
         let turns = Turns::new(&w);
         assert_eq!(turns.count(), 2);
-        let (first, _) = turns.tree(0, "eidolon", "Aoide-x");
+        let (first, _) = turns.tree(0, "eidolon", "Aoide-x", &Subagents::new());
         assert_eq!(first["attributes"]["gen_ai.usage.input_tokens"], 40, "10 + 30 cache read + 0 cache write");
         assert_eq!(first["attributes"]["gen_ai.usage.output_tokens"], 4);
         assert_eq!(first["attributes"]["gen_ai.usage.cache_read.input_tokens"], 30);
         assert!(first["attributes"].get("gen_ai.usage.cache_write.input_tokens").is_none(), "zero is left out");
-        let (second, _) = turns.tree(1, "eidolon", "Aoide-x");
+        let (second, _) = turns.tree(1, "eidolon", "Aoide-x", &Subagents::new());
         assert_eq!(second["attributes"]["gen_ai.usage.input_tokens"], 16, "7 + 0 + 9");
         assert_eq!(second["attributes"]["gen_ai.usage.output_tokens"], 1);
         assert_eq!(second["attributes"]["gen_ai.usage.cache_write.input_tokens"], 9);
@@ -960,7 +1098,7 @@ mod tests {
         assert_eq!(listed[0]["start"], 5);
         let c = window(&[C0, C1, C2, C3, C4, C5, C6, C7, C8]);
         let turns = Turns::new(&c);
-        let (root, _) = turns.tree(0, "eidolon", "Aoide-x");
+        let (root, _) = turns.tree(0, "eidolon", "Aoide-x", &Subagents::new());
         assert_eq!(root["children"][1]["children"][0]["start"], 40, "after the external message");
         assert_eq!(root["children"][2]["children"][0]["start"], 60, "after the answered question");
     }
@@ -970,7 +1108,7 @@ mod tests {
         let c = window(&[C0, C1, C2, C3, C4, C5, C6, C7, C8]);
         let turns = Turns::new(&c);
         let (listed, _) = turns.listing();
-        let (root, _) = turns.tree(0, "eidolon", "Aoide-x");
+        let (root, _) = turns.tree(0, "eidolon", "Aoide-x", &Subagents::new());
         let text = format!("{listed:?} {root}");
         for marker in [
             "MARK-USER-TEXT",
@@ -1002,7 +1140,7 @@ mod tests {
     fn a_settled_turn_whose_call_never_got_a_result_ends_that_call_as_no_result() {
         let w = window(&[Q0, Q1, Q2]);
         let turns = Turns::new(&w);
-        let (root, _) = turns.tree(0, "eidolon", "Aoide-x");
+        let (root, _) = turns.tree(0, "eidolon", "Aoide-x", &Subagents::new());
         let tool = &root["children"][0]["children"][1];
         assert_eq!(tool["status"], "error");
         assert_eq!(tool["end"], 300, "the settle is the last thing the turn knows");
@@ -1014,7 +1152,7 @@ mod tests {
     fn a_call_without_an_id_gets_a_positional_id_and_no_result() {
         let w = window(&[I0, I1]);
         let turns = Turns::new(&w);
-        let (root, _) = turns.tree(0, "eidolon", "Aoide-x");
+        let (root, _) = turns.tree(0, "eidolon", "Aoide-x", &Subagents::new());
         let tool = &root["children"][0]["children"][1];
         assert_eq!(tool["id"], "tool-1-0");
         assert_eq!(tool["status"], "running");
@@ -1025,7 +1163,7 @@ mod tests {
     fn a_record_without_a_timestamp_gives_its_span_a_null_time() {
         let w = window(&[N0, N1, N2]);
         let turns = Turns::new(&w);
-        let (root, _) = turns.tree(0, "eidolon", "Aoide-x");
+        let (root, _) = turns.tree(0, "eidolon", "Aoide-x", &Subagents::new());
         assert!(root["start"].is_null(), "no read time is ever substituted");
         assert!(root["children"][0]["children"][0]["start"].is_null());
         assert_eq!(root["end"], 30);
@@ -1063,7 +1201,7 @@ mod tests {
         let refs: Vec<&str> = lines.iter().map(String::as_str).collect();
         let w = window(&refs);
         let turns = Turns::new(&w);
-        let (root, omitted) = turns.tree(0, "eidolon", "Aoide-x");
+        let (root, omitted) = turns.tree(0, "eidolon", "Aoide-x", &Subagents::new());
         assert_eq!(spans_in(&root), MAX_SPANS, "the kept tree is exactly the bound");
         assert_eq!(omitted, 201, "1 root + 400 steps of 3 spans, less the 1000 kept");
         assert_eq!(kids(&root), 333, "whole steps only: 333 steps of 3 spans beside the root");
@@ -1075,7 +1213,7 @@ mod tests {
     fn a_tree_inside_the_bounds_omits_nothing() {
         let w = window(&[SESSION_START, U1, A2, R3, A4, T5]);
         let turns = Turns::new(&w);
-        let (_, omitted) = turns.tree(0, "eidolon", "Aoide-x");
+        let (_, omitted) = turns.tree(0, "eidolon", "Aoide-x", &Subagents::new());
         assert_eq!(omitted, 0);
     }
 
@@ -1097,7 +1235,7 @@ mod tests {
         let (listed, _) = turns.listing();
         assert_eq!(listed[0]["steps"], 1, "three records, one model call: {listed:?}");
         assert_eq!(listed[0]["tools"], 2, "{listed:?}");
-        let (root, _) = turns.tree(0, "eidolon", "Aoide-x");
+        let (root, _) = turns.tree(0, "eidolon", "Aoide-x", &Subagents::new());
         assert_eq!(kids(&root), 1, "one step for the call: {root}");
         let step = &root["children"][0];
         assert_eq!(step["id"], "step-1", "the step is named by the call's first record");
@@ -1119,5 +1257,250 @@ mod tests {
         assert_eq!(second["id"], "g2");
         assert_eq!(second["start"], 240, "the second tool starts at its own record, after the first result");
         assert_eq!(second["end"], 260, "and ends at its own result");
+    }
+
+    // The sub-agent tests build their lines from these templates: `@ID@`, `@TS@`,
+    // `@TEXT@`, `@CALL@` and `@NAME@` are filled by the helpers below.
+    const USER_LINE: &str = r#"{"id":@ID@,"parent":null,"ts_ms":@TS@,"kind":{"UserMessage":{"role":"user","content":[{"type":"text","text":"@TEXT@"}]}}}"#;
+    const REPLY_LINE: &str = r#"{"id":@ID@,"parent":null,"ts_ms":@TS@,"kind":{"AssistantMessage":{"role":"assistant","content":[{"type":"text","text":"@TEXT@"}]}}}"#;
+    const CALL_LINE: &str = r#"{"id":@ID@,"parent":null,"ts_ms":@TS@,"kind":{"AssistantMessage":{"role":"assistant","content":[{"type":"tool_use","id":"@CALL@","name":"@NAME@","input":"{}"}]}}}"#;
+    const ANSWER_LINE: &str = r#"{"id":@ID@,"parent":null,"ts_ms":@TS@,"kind":{"ToolResult":{"tool_use_id":"@CALL@","content":"ok","is_error":false}}}"#;
+    const SETTLE_LINE: &str = r#"{"id":@ID@,"parent":null,"ts_ms":@TS@,"kind":{"TurnSettled":{"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}}}"#;
+
+    fn fill(template: &str, id: u32, ts: i64) -> String {
+        template.replace("@ID@", &id.to_string()).replace("@TS@", &ts.to_string())
+    }
+
+    fn user(id: u32, ts: i64, text: &str) -> String {
+        fill(USER_LINE, id, ts).replace("@TEXT@", text)
+    }
+
+    fn reply(id: u32, ts: i64, text: &str) -> String {
+        fill(REPLY_LINE, id, ts).replace("@TEXT@", text)
+    }
+
+    fn calling(id: u32, ts: i64, call: &str, name: &str) -> String {
+        fill(CALL_LINE, id, ts).replace("@CALL@", call).replace("@NAME@", name)
+    }
+
+    fn answer(id: u32, ts: i64, call: &str) -> String {
+        fill(ANSWER_LINE, id, ts).replace("@CALL@", call)
+    }
+
+    fn settle(id: u32, ts: i64) -> String {
+        fill(SETTLE_LINE, id, ts)
+    }
+
+    fn trace(lines: &[String]) -> Vec<TraceRecord> {
+        lines.iter().map(|line| eidolon_trace_record(line).expect("a trace record")).collect()
+    }
+
+    fn sub(agent: &str, lines: &[String]) -> Subagent {
+        Subagent { agent: agent.to_string(), records: trace(lines) }
+    }
+
+    fn one(call: &str, subagent: Subagent) -> Subagents {
+        let mut subagents = Subagents::new();
+        subagents.insert(call.to_string(), subagent);
+        subagents
+    }
+
+    /// One turn that calls `call_n` at 200 and gets its answer at 400.
+    fn parent() -> Vec<TraceRecord> {
+        trace(&[
+            user(100, 100, "go"),
+            calling(101, 200, "call_n", "Agent"),
+            answer(102, 400, "call_n"),
+            reply(103, 410, "after"),
+            settle(104, 420),
+        ])
+    }
+
+    /// The first span under `span`, itself included, that carries tool call `call`;
+    /// `null` when none does.
+    fn call_span(span: &Value, call: &str) -> Value {
+        if span["attributes"]["gen_ai.tool.call.id"] == call {
+            return span.clone();
+        }
+        span["children"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|child| call_span(child, call))
+            .find(|found| !found.is_null())
+            .unwrap_or(Value::Null)
+    }
+
+    #[test]
+    fn a_subagent_that_ran_inside_its_call_nests_under_it() {
+        let child = sub(
+            "helper",
+            &[user(200, 210, "MARK-PROMPT"), reply(201, 220, "MARK-REPLY"), settle(202, 300)],
+        );
+        let (root, omitted) = Turns::new(&parent()).tree(0, "eidolon", "Aoide-x", &one("call_n", child));
+        let call = call_span(&root, "call_n");
+        assert_eq!(call["children"].as_array().map(Vec::len), Some(1), "{root}");
+        assert_eq!(call["children"][0]["name"], "invoke_agent helper", "{root}");
+        assert_eq!(call["children"][0]["status"], "ok", "{root}");
+        assert_eq!(call["children"][0]["end"], 300, "{root}");
+        assert!(call["attributes"].get("aoide.subagent").is_none(), "{root}");
+        assert_eq!(omitted, 0, "{root}");
+    }
+
+    #[test]
+    fn a_subagent_that_outlived_its_call_is_linked_not_nested() {
+        let child = sub("helper", &[user(200, 210, "x"), reply(201, 220, "y"), settle(202, 500)]);
+        let (root, _) = Turns::new(&parent()).tree(0, "eidolon", "Aoide-x", &one("call_n", child));
+        let call = call_span(&root, "call_n");
+        assert_eq!(call["attributes"]["aoide.subagent"], "linked", "{root}");
+        assert_eq!(call["children"].as_array().map(Vec::len), Some(0), "{root}");
+    }
+
+    #[test]
+    fn a_running_subagent_call_nests_a_running_subagent() {
+        let records = trace(&[user(100, 100, "go"), calling(101, 200, "call_n", "Agent")]);
+        let child = sub("helper", &[user(200, 210, "x"), reply(201, 220, "y")]);
+        let (root, _) = Turns::new(&records).tree(0, "eidolon", "Aoide-x", &one("call_n", child));
+        let call = call_span(&root, "call_n");
+        assert_eq!(call["status"], "running", "{root}");
+        assert_eq!(call["children"][0]["name"], "invoke_agent helper", "{root}");
+        assert_eq!(call["children"][0]["status"], "running", "{root}");
+        assert!(call["children"][0]["end"].is_null(), "{root}");
+    }
+
+    #[test]
+    fn an_open_subagent_under_an_ended_call_is_cut_at_the_calls_end() {
+        let child = sub("helper", &[user(200, 210, "x"), calling(201, 220, "call_u", "bash")]);
+        let (root, _) = Turns::new(&parent()).tree(0, "eidolon", "Aoide-x", &one("call_n", child));
+        let nested = call_span(&root, "call_n")["children"][0].clone();
+        assert_eq!(nested["status"], "cancelled", "{root}");
+        assert_eq!(nested["end"], 400, "{root}");
+        let unfinished = call_span(&root, "call_u");
+        assert_eq!(unfinished["status"], "cancelled", "{root}");
+        assert_eq!(unfinished["end"], 400, "{root}");
+        assert_eq!(unfinished["attributes"]["error.type"], "cancelled", "{root}");
+    }
+
+    #[test]
+    fn a_closed_subagent_under_an_ended_call_is_unchanged_by_the_cut() {
+        let child = sub("helper", &[user(200, 210, "x"), reply(201, 220, "y"), settle(202, 300)]);
+        let (root, _) = Turns::new(&parent()).tree(0, "eidolon", "Aoide-x", &one("call_n", child));
+        let call = call_span(&root, "call_n");
+        assert_eq!(call["children"].as_array().map(Vec::len), Some(1), "a lone Cancelled is no turn: {root}");
+        assert_eq!(call["children"][0]["status"], "ok", "{root}");
+        assert_eq!(call["children"][0]["end"], 300, "{root}");
+    }
+
+    #[test]
+    fn a_nested_subagent_keeps_its_newest_steps_within_the_bound() {
+        let mut lines = vec![user(200, 210, "x")];
+        lines.extend((0..200).map(|i| reply(300 + i, 220, "y")));
+        lines.push(settle(600, 300));
+        let child = sub("helper", &lines);
+        let (root, omitted) = Turns::new(&parent()).tree(0, "eidolon", "Aoide-x", &one("call_n", child));
+        let nested = call_span(&root, "call_n")["children"][0].clone();
+        assert_eq!(
+            nested["children"].as_array().map(Vec::len),
+            Some((MAX_NESTED_SPANS - 1) / 2),
+            "one chat per step, the root counted: {root}"
+        );
+        assert_eq!(omitted, 302, "the nested spans left out count toward spansOmitted: {root}");
+    }
+
+    #[test]
+    fn a_nested_subagent_carries_no_content() {
+        let child = sub(
+            "helper",
+            &[
+                user(200, 210, "MARK-PROMPT"),
+                calling(201, 220, "call_u", "bash"),
+                answer(202, 230, "call_u"),
+                reply(203, 240, "MARK-REPLY"),
+                settle(204, 300),
+            ],
+        );
+        let (root, _) = Turns::new(&parent()).tree(0, "eidolon", "Aoide-x", &one("call_n", child));
+        assert_eq!(call_span(&root, "call_n")["children"][0]["name"], "invoke_agent helper", "{root}");
+        assert!(!root.to_string().contains("MARK"), "{root}");
+    }
+
+    #[test]
+    fn a_subagent_call_past_the_depth_bound_is_a_plain_tool_span() {
+        let helper = sub(
+            "helper",
+            &[
+                user(200, 210, "x"),
+                calling(201, 220, "call_m", "Agent"),
+                answer(202, 230, "call_m"),
+                settle(203, 250),
+            ],
+        );
+        let middle = sub(
+            "middle",
+            &[
+                user(300, 212, "y"),
+                calling(301, 222, "call_z", "Agent"),
+                answer(302, 226, "call_z"),
+                settle(303, 229),
+            ],
+        );
+        let deep = sub("deep", &[user(400, 223, "z"), settle(401, 224)]);
+        let mut subagents = one("call_n", helper);
+        subagents.insert("call_m".to_string(), middle);
+        subagents.insert("call_z".to_string(), deep);
+        let (root, _) = Turns::new(&parent()).tree(0, "eidolon", "Aoide-x", &subagents);
+        assert_eq!(call_span(&root, "call_n")["children"][0]["name"], "invoke_agent helper", "{root}");
+        assert_eq!(
+            call_span(&root, "call_m")["children"][0]["name"],
+            "invoke_agent middle",
+            "the second level nests: {root}"
+        );
+        let deepest = call_span(&root, "call_z");
+        assert_eq!(deepest["children"].as_array().map(Vec::len), Some(0), "{root}");
+        assert!(deepest["attributes"].get("aoide.subagent").is_none(), "{root}");
+    }
+
+    #[test]
+    fn a_subagent_with_no_timed_record_is_linked() {
+        let blank = [
+            user(200, 210, "x").replace(r#""ts_ms":210,"#, ""),
+            reply(201, 220, "y").replace(r#""ts_ms":220,"#, ""),
+        ];
+        let (root, _) = Turns::new(&parent()).tree(0, "eidolon", "Aoide-x", &one("call_n", sub("helper", &blank)));
+        let call = call_span(&root, "call_n");
+        assert_eq!(call["attributes"]["aoide.subagent"], "linked", "{root}");
+        assert_eq!(call["children"].as_array().map(Vec::len), Some(0), "{root}");
+    }
+
+    /// A sub-agent whose records name its own call nests to the depth bound and
+    /// stops there: two levels under the call, the third a plain span. The
+    /// literal 2 is deliberate, since a check against the constant would pass at
+    /// any bound.
+    #[test]
+    fn a_subagent_naming_its_own_call_nests_to_the_depth_bound_and_stops() {
+        let records = trace(&[
+            user(100, 100, "go"),
+            calling(101, 200, "call_s", "Agent"),
+            answer(102, 400, "call_s"),
+            settle(103, 420),
+        ]);
+        let child = sub(
+            "helper",
+            &[user(200, 210, "x"), calling(201, 220, "call_s", "Agent"), settle(202, 310)],
+        );
+        let (root, _) = Turns::new(&records).tree(0, "eidolon", "Aoide-x", &one("call_s", child));
+        let mut deepest = call_span(&root, "call_s");
+        let mut levels = 0;
+        loop {
+            let nested = deepest["children"].get(0).cloned().unwrap_or(Value::Null);
+            if !nested["name"].as_str().is_some_and(|name| name.starts_with("invoke_agent")) {
+                break;
+            }
+            levels += 1;
+            deepest = call_span(&nested, "call_s");
+        }
+        assert_eq!(levels, 2, "{root}");
+        assert_eq!(deepest["children"].as_array().map(Vec::len), Some(0), "{root}");
+        assert!(deepest["attributes"].get("aoide.subagent").is_none(), "{root}");
     }
 }

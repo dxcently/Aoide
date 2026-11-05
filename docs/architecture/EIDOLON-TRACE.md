@@ -245,7 +245,12 @@ carries whatever the journal carries; that fix is harnox's.
   (`chat` alone when no model is in force) and one
   `execute_tool <name>` per `tool_use` block. The turn is the one `--turn <id>`
   names, else the newest, and `null` when the window holds none. `spansOmitted`
-  counts the spans the 1000-span bound dropped, whole newest steps kept.
+  counts the spans the 1000-span bound dropped, whole newest steps kept. A
+  sub-agent that ran inside its tool call nests under it: the call's children are
+  the sub-agent's turns, each an `invoke_agent` root; a sub-agent that outlived the
+  call is linked instead (`aoide.subagent` `"linked"`, no children).
+  `subagentsOmitted` counts the sub-agent calls the bounds left unread (8 files,
+  2 levels).
   A chat starts at the input before it: the last user or external message, tool
   result, or answered question. A tool ends at its own result. A failed result
   is `error` (`error.type` `tool_error`). A settled turn whose call never got
@@ -264,7 +269,7 @@ carries whatever the journal carries; that fix is harnox's.
   the command above (`--tail N --clip … --json`, plus `--turn <turn>` and
   `--subagent <call>` when named) and answers one JSON line:
   `{ok, sessionId, clip, lines, trace, at,
-  steps, stepsOmitted, turns, turnsOmitted, spans, spansOmitted}` or
+  steps, stepsOmitted, turns, turnsOmitted, spans, spansOmitted, subagentsOmitted}` or
   `{ok:false, sessionId, clip, lines, reason, message}` carrying the CLI's
   own taught refusal verbatim (`reason` ∈ `no-trace · no-presence ·
   unknown-agent · remote-target · not-found · ambiguous · no-turn`, plus the

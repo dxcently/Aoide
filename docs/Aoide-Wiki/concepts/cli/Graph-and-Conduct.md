@@ -895,7 +895,7 @@ aoide session trace <id> [--tail N] [--clip line|detail] [--follow] [--json] [--
   `data.turns` (every turn in the window, oldest first, with `turnsOmitted`)
   and `data.spans` (one turn's span tree in OTel GenAI names: `invoke_agent`,
   then `step <n>`, then `chat <model>` and `execute_tool <name>`; names, ids,
-  times, status and token counts, never content; with `spansOmitted`). Turns
+  times, status and token counts, never content; with `spansOmitted` and `subagentsOmitted`). Turns
   and spans are read from the whole window, the turn log's last 1 MiB (an
   eidolon trace) or 8 MiB (a claude transcript), never
   from the `--tail` cut. The shapes are in the conduct crate's README.
@@ -915,6 +915,11 @@ aoide session trace <id> [--tail N] [--clip line|detail] [--follow] [--json] [--
   started, in the same shape (`data.trace` is its file, `data.subagent` the call
   id); `--follow` re-reads that file. A sub-agent stopped with no closer and no
   hand-back reads as `running`, since its file holds no turn marker to cancel it.
+  Under `data.spans`, a sub-agent that ran inside its call nests under it, and one
+  that outlived the call is linked: the call carries `aoide.subagent` `"linked"`
+  and no children. `subagentsOmitted` counts the sub-agent calls the bounds left
+  unread. Stated limit: a sub-agent resumed after its call ended has records past
+  the call's end, so it is linked.
 - **Errors (exit 1), each naming WHY:** `not-found` (`<id>` matches no local
   session), `ambiguous`, `remote-target` (a `node/<rest>` target — a trace is
   a file on the node that wrote it; run the command there), `unknown-agent`

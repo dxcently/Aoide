@@ -909,9 +909,18 @@ in the message.
   harness with no `subagent_records` refuses `no-trace-capability`. The span
   root is `subagent_name`'s type, else the session's agent, and
   `gen_ai.conversation.id` stays the session id.
+- **A sub-agent is placed by its call and its own record times, and by nothing
+  else.** `gather_subagents` (`trace.rs`) reads the sub-agent files a turn's tree
+  places, and stops at `MAX_SUBAGENT_FILES` and `MAX_SUBAGENT_DEPTH`, counting what
+  those stop.
+  `Turns::tree` takes the map as data and names no harness or tool; `nested_records`
+  alone decides nested or linked. `MAX_NESTED_SPANS` bounds each nested turn's root,
+  not each call, so a call whose sub-agent holds several turns can carry more.
 - **The span bounds are named, like the step bounds.** `MAX_TURNS` (newest
-  kept, `turnsOmitted`) and `MAX_SPANS` (whole newest steps kept,
-  `spansOmitted`) are the only cuts; `Turns::tree` never drops a span uncounted.
+  kept, `turnsOmitted`), `MAX_SPANS` (whole newest steps kept, `spansOmitted`),
+  `MAX_NESTED_SPANS` (the same, per nested turn), and the sub-agent bounds
+  `MAX_SUBAGENT_FILES` and `MAX_SUBAGENT_DEPTH` (counted in `subagentsOmitted`) are
+  the only cuts; `Turns::tree` never drops a span uncounted.
   A change to the turn rules or to a span's name or attributes changes
   `docs/architecture/EIDOLON-TRACE.md`'s consumer section in the same commit.
 - **The bridge's trace query is bounded by the DOOR, not by the caller's

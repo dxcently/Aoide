@@ -70,16 +70,16 @@
 
 use super::common::{require_args, stage_error};
 use super::model::{load_stage, resolved_parent, sessions_path, SessionRecord, SessionsFile};
-use super::spans::Turns;
+use super::spans::{named_calls, Subagent, Subagents, Turns, MAX_SUBAGENT_DEPTH};
 use crate::shellbridge::safe_session_id;
-use aoide_protocol::agents::{agent_profile, eidolon_trace_record, TraceRecord};
+use aoide_protocol::agents::{agent_profile, eidolon_trace_record, AgentProfile, TraceRecord};
 use aoide_protocol::output::{Fix, Kind, Outcome};
 use aoide_protocol::style::{Color, Stream, Style};
 use aoide_protocol::untrusted::strip_unsafe;
 use aoide_protocol::{Door, Invocation};
 use aoide_storage::addr::{self, LocalCandidate, Resolution};
 use serde_json::{json, Value};
-use std::collections::HashSet;
+use std::collections::{HashSet, VecDeque};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
@@ -89,6 +89,9 @@ use std::time::Duration;
 const DEFAULT_TAIL: usize = 50;
 /// How long `--follow` waits between re-reads of the trace.
 const FOLLOW_POLL: Duration = Duration::from_millis(500);
+/// Sub-agent files one command reads. A sub-agent call past the bound is counted in
+/// `subagentsOmitted`.
+const MAX_SUBAGENT_FILES: usize = 8;
 /// An `AssistantMessage`'s thinking block, clipped.
 const THINKING_MAX: usize = 80;
 /// An `AssistantMessage`'s text block, and every other one-line field, clipped.
@@ -1084,8 +1087,14 @@ pub fn session_trace(inv: &Invocation) -> Outcome {
             .unwrap_or_else(|| agent.clone()),
         None => agent.clone(),
     };
+    let calls = match picked {
+        Some(index) => named_calls(turns.turn_records(index), profile.subagent_tools),
+        None => Vec::new(),
+    };
+    let subs_dir = (profile.transcript.subagents_dir)(&id, Some(&cwd));
+    let (subagents, subagents_omitted) = gather_subagents(profile, subs_dir.as_deref(), &agent, calls);
     let (spans, spans_omitted) = match picked {
-        Some(index) => turns.tree(index, &root, &id),
+        Some(index) => turns.tree(index, &root, &id, &subagents),
         None => (Value::Null, 0),
     };
     Outcome::ok(cmd, message)
@@ -1103,8 +1112,56 @@ pub fn session_trace(inv: &Invocation) -> Outcome {
             "turnsOmitted": turns_omitted,
             "spans": spans,
             "spansOmitted": spans_omitted,
+            "subagentsOmitted": subagents_omitted,
             "subagent": subagent,
         }))
+}
+
+/// The sub-agents a turn's tree places, read breadth-first: the calls the turn names,
+/// then the calls each sub-agent names, newest first. At most [`MAX_SUBAGENT_FILES`]
+/// files are read, and a call past [`MAX_SUBAGENT_DEPTH`] levels is not read. The
+/// second value counts the calls the bounds left unread that have a file.
+fn gather_subagents(
+    profile: &AgentProfile,
+    dir: Option<&Path>,
+    session_agent: &str,
+    calls: Vec<String>,
+) -> (Subagents, usize) {
+    let (Some(dir), Some(read)) = (dir, profile.transcript.subagent_records) else {
+        return (Subagents::new(), 0);
+    };
+    let mut queue: VecDeque<(String, usize)> = calls.into_iter().map(|call| (call, 1)).collect();
+    let mut seen = HashSet::new();
+    let mut subagents = Subagents::new();
+    let mut omitted = 0;
+    while let Some((call, level)) = queue.pop_front() {
+        if !seen.insert(call.clone()) {
+            continue;
+        }
+        let Some(path) = (profile.transcript.find_subagent)(dir, &call) else {
+            continue;
+        };
+        if level > MAX_SUBAGENT_DEPTH || subagents.len() == MAX_SUBAGENT_FILES {
+            omitted += 1;
+            continue;
+        }
+        let Some(lines) = read(&path) else {
+            continue;
+        };
+        let records: Vec<TraceRecord> =
+            lines.iter().filter_map(|line| eidolon_trace_record(line)).collect();
+        let agent = match (profile.transcript.subagent_name)(&path) {
+            Some(name) => strip_unsafe(&name),
+            None => session_agent.to_string(),
+        };
+        queue.extend(
+            named_calls(&records, profile.subagent_tools)
+                .into_iter()
+                .map(|next| (next, level + 1)),
+        );
+        subagents.insert(call, Subagent { agent, records });
+    }
+    (subagents, omitted)
 }
 
 /// The taught refusal for a `--turn` the window does not hold: the newest ids it
@@ -1790,7 +1847,12 @@ mod tests {
     /// `claude-code-guide` run (started by `toolu_9001`), `agent-a2` the
     /// `general-purpose` run above (started by `toolu_9002`).
     fn subagent_fixture(tag: &str) -> std::path::PathBuf {
-        let root = claude_fixture(tag, "claude-subagents", "");
+        subagent_fixture_with(tag, "")
+    }
+
+    /// [`subagent_fixture`] with `transcript` as the session's own turn log.
+    fn subagent_fixture_with(tag: &str, transcript: &str) -> std::path::PathBuf {
+        let root = claude_fixture(tag, "claude-subagents", transcript);
         let home = root.join("home");
         let subs = home.join(".claude/projects/-srv-project/claude-subagents/subagents");
         std::fs::create_dir_all(&subs).unwrap();
@@ -3012,5 +3074,211 @@ mod tests {
         for f in ["tail", "clip", "follow", "json"] {
             assert!(cmd.flags.iter().any(|x| x.name == f), "missing --{f}: {:?}", cmd.flags);
         }
+    }
+
+    /// Writes one sub-agent file of the staged session, with its meta file.
+    fn write_subagent(root: &std::path::Path, name: &str, call: &str, agent: &str, lines: &str) {
+        let subs = root.join("home/.claude/projects/-srv-project/claude-subagents/subagents");
+        std::fs::create_dir_all(&subs).unwrap();
+        std::fs::write(subs.join(format!("agent-{name}.jsonl")), lines).unwrap();
+        std::fs::write(
+            subs.join(format!("agent-{name}.meta.json")),
+            format!(r#"{{"toolUseId":"{call}","agentType":"{agent}"}}"#),
+        )
+        .unwrap();
+    }
+
+    /// The first span under `span`, itself included, that carries tool call `call`;
+    /// `null` when none does.
+    fn span_of_call(span: &Value, call: &str) -> Value {
+        if span["attributes"]["gen_ai.tool.call.id"] == call {
+            return span.clone();
+        }
+        span["children"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|child| span_of_call(child, call))
+            .find(|found| !found.is_null())
+            .unwrap_or(Value::Null)
+    }
+
+    /// Two turns. The first starts `toolu_9001` and gets its answer at 00:00:30, while
+    /// the fixture run has records to 00:00:59: linked. The second starts `toolu_9002`
+    /// and gets its answer at 00:02:45, after the general run's last record: nested.
+    const SUBAGENT_TWO_TURNS: &str = concat!(
+        r#"{"type":"user","uuid":"m-0001","timestamp":"2026-01-01T00:00:01.000Z","message":{"role":"user","content":"first"}}"#, "\n",
+        r#"{"type":"assistant","uuid":"m-0002","timestamp":"2026-01-01T00:00:02.000Z","message":{"id":"msg_m1","model":"claude-haiku-5-5","role":"assistant","stop_reason":"tool_use","content":[{"type":"tool_use","id":"toolu_9001","name":"Agent","input":{"prompt":"p"}}],"usage":{"input_tokens":1,"output_tokens":1,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}"#, "\n",
+        r#"{"type":"user","uuid":"m-0003","timestamp":"2026-01-01T00:00:30.000Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_9001","content":"ok"}]}}"#, "\n",
+        r#"{"type":"assistant","uuid":"m-0004","timestamp":"2026-01-01T00:00:31.000Z","message":{"id":"msg_m2","model":"claude-haiku-5-5","role":"assistant","stop_reason":"end_turn","content":[{"type":"text","text":"a"}],"usage":{"input_tokens":1,"output_tokens":1,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}"#, "\n",
+        r#"{"type":"user","uuid":"m-0005","timestamp":"2026-01-01T00:02:40.000Z","message":{"role":"user","content":"second"}}"#, "\n",
+        r#"{"type":"assistant","uuid":"m-0006","timestamp":"2026-01-01T00:02:41.000Z","message":{"id":"msg_m3","model":"claude-haiku-5-5","role":"assistant","stop_reason":"tool_use","content":[{"type":"tool_use","id":"toolu_9002","name":"Agent","input":{"prompt":"p"}}],"usage":{"input_tokens":1,"output_tokens":1,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}"#, "\n",
+        r#"{"type":"user","uuid":"m-0007","timestamp":"2026-01-01T00:02:45.000Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_9002","content":"ok"}]}}"#, "\n",
+        r#"{"type":"assistant","uuid":"m-0008","timestamp":"2026-01-01T00:02:46.000Z","message":{"id":"msg_m4","model":"claude-haiku-5-5","role":"assistant","stop_reason":"end_turn","content":[{"type":"text","text":"b"}],"usage":{"input_tokens":1,"output_tokens":1,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}"#, "\n",
+    );
+
+    #[test]
+    fn a_subagent_nests_under_its_call_and_a_call_whose_run_outlives_it_links() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&env_keys());
+        let root = subagent_fixture_with("subagent-two-turns", SUBAGENT_TWO_TURNS);
+
+        let newest = session_trace(&trace_invocation(&["claude-subagents"], &[("json", "true")]));
+        assert_eq!(newest.status, Status::Ok, "msg: {}", newest.message);
+        let data = newest.data.clone().unwrap();
+        let nested = span_of_call(&data["spans"], "toolu_9002");
+        assert_eq!(nested["children"][0]["name"], "invoke_agent general-purpose", "{data}");
+        assert!(nested["attributes"].get("aoide.subagent").is_none(), "{data}");
+
+        let earlier = session_trace(&trace_invocation(
+            &["claude-subagents"],
+            &[("json", "true"), ("turn", "m-0001")],
+        ));
+        assert_eq!(earlier.status, Status::Ok, "msg: {}", earlier.message);
+        let data = earlier.data.clone().unwrap();
+        let linked = span_of_call(&data["spans"], "toolu_9001");
+        assert_eq!(linked["attributes"]["aoide.subagent"], "linked", "{data}");
+        assert_eq!(linked["children"].as_array().map(Vec::len), Some(0), "{data}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The brief's layout, two turns. Turn A (`p-0001`) starts `toolu_9001`, the
+    /// fixture run, and gets its answer at 00:01:00, after the run's last record
+    /// (00:00:59.002): nested. Turn B (`p-0005`) starts `toolu_9002` and gets its
+    /// answer at 00:02:01.500, before the general run's records (00:02:03 and
+    /// 00:02:30): linked.
+    const BRIEF_LAYOUT: &str = concat!(
+        r#"{"type":"user","uuid":"p-0001","timestamp":"2025-12-31T23:59:58.000Z","message":{"role":"user","content":"first"}}"#, "\n",
+        r#"{"type":"assistant","uuid":"p-0002","timestamp":"2025-12-31T23:59:59.000Z","message":{"id":"pmsg_1","model":"claude-haiku-5-5","role":"assistant","stop_reason":"tool_use","content":[{"type":"tool_use","id":"toolu_9001","name":"Agent","input":{"prompt":"p"}}],"usage":{"input_tokens":1,"output_tokens":1,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}"#, "\n",
+        r#"{"type":"user","uuid":"p-0003","timestamp":"2026-01-01T00:01:00.000Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_9001","content":"ok"}]}}"#, "\n",
+        r#"{"type":"assistant","uuid":"p-0004","timestamp":"2026-01-01T00:01:01.000Z","message":{"id":"pmsg_2","model":"claude-haiku-5-5","role":"assistant","stop_reason":"end_turn","content":[{"type":"text","text":"a"}],"usage":{"input_tokens":1,"output_tokens":1,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}"#, "\n",
+        r#"{"type":"user","uuid":"p-0005","timestamp":"2026-01-01T00:02:00.000Z","message":{"role":"user","content":"second"}}"#, "\n",
+        r#"{"type":"assistant","uuid":"p-0006","timestamp":"2026-01-01T00:02:01.000Z","message":{"id":"pmsg_3","model":"claude-haiku-5-5","role":"assistant","stop_reason":"tool_use","content":[{"type":"tool_use","id":"toolu_9002","name":"Agent","input":{"prompt":"p"}}],"usage":{"input_tokens":1,"output_tokens":1,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}"#, "\n",
+        r#"{"type":"user","uuid":"p-0007","timestamp":"2026-01-01T00:02:01.500Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_9002","content":"launched"}]}}"#, "\n",
+        r#"{"type":"assistant","uuid":"p-0008","timestamp":"2026-01-01T00:02:02.000Z","message":{"id":"pmsg_4","model":"claude-haiku-5-5","role":"assistant","stop_reason":"end_turn","content":[{"type":"text","text":"b"}],"usage":{"input_tokens":1,"output_tokens":1,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}"#, "\n",
+    );
+
+    #[test]
+    fn a_subagent_whose_run_ends_inside_its_call_nests_and_one_that_outlives_it_links() {
+        fn within(span: &Value, low: i64, high: i64) -> bool {
+            let inside = |key: &str| span[key].as_i64().is_some_and(|t| (low..=high).contains(&t));
+            inside("start")
+                && inside("end")
+                && span["children"].as_array().into_iter().flatten().all(|child| within(child, low, high))
+        }
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&env_keys());
+        let root = subagent_fixture_with("subagent-brief-layout", BRIEF_LAYOUT);
+
+        let newest = session_trace(&trace_invocation(&["claude-subagents"], &[("json", "true")]));
+        assert_eq!(newest.status, Status::Ok, "msg: {}", newest.message);
+        let data = newest.data.clone().unwrap();
+        let linked = span_of_call(&data["spans"], "toolu_9002");
+        assert_eq!(linked["attributes"]["aoide.subagent"], "linked", "{data}");
+        assert_eq!(linked["children"].as_array().map(Vec::len), Some(0), "{data}");
+
+        let earlier = session_trace(&trace_invocation(
+            &["claude-subagents"],
+            &[("json", "true"), ("turn", "p-0001")],
+        ));
+        assert_eq!(earlier.status, Status::Ok, "msg: {}", earlier.message);
+        let data = earlier.data.clone().unwrap();
+        let call = span_of_call(&data["spans"], "toolu_9001");
+        assert_eq!(call["children"].as_array().map(Vec::len), Some(1), "{data}");
+        let run = &call["children"][0];
+        assert_eq!(run["name"], "invoke_agent claude-code-guide", "{data}");
+        assert_eq!(run["status"], "ok", "{data}");
+        assert_eq!(run["children"].as_array().map(Vec::len), Some(11), "{data}");
+        assert_eq!(run["end"], 1767225659002_i64, "{data}");
+        assert_eq!(run["attributes"]["gen_ai.usage.input_tokens"], 496473, "{data}");
+        assert_eq!(data["subagentsOmitted"], 0, "{data}");
+        assert!(within(run, 1767225599000, 1767225660000), "{data}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// One nine-call turn: a single message names `toolu_8001` to `toolu_8009`, and
+    /// the turn settles at 00:05:00.
+    const NINE_TURN: &str = concat!(
+        r#"{"type":"user","uuid":"n-0001","timestamp":"2026-01-01T00:04:00.000Z","message":{"role":"user","content":"fan out"}}"#, "\n",
+        r#"{"type":"assistant","uuid":"n-0002","timestamp":"2026-01-01T00:04:01.000Z","message":{"id":"msg_n1","model":"claude-haiku-5-5","role":"assistant","stop_reason":"tool_use","content":[@BLOCKS@],"usage":{"input_tokens":1,"output_tokens":1,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}"#, "\n",
+        r#"{"type":"assistant","uuid":"n-0003","timestamp":"2026-01-01T00:05:00.000Z","message":{"id":"msg_n2","model":"claude-haiku-5-5","role":"assistant","stop_reason":"end_turn","content":[{"type":"text","text":"done"}],"usage":{"input_tokens":1,"output_tokens":1,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}"#, "\n",
+    );
+
+    #[test]
+    fn nine_subagent_calls_read_eight_files_and_count_the_ninth() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&env_keys());
+        let blocks = (1..=9)
+            .map(|n| format!(r#"{{"type":"tool_use","id":"toolu_800{n}","name":"Agent","input":{{}}}}"#))
+            .collect::<Vec<String>>()
+            .join(",");
+        let root = subagent_fixture_with("subagent-nine", &NINE_TURN.replace("@BLOCKS@", &blocks));
+        for n in 1..=9 {
+            write_subagent(&root, &format!("n{n}"), &format!("toolu_800{n}"), "general-purpose", GENERAL_SUBAGENT);
+        }
+
+        let out = session_trace(&trace_invocation(&["claude-subagents"], &[("json", "true")]));
+        assert_eq!(out.status, Status::Ok, "msg: {}", out.message);
+        let data = out.data.clone().unwrap();
+        assert_eq!(data["subagentsOmitted"], 1, "{data}");
+        let placed = (2..=9)
+            .filter(|n| {
+                span_of_call(&data["spans"], &format!("toolu_800{n}"))["children"]
+                    .as_array()
+                    .is_some_and(|children| children.len() == 1)
+            })
+            .count();
+        assert_eq!(placed, 8, "{data}");
+        let unread = span_of_call(&data["spans"], "toolu_8001");
+        assert_eq!(unread["children"].as_array().map(Vec::len), Some(0), "{data}");
+        assert!(unread["attributes"].get("aoide.subagent").is_none(), "{data}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// One turn that starts `toolu_9020` and gets its answer at 00:04:30.
+    const DEPTH_TURN: &str = concat!(
+        r#"{"type":"user","uuid":"m-0001","timestamp":"2026-01-01T00:04:00.000Z","message":{"role":"user","content":"go"}}"#, "\n",
+        r#"{"type":"assistant","uuid":"m-0002","timestamp":"2026-01-01T00:04:00.500Z","message":{"id":"msg_d1","model":"claude-haiku-5-5","role":"assistant","stop_reason":"tool_use","content":[{"type":"tool_use","id":"toolu_9020","name":"Agent","input":{"prompt":"p"}}],"usage":{"input_tokens":1,"output_tokens":1,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}"#, "\n",
+        r#"{"type":"user","uuid":"m-0003","timestamp":"2026-01-01T00:04:30.000Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_9020","content":"ok"}]}}"#, "\n",
+        r#"{"type":"assistant","uuid":"m-0004","timestamp":"2026-01-01T00:04:31.000Z","message":{"id":"msg_d2","model":"claude-haiku-5-5","role":"assistant","stop_reason":"end_turn","content":[{"type":"text","text":"done"}],"usage":{"input_tokens":1,"output_tokens":1,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}"#, "\n",
+    );
+
+    /// The first sub-agent: it starts `toolu_9021` and gets its answer at 00:04:20.
+    const LEVEL_ONE: &str = concat!(
+        r#"{"type":"user","uuid":"b1-1","timestamp":"2026-01-01T00:04:01.000Z","isSidechain":true,"message":{"role":"user","content":"one"}}"#, "\n",
+        r#"{"type":"assistant","uuid":"b1-2","timestamp":"2026-01-01T00:04:02.000Z","isSidechain":true,"message":{"id":"msg_b1a","model":"claude-haiku-5-5","role":"assistant","stop_reason":"tool_use","content":[{"type":"tool_use","id":"toolu_9021","name":"Agent","input":{"prompt":"p"}}],"usage":{"input_tokens":1,"output_tokens":1,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}"#, "\n",
+        r#"{"type":"user","uuid":"b1-3","timestamp":"2026-01-01T00:04:20.000Z","isSidechain":true,"message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_9021","content":"ok"}]}}"#, "\n",
+        r#"{"type":"assistant","uuid":"b1-4","timestamp":"2026-01-01T00:04:21.000Z","isSidechain":true,"message":{"id":"msg_b1b","model":"claude-haiku-5-5","role":"assistant","stop_reason":"end_turn","content":[{"type":"text","text":"ok"}],"usage":{"input_tokens":1,"output_tokens":1,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}"#, "\n",
+    );
+
+    /// The second sub-agent: it starts `toolu_9022` and gets its answer at 00:04:10.
+    const LEVEL_TWO: &str = concat!(
+        r#"{"type":"user","uuid":"b2-1","timestamp":"2026-01-01T00:04:03.000Z","isSidechain":true,"message":{"role":"user","content":"two"}}"#, "\n",
+        r#"{"type":"assistant","uuid":"b2-2","timestamp":"2026-01-01T00:04:04.000Z","isSidechain":true,"message":{"id":"msg_b2a","model":"claude-haiku-5-5","role":"assistant","stop_reason":"tool_use","content":[{"type":"tool_use","id":"toolu_9022","name":"Agent","input":{"prompt":"p"}}],"usage":{"input_tokens":1,"output_tokens":1,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}"#, "\n",
+        r#"{"type":"user","uuid":"b2-3","timestamp":"2026-01-01T00:04:10.000Z","isSidechain":true,"message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_9022","content":"ok"}]}}"#, "\n",
+        r#"{"type":"assistant","uuid":"b2-4","timestamp":"2026-01-01T00:04:11.000Z","isSidechain":true,"message":{"id":"msg_b2b","model":"claude-haiku-5-5","role":"assistant","stop_reason":"end_turn","content":[{"type":"text","text":"ok"}],"usage":{"input_tokens":1,"output_tokens":1,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}"#, "\n",
+    );
+
+    #[test]
+    fn a_level_three_subagent_call_is_not_read_and_is_counted() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&env_keys());
+        let root = subagent_fixture_with("subagent-depth", DEPTH_TURN);
+        write_subagent(&root, "b1", "toolu_9020", "general-purpose", LEVEL_ONE);
+        write_subagent(&root, "b2", "toolu_9021", "claude-code-guide", LEVEL_TWO);
+        write_subagent(&root, "b3", "toolu_9022", "general-purpose", GENERAL_SUBAGENT);
+
+        let out = session_trace(&trace_invocation(&["claude-subagents"], &[("json", "true")]));
+        assert_eq!(out.status, Status::Ok, "msg: {}", out.message);
+        let data = out.data.clone().unwrap();
+        assert_eq!(data["subagentsOmitted"], 1, "{data}");
+        let first = span_of_call(&data["spans"], "toolu_9020");
+        assert_eq!(first["children"][0]["name"], "invoke_agent general-purpose", "{data}");
+        let second = span_of_call(&data["spans"], "toolu_9021");
+        assert_eq!(second["children"][0]["name"], "invoke_agent claude-code-guide", "{data}");
+        let third = span_of_call(&data["spans"], "toolu_9022");
+        assert_eq!(third["children"].as_array().map(Vec::len), Some(0), "{data}");
+        assert!(third["attributes"].get("aoide.subagent").is_none(), "{data}");
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

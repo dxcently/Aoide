@@ -779,7 +779,7 @@ fn trace_refusal(session_id: &str, clip: &str, lines: usize, reason: &str, messa
 /// (`aoide session trace <id> --tail N --clip <clip> --json`, with `--turn <turn>`
 /// and `--subagent <call>` when named) and shape its own envelope into the ONE line the card
 /// reads — `{ok, sessionId, clip, lines, trace, at, steps, stepsOmitted, turns,
-/// turnsOmitted, spans, spansOmitted}`, or a refusal ([`trace_refusal`]).
+/// turnsOmitted, spans, spansOmitted, subagentsOmitted}`, or a refusal ([`trace_refusal`]).
 /// Nothing is resolved, folded or re-parsed here: the CLI's resolver, capability
 /// refusal and projection ARE the answer, which is why this is a re-exec and not
 /// a second reader.
@@ -867,6 +867,7 @@ fn dispatch_session_trace(session_id: &str, lines: usize, clip: &str, turn: Opti
         "turnsOmitted": data.get("turnsOmitted").cloned().unwrap_or_else(|| json!(0)),
         "spans": data.get("spans").cloned().unwrap_or(Value::Null),
         "spansOmitted": data.get("spansOmitted").cloned().unwrap_or_else(|| json!(0)),
+        "subagentsOmitted": data.get("subagentsOmitted").cloned().unwrap_or_else(|| json!(0)),
     })
 }
 
@@ -2074,7 +2075,7 @@ printf '{"status":"ok","command":"session.trace","message":"1 record(s)","data":
         std::fs::write(
             &stub,
             r#"#!/bin/sh
-printf '{"status":"ok","command":"session.trace","message":"1 record(s)","data":{"sessionId":"%s","trace":"%s.jsonl","clip":"%s","steps":[{"id":"2","ts":1789603009102,"kind":"thinking","text":"argv: %s %s %s %s %s %s %s","error":false,"clipped":true}],"stepsOmitted":3,"turns":[{"id":"6","start":1789603009102,"end":1789603009200,"status":"ok","partial":false,"steps":1,"tools":0,"failed":0}],"turnsOmitted":0,"spans":{"id":"turn-6","name":"invoke_agent eidolon","kind":"internal","start":1789603009102,"end":1789603009200,"status":"ok","attributes":{},"children":[]},"spansOmitted":4}}\n' "$3" "$3" "$7" "$4" "$5" "$6" "$7" "$8" "$9" "${10}"
+printf '{"status":"ok","command":"session.trace","message":"1 record(s)","data":{"sessionId":"%s","trace":"%s.jsonl","clip":"%s","steps":[{"id":"2","ts":1789603009102,"kind":"thinking","text":"argv: %s %s %s %s %s %s %s","error":false,"clipped":true}],"stepsOmitted":3,"turns":[{"id":"6","start":1789603009102,"end":1789603009200,"status":"ok","partial":false,"steps":1,"tools":0,"failed":0}],"turnsOmitted":0,"spans":{"id":"turn-6","name":"invoke_agent eidolon","kind":"internal","start":1789603009102,"end":1789603009200,"status":"ok","attributes":{},"children":[]},"spansOmitted":4,"subagentsOmitted":1}}\n' "$3" "$3" "$7" "$4" "$5" "$6" "$7" "$8" "$9" "${10}"
 "#,
         )
         .unwrap();
@@ -2099,6 +2100,7 @@ printf '{"status":"ok","command":"session.trace","message":"1 record(s)","data":
         assert_eq!(answer["turnsOmitted"], 0, "{answer}");
         assert_eq!(answer["spans"]["id"], "turn-6", "{answer}");
         assert_eq!(answer["spansOmitted"], 4, "the CLI's own tree bound is carried");
+        assert_eq!(answer["subagentsOmitted"], 1, "the CLI's own sub-agent bound is carried");
 
         let _ = std::fs::remove_dir_all(&root);
     }

@@ -1214,6 +1214,22 @@ blank one is refused too.
   is `no-subagent`; a harness with no `subagent_records` is
   `no-trace-capability`. Stated limit: a sub-agent stopped with no closer and no
   hand-back reads as `running`, since its file holds no turn marker to cancel it.
+- **Sub-agents in the tree (`trace.rs` gathers, `spans.rs` places).** The calls of
+  the turn whose tool name the profile's `subagent_tools` lists (Claude: `Task`,
+  `Agent`) are read newest first, breadth-first, through the same
+  `subagent_records` reader: at most 8 files per command (`MAX_SUBAGENT_FILES`),
+  and at most 2 levels below the turn (`MAX_SUBAGENT_DEPTH`). A call with no file
+  is a plain tool span, not counted; a call a bound leaves unread is counted in
+  `subagentsOmitted` and is a plain tool span. A call whose sub-agent ran inside it
+  (every timed record at or before the call's end) is NESTED: its children are the
+  sub-agent's turns, each an `invoke_agent <agent>` root built as a turn's root is,
+  each bounded by `MAX_NESTED_SPANS` (100; its newest whole steps kept, the rest
+  counted in `spansOmitted`). A sub-agent that outlived its call is LINKED: no
+  children, and `aoide.subagent` is `"linked"`. A running call nests a running
+  sub-agent; under an ended call an open sub-agent turn is cut at the call's end,
+  and a closed one is left as it was. Nested spans carry no content. Stated limit:
+  a sub-agent resumed after its call ended has records past the call's end, so it
+  is linked.
 - **The read-only trace QUERY over the bridge (`shellbridge.rs::SessionTrace`).**
   `{"cmd":"sessiontrace","sessionId":…,"lines":N,"clip":"line|detail","turn":…,"subagent":…}`
   re-execs exactly `session trace <id> --tail N --clip … --json`, plus
@@ -1222,7 +1238,7 @@ blank one is refused too.
   `dispatch_usage_refresh`/`dispatch_recheck_sessions` path), and answers ONE
   JSON line on the connection, the `sessionaction` shape: `{ok, sessionId, clip,
   lines, trace, at, steps, stepsOmitted, turns, turnsOmitted, spans,
-  spansOmitted}` or `{ok:false, …, reason, message}`, the CLI's own taught
+  spansOmitted, subagentsOmitted}` or `{ok:false, …, reason, message}`, the CLI's own taught
   refusal verbatim (`reason` is the CLI's own machine name, plus this door's
   `no-answer`/`bad-request`). The gate refuses what it cannot answer honestly:
   a blank/non-id-shaped `sessionId`, a non-numeric or `0` `lines`, an unknown

@@ -223,7 +223,7 @@ string names). The daemon re-execs the existing CLI (`aoide session trace <id>
 ```json
 {"ok":true,"sessionId":"…","clip":"line","lines":12,"trace":"…jsonl",
  "at":1789985394295,"steps":[…],"stepsOmitted":0,
- "turns":[…],"turnsOmitted":0,"spans":{…},"spansOmitted":0}
+ "turns":[…],"turnsOmitted":0,"spans":{…},"spansOmitted":0,"subagentsOmitted":0}
 {"ok":false,"sessionId":"…","clip":"line","lines":12,
  "reason":"no-trace","message":"`…` has no readable trace at …"}
 ```
