@@ -143,6 +143,16 @@ pub struct TranscriptSpec {
     /// `claude_trace::claude_trace_tail`. `None` where the turn log is not
     /// records (kimi, pi).
     pub records: Option<TraceReader>,
+    /// One sub-agent's own file (the path `find_subagent` returns) as trace
+    /// lines. Only `session trace --subagent` reads it, and ping-back never
+    /// does. Claude's sub-agent files are all sidechain records, so they read
+    /// through `claude_trace::claude_subagent_trace_tail`. `None` where a
+    /// sub-agent keeps no transcript that reads as records.
+    pub subagent_records: Option<TraceReader>,
+    /// The sub-agent's type, which names the span root when `session trace
+    /// --subagent` reads its file. Only that command reads it. `None` when the
+    /// file records no type, and where `subagent_records` is `None`.
+    pub subagent_name: fn(file: &Path) -> Option<String>,
 }
 
 /// The on-disk format of an agent's hook-settings file.
@@ -832,7 +842,13 @@ fn subagents_dir(session_id: &str, cwd: Option<&str>) -> Option<PathBuf> {
 /// - `sub:<tool_use_id>` — the classic keying, not yet (or never) re-keyed;
 ///   fall back to scanning `*.meta.json` files for one whose `toolUseId ==
 ///   tuid`, returning its sibling `agent-<id>.jsonl`.
+///
+/// `tuid` joins into a path, so it must be an id: ASCII letters, digits, `_` and
+/// `-`. Any other value is `None`, so `x/../../y` never names a file outside `dir`.
 fn find_subagent_transcript(dir: &Path, tuid: &str) -> Option<PathBuf> {
+    if tuid.is_empty() || !tuid.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-') {
+        return None;
+    }
     let direct = dir.join(format!("agent-{tuid}.jsonl"));
     if direct.is_file() {
         return Some(direct);
@@ -860,6 +876,15 @@ fn find_subagent_transcript(dir: &Path, tuid: &str) -> Option<PathBuf> {
         }
     }
     None
+}
+
+/// The sub-agent's type off its meta file (`agent-x.jsonl` → `agent-x.meta.json`).
+/// `None` when that file is missing or unreadable, lacks `agentType`, or holds an
+/// empty one.
+fn claude_subagent_name(file: &Path) -> Option<String> {
+    let text = std::fs::read_to_string(file.with_extension("meta.json")).ok()?;
+    let meta: Value = serde_json::from_str(&text).ok()?;
+    meta.get("agentType")?.as_str().filter(|name| !name.is_empty()).map(str::to_string)
 }
 
 /// Identity normalizer for a harness whose payloads already speak the
@@ -933,6 +958,8 @@ pub static CLAUDE_PROFILE: AgentProfile = AgentProfile {
         trace: None,
         // Read as trace lines for `session trace` only (`claude_trace.rs`).
         records: Some(claude_trace::claude_trace_tail),
+        subagent_records: Some(claude_trace::claude_subagent_trace_tail),
+        subagent_name: claude_subagent_name,
     },
     chat: crate::chat::ChatSupport::Adapter(crate::chat::ChatAdapter {
         read: claude_chat_read,
@@ -1344,6 +1371,11 @@ fn kimi_find_subagent(dir: &Path, tuid: &str) -> Option<PathBuf> {
     p.is_file().then_some(p)
 }
 
+/// Kimi's sub-agent `wire.jsonl` keeps no type beside it: always `None`.
+fn kimi_subagent_name(_: &Path) -> Option<String> {
+    None
+}
+
 /// The Kimi Code profile.
 pub static KIMI_PROFILE: AgentProfile = AgentProfile {
     name: "kimi",
@@ -1389,6 +1421,8 @@ pub static KIMI_PROFILE: AgentProfile = AgentProfile {
         // No mirrored trace: kimi's own wire log IS its turn record.
         trace: None,
         records: None,
+        subagent_records: None,
+        subagent_name: kimi_subagent_name,
     },
     chat: crate::chat::ChatSupport::Unsupported(
         "no chat adapter yet: kimi's transcript is not projected into chat lines",
@@ -1693,6 +1727,11 @@ fn pi_find_subagent(_: &Path, _: &str) -> Option<PathBuf> {
     None
 }
 
+/// pi keeps no sub-agent file, so no type: always `None`, as [`pi_find_subagent`].
+fn pi_subagent_name(_: &Path) -> Option<String> {
+    None
+}
+
 /// The Pi profile. The aoide-pi-session extension emits Aoide's own
 /// canonical field names directly (it's aoide-owned code, not a foreign
 /// harness to translate), so normalize is identity. Its sub-agent children
@@ -1730,6 +1769,8 @@ pub static PI_PROFILE: AgentProfile = AgentProfile {
         // No mirrored trace: pi's transcript IS its turn record.
         trace: None,
         records: None,
+        subagent_records: None,
+        subagent_name: pi_subagent_name,
     },
     chat: crate::chat::ChatSupport::Unsupported(
         "no chat adapter yet: pi's transcript is not projected into chat lines",
@@ -3018,6 +3059,11 @@ fn eidolon_find_subagent(_dir: &Path, _tuid: &str) -> Option<PathBuf> {
     None
 }
 
+/// Eidolon keeps no sub-agent file, so no type: `None`, as [`pi_subagent_name`].
+fn eidolon_subagent_name(_file: &Path) -> Option<String> {
+    None
+}
+
 /// `eidolon send --from aoide --wake <to> -` — deliver a message to another
 /// live eidolon session by its native presence id, WITHOUT typing into any
 /// pty composer at all (`main.rs:155-176`, impl `:506-546`,
@@ -3146,6 +3192,8 @@ pub static EIDOLON_PROFILE: AgentProfile = AgentProfile {
         // the call site.
         trace: Some(eidolon_trace_tail),
         records: Some(eidolon_trace_tail),
+        subagent_records: None,
+        subagent_name: eidolon_subagent_name,
     },
     // Eidolon has no hook file at all — its config is Nix-owned and
     // read-only to the harness (`~/eidolon/AGENTS.md`: "Configuration is
@@ -4172,6 +4220,52 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
     #[test]
+    fn find_subagent_transcript_takes_only_a_call_id_never_a_path() {
+        // `x/../../escape` joins to `<root>/escape.jsonl` once `agent-x/` exists.
+        let root = std::env::temp_dir().join(format!("aoide_subs_escape_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let dir = root.join("subagents");
+        std::fs::create_dir_all(dir.join("agent-x")).unwrap();
+        std::fs::write(root.join("escape.jsonl"), "{}\n").unwrap();
+        assert_eq!(find_subagent_transcript(&dir, "x/../../escape"), None);
+        assert_eq!(find_subagent_transcript(&dir, ""), None);
+        assert_eq!(find_subagent_transcript(&dir, "a b"), None);
+        // A real call id still resolves.
+        std::fs::write(dir.join("agent-toolu_9001.jsonl"), "{}\n").unwrap();
+        assert_eq!(
+            find_subagent_transcript(&dir, "toolu_9001"),
+            Some(dir.join("agent-toolu_9001.jsonl"))
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_sub_agent_names_its_type_from_the_meta_file_beside_it_and_only_there() {
+        let dir = std::env::temp_dir().join(format!("aoide_subname_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("agent-a1.jsonl"), "{}\n").unwrap();
+        std::fs::write(
+            dir.join("agent-a1.meta.json"),
+            include_str!("../tests/fixtures/claude-subagent.meta.json"),
+        )
+        .unwrap();
+        std::fs::write(dir.join("agent-b2.jsonl"), "{}\n").unwrap();
+        std::fs::write(dir.join("agent-c3.jsonl"), "{}\n").unwrap();
+        std::fs::write(dir.join("agent-c3.meta.json"), r#"{"toolUseId":"toolu_C"}"#).unwrap();
+        std::fs::write(dir.join("agent-d4.jsonl"), "{}\n").unwrap();
+        std::fs::write(dir.join("agent-d4.meta.json"), r#"{"agentType":""}"#).unwrap();
+        let name = |file: &str| (CLAUDE_PROFILE.transcript.subagent_name)(&dir.join(file));
+        // The fixture pair: its meta names the type.
+        assert_eq!(name("agent-a1.jsonl").as_deref(), Some("claude-code-guide"));
+        // No meta file, a meta without the key, and an empty value each name no type.
+        assert_eq!(name("agent-b2.jsonl"), None);
+        assert_eq!(name("agent-c3.jsonl"), None);
+        assert_eq!(name("agent-d4.jsonl"), None);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn every_harness_extracts_its_latest_tool_call_into_one_label() {
         // claude: `tool_use` blocks inside an assistant message's content.
         let claude: Vec<String> = [
@@ -4343,6 +4437,12 @@ mod tests {
         assert!(CLAUDE_PROFILE.transcript.records.is_some());
         assert!(KIMI_PROFILE.transcript.records.is_none());
         assert!(PI_PROFILE.transcript.records.is_none());
+        // `subagent_records` is the sub-agent reader `session trace --subagent`
+        // takes: claude's sub-agent files alone. `trace` above is unchanged.
+        assert!(CLAUDE_PROFILE.transcript.subagent_records.is_some());
+        assert!(EIDOLON_PROFILE.transcript.subagent_records.is_none());
+        assert!(KIMI_PROFILE.transcript.subagent_records.is_none());
+        assert!(PI_PROFILE.transcript.subagent_records.is_none());
         // And the reader refuses a path that is not a trace file at all --
         // the presence stand-in `locate` falls back to. That distinction is
         // the whole reason it returns `Option`: "keeps no trace" and "an

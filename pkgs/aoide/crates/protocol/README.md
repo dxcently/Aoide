@@ -253,7 +253,14 @@ crate; beyond that no `aoide-*` crate sits beneath it, and every other
   trace` reads: eidolon's own trace, and Claude's transcript read as trace
   lines by `agents/claude_trace.rs`; `None` for kimi and pi, whose turn log is
   not records. Claude keeps `trace: None`: a translated transcript is never a
-  ping-back source. `eidolon_transcript_locate` answers the
+  ping-back source. `TranscriptSpec::subagent_records` is one sub-agent's own
+  file (the path `find_subagent` returns) as trace lines, read by `session
+  trace --subagent` only: Claude's `claude_subagent_trace_tail` keeps that
+  file's sidechain records, which a session's own transcript skips, and the
+  other harnesses keep `None`. `TranscriptSpec::subagent_name` is the
+  sub-agent's type off the meta file beside it (Claude: its `agentType`), read
+  by the same command. Ping-back reads `trace` and nothing else, so no
+  sub-agent file can source it. `eidolon_transcript_locate` answers the
   producer generation that is actually installed: a mirror that is still
   current, else the journal itself when the producer's own read-only export
   door proves there (`eidolon log --json …`, probed per program identity,

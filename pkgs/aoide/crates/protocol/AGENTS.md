@@ -277,8 +277,9 @@
   alone, so no ping-back can ever source from it. The translator
   (`agents/claude_trace.rs`) keeps these rules, each pinned by a test there:
   an unnamed shape (no uuid, no `message.id`, content that is not a list,
-  a sidechain, a `<synthetic>` stand-in) is no line; a
-  meta record that opens no turn is no line; a turn opens at a record with
+  a `<synthetic>` stand-in) is no line, and so is a sidechain record of a
+  session's own transcript (`skip_sidechain`); a meta record that opens no
+  turn is no line; a turn opens at a record with
   `turnPosition`, and an opener while one is open first emits `Cancelled` at
   the last timed line; a settle is the last record of a message whose stop
   reason is set and is neither `tool_use` nor `pause_turn`, and a message's
@@ -291,6 +292,24 @@
   served it; the window is the transcript's last 8 MiB. The format is
   Claude Code's own, read from the CLI 2.1.308 and 2.1.309 fixtures in
   `tests/fixtures/`, so a CLI change shows first in the translator's tests.
+- **A sub-agent's own file reads through `subagent_records`, and its
+  hand-back ends the turn.** Every record of that file is a sidechain, so
+  `translate` takes `skip_sidechain`: false for it, true for a session's own
+  transcript (`claude_trace_tail` and `claude_subagent_trace_tail` pass it).
+  A `SubagentHandback` call (`HAND_BACK_TOOL`) ends the sub-agent's turn: its
+  result, read after the call, settles the open turn right after its own
+  line. The settle's id is `settled-<result id>`, its `ts_ms` is that line's,
+  its stop reason is the call's message's as its last record writes it
+  (`null` included), and its usage is the four sums. A result whose call is
+  not read earlier in the window settles nothing. The rule holds in both
+  modes, since a session's own transcript never calls that tool. Why: 349 of
+  the 354 sub-agent files with no `end_turn` closer end on a hand-back, all
+  written by CLI 2.1.293 or later. Limit: a file whose every stop reason is
+  null carries each request's opening usage, so its output count reads low.
+- **`find_subagent_transcript` takes a call id, never a path.** The id joins
+  into `agent-<id>.jsonl`, so only ASCII letters, digits, `_` and `-` pass;
+  any other id is `None`, and `x/../../y` cannot name a file outside the
+  subagents directory.
 - **A new agent harness** (beyond `claude`/`kimi`/`pi`/`eidolon`) is a new
   `agents::agent_profile` table entry, not a scatter of `if harness == ...`
   conditionals elsewhere. A harness need not fill every field to qualify —

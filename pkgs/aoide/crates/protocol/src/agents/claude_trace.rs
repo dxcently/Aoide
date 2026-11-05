@@ -1,5 +1,6 @@
 //! Claude's transcript as trace lines: the `records` reader of the Claude
-//! profile, read by `session trace` only. The transcript is Claude Code's own
+//! profile, and the `subagent_records` reader of one sub-agent's own file, both
+//! read by `session trace` only. The transcript is Claude Code's own
 //! log, one record per content block. This turns it into the record kinds
 //! `eidolon_trace_record` reads (docs/architecture/EIDOLON-TRACE.md), so the
 //! span view reads one shape. Claude keeps `trace: None`: these lines are never
@@ -13,15 +14,27 @@ use std::collections::HashMap;
 use std::path::Path;
 
 /// The window's trace lines for `session trace`, or `None` when `path` is not a
-/// file. The window is the transcript's last [`CHAT_FIRST_BYTES`].
+/// file. The window is the transcript's last [`CHAT_FIRST_BYTES`]. A session's
+/// own transcript: its sidechain records are skipped.
 pub(crate) fn claude_trace_tail(path: &Path) -> Option<Vec<String>> {
     path.is_file()
-        .then(|| translate(&transcript_tail_bounded(path, CHAT_FIRST_BYTES)))
+        .then(|| translate(&transcript_tail_bounded(path, CHAT_FIRST_BYTES), true))
 }
 
+/// One sub-agent's own file (`agent-<id>.jsonl`) as trace lines, over the same
+/// window. Every record of such a file is a sidechain, so none is skipped.
+pub(crate) fn claude_subagent_trace_tail(path: &Path) -> Option<Vec<String>> {
+    path.is_file()
+        .then(|| translate(&transcript_tail_bounded(path, CHAT_FIRST_BYTES), false))
+}
+
+/// The tool a sub-agent calls to hand its report back, which ends its turn.
+const HAND_BACK_TOOL: &str = "SubagentHandback";
+
 /// The window's transcript lines as trace lines, in file order. A line that does
-/// not parse is no line.
-fn translate(lines: &[String]) -> Vec<String> {
+/// not parse is no line. `skip_sidechain` is true for a session's own transcript
+/// and false for a sub-agent's own file, as `TranscriptSpec::say` takes it.
+fn translate(lines: &[String], skip_sidechain: bool) -> Vec<String> {
     let records: Vec<Value> = lines
         .iter()
         .filter_map(|line| serde_json::from_str(line.trim()).ok())
@@ -33,11 +46,16 @@ fn translate(lines: &[String]) -> Vec<String> {
         .filter(|(_, record)| record.get("type").and_then(Value::as_str) == Some("assistant"))
         .filter_map(|(i, record)| Some((text_at(record, "/message/id")?, i)))
         .collect();
-    let mut st = State::default();
+    // Each message's stop reason as its last record writes it: a hand-back carries it.
+    let stops: HashMap<&str, Value> = last_of
+        .iter()
+        .map(|(&id, &i)| (id, json!(text_at(&records[i], "/message/stop_reason"))))
+        .collect();
+    let mut st = State { skip_sidechain, ..State::default() };
     for (i, record) in records.iter().enumerate() {
         match record.get("type").and_then(Value::as_str) {
             Some("user") => user(record, &mut st),
-            Some("assistant") => assistant(record, i, &last_of, &mut st),
+            Some("assistant") => assistant(record, i, &last_of, &stops, &mut st),
             _ => {}
         }
     }
@@ -45,13 +63,18 @@ fn translate(lines: &[String]) -> Vec<String> {
 }
 
 /// The window's running state: whether a turn is open, the model last emitted,
-/// and the open turn's usage sums.
+/// the open turn's usage sums, and the hand-back calls read so far.
 #[derive(Default)]
 struct State {
+    skip_sidechain: bool,
     open: bool,
     model: Option<String>,
     last_ts: Option<i64>,
     sums: Sums,
+    /// Call id to the stop reason of the call's message, for each `SubagentHandback`
+    /// call read so far. A result settles only through an entry here, so its call
+    /// comes earlier in the window.
+    handbacks: HashMap<String, Value>,
     out: Vec<String>,
 }
 
@@ -119,7 +142,10 @@ fn ts_of(record: &Value) -> Option<i64> {
 /// A user record: an opener (`turnPosition`), a tool result, or other user text.
 /// Its content is a string or a list of blocks; any other shape is no line.
 fn user(record: &Value, st: &mut State) {
-    if flag(record, "isSidechain") || flag(record, "isCompactSummary") || flag(record, "isVisibleInTranscriptOnly") {
+    if (st.skip_sidechain && flag(record, "isSidechain"))
+        || flag(record, "isCompactSummary")
+        || flag(record, "isVisibleInTranscriptOnly")
+    {
         return;
     }
     let Some(uuid) = text_at(record, "/uuid") else {
@@ -149,12 +175,19 @@ fn user(record: &Value, st: &mut State) {
         let one = results.len() == 1;
         for (index, block) in results {
             let id = if one { uuid.to_string() } else { format!("{uuid}.{index}") };
+            let call = text_field(block, "tool_use_id");
             let kind = json!({"ToolResult": {
-                "tool_use_id": text_field(block, "tool_use_id"),
+                "tool_use_id": call,
                 "content": result_text(block.get("content")),
                 "is_error": flag(block, "is_error"),
             }});
-            st.emit(id, ts, kind);
+            st.emit(id.clone(), ts, kind);
+            // A hand-back's result closes the open turn, right after its own line.
+            if let Some(stop) = st.handbacks.get(call).cloned().filter(|_| st.open) {
+                let usage = st.sums.json();
+                st.emit(format!("settled-{id}"), ts, json!({"TurnSettled": {"stop_reason": stop, "usage": usage}}));
+                st.close();
+            }
         }
         return;
     }
@@ -198,8 +231,8 @@ fn plain_text(content: Option<&Value>) -> Option<String> {
 /// model moved. A `<synthetic>` reply emits no line and adds no usage, but its
 /// stop reason can still settle an open turn. A record whose content is not a
 /// list is no line.
-fn assistant(record: &Value, index: usize, last_of: &HashMap<&str, usize>, st: &mut State) {
-    if flag(record, "isSidechain") {
+fn assistant(record: &Value, index: usize, last_of: &HashMap<&str, usize>, stops: &HashMap<&str, Value>, st: &mut State) {
+    if st.skip_sidechain && flag(record, "isSidechain") {
         return;
     }
     let (Some(uuid), Some(mid), Some(content)) = (
@@ -226,6 +259,13 @@ fn assistant(record: &Value, index: usize, last_of: &HashMap<&str, usize>, st: &
         st.sums.add(record.pointer("/message/usage"));
     }
     let stop = text_at(record, "/message/stop_reason");
+    for block in content
+        .iter()
+        .filter(|block| text_field(block, "type") == "tool_use" && text_field(block, "name") == HAND_BACK_TOOL)
+    {
+        let reason = stops.get(mid).cloned().unwrap_or(Value::Null);
+        st.handbacks.insert(text_field(block, "id").to_string(), reason);
+    }
     let settles = matches!(stop, Some(s) if s != "tool_use" && s != "pause_turn");
     if st.open && settles && last_of.get(mid) == Some(&index) {
         let kind = json!({"TurnSettled": {"stop_reason": stop, "usage": st.sums.json()}});
@@ -256,7 +296,7 @@ fn blocks(content: &[Value]) -> Vec<Value> {
 
 #[cfg(test)]
 mod tests {
-    use super::{claude_trace_tail, translate};
+    use super::{claude_subagent_trace_tail, claude_trace_tail, translate};
     use crate::agents::eidolon_trace_record;
     use serde_json::{json, Value};
 
@@ -270,7 +310,7 @@ mod tests {
 
     /// The translated window, one JSON value per line, in order.
     fn out(lines: &[String]) -> Vec<Value> {
-        translate(lines)
+        translate(lines, true)
             .iter()
             .map(|line| serde_json::from_str(line).expect("a translated line is JSON"))
             .collect()
@@ -302,7 +342,7 @@ mod tests {
     #[test]
     fn every_line_is_a_trace_record_eidolon_reads_with_a_real_id() {
         for text in [TURNS, COMPACT, READ_TOOL] {
-            let lines = translate(&window(text));
+            let lines = translate(&window(text), true);
             assert!(!lines.is_empty(), "a fixture translates to lines");
             for line in lines {
                 let record = eidolon_trace_record(&line).expect("eidolon reads the line");
@@ -676,5 +716,135 @@ mod tests {
         let failed = &by_id(&lines, "u-0029")["kind"]["ToolResult"];
         assert_eq!(failed["tool_use_id"], "toolu_0003");
         assert_eq!(failed["is_error"], true);
+    }
+
+    const SUBAGENT: &str = include_str!("../../tests/fixtures/claude-subagent.jsonl");
+
+    /// A temp dir holding `files`, named `tag`: a sub-agent's `subagents/` dir in
+    /// miniature. The caller removes it.
+    fn staged(tag: &str, files: &[(&str, &str)]) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("claude-subagent-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("a temp dir");
+        for (name, text) in files {
+            std::fs::write(dir.join(name), text).expect("a staged file");
+        }
+        dir
+    }
+
+    /// Read `lines` as one sub-agent file through its own reader, parsed.
+    fn sub_out(tag: &str, lines: &[&str]) -> Vec<Value> {
+        let body = lines.join("\n") + "\n";
+        let dir = staged(tag, &[("agent-s.jsonl", body.as_str())]);
+        let read = claude_subagent_trace_tail(&dir.join("agent-s.jsonl")).expect("a file reads");
+        let _ = std::fs::remove_dir_all(&dir);
+        read.iter().map(|line| serde_json::from_str(line).expect("a line is JSON")).collect()
+    }
+
+    #[test]
+    fn a_subagent_file_reads_whole_through_its_own_reader_and_not_through_the_main_one() {
+        let dir = staged("fixture", &[("agent-a1.jsonl", SUBAGENT)]);
+        let file = dir.join("agent-a1.jsonl");
+        // Every record of a sub-agent file is a sidechain: the main reader drops them all.
+        assert_eq!(claude_trace_tail(&file), Some(Vec::new()));
+        let lines = claude_subagent_trace_tail(&file).expect("a file reads");
+        let _ = std::fs::remove_dir_all(&dir);
+        let out: Vec<Value> = lines.iter().map(|l| serde_json::from_str(l).expect("a line is JSON")).collect();
+        assert_eq!(out.len(), 44, "{out:?}");
+        // The first record is the prompt, from no named sender; the meta record yields no line.
+        assert_eq!(out[0]["id"], "u-0001");
+        assert_eq!(out[0]["kind"]["ExternalMessage"]["from"], "unknown");
+        assert!(out.iter().all(|line| line["id"] != "u-0002"));
+        // One model named once, before the first of 26 messages.
+        let model_at = out.iter().position(|line| kind_of(line) == "ModelChanged").expect("a model line");
+        assert_eq!(out[model_at]["id"], "model-u-0011");
+        assert_eq!(out[model_at]["kind"]["ModelChanged"]["model"], ":claude-haiku-5-5");
+        let first_message = out.iter().position(|line| kind_of(line) == "AssistantMessage").expect("a message");
+        assert!(model_at < first_message);
+        assert_eq!(out.iter().filter(|line| kind_of(line) == "AssistantMessage").count(), 26);
+        assert_eq!(out.iter().filter(|line| kind_of(line) == "ToolResult").count(), 15);
+        // The hand-back result closes the turn: its settle comes last, with the four sums.
+        let settle = out.last().expect("a last line");
+        assert_eq!(kind_of(settle), "TurnSettled");
+        assert_eq!(settle["id"], "settled-u-0063");
+        assert_eq!(settle["ts_ms"], 1_767_225_659_002_i64);
+        assert!(settle["kind"]["TurnSettled"]["stop_reason"].is_null());
+        assert_eq!(
+            settle["kind"]["TurnSettled"]["usage"],
+            json!({
+                "input_tokens": 22,
+                "output_tokens": 52,
+                "cache_creation_input_tokens": 65_202,
+                "cache_read_input_tokens": 431_249,
+            })
+        );
+    }
+
+    #[test]
+    fn a_hand_back_result_settles_its_open_turn_right_after_its_line() {
+        let out = sub_out(
+            "hand-back",
+            &[
+                r#"{"type":"user","uuid":"s-1","timestamp":"2026-03-01T12:34:56Z","isSidechain":true,"message":{"role":"user","content":"go"}}"#,
+                r#"{"type":"assistant","uuid":"s-2","timestamp":"2026-03-01T12:34:57Z","isSidechain":true,"message":{"id":"m-h","model":"claude-haiku-5-5","role":"assistant","stop_reason":null,"content":[{"type":"tool_use","id":"toolu-h","name":"SubagentHandback","input":{}}],"usage":{"input_tokens":3,"output_tokens":4,"cache_creation_input_tokens":5,"cache_read_input_tokens":6}}}"#,
+                r#"{"type":"user","uuid":"s-3","timestamp":"2026-03-01T12:34:58Z","isSidechain":true,"message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu-h","content":"report"}]}}"#,
+            ],
+        );
+        let kinds: Vec<&str> = out.iter().map(kind_of).collect();
+        assert_eq!(kinds, ["ExternalMessage", "ModelChanged", "AssistantMessage", "ToolResult", "TurnSettled"]);
+        let result = &out[3];
+        let settle = &out[4];
+        assert_eq!(settle["id"], "settled-s-3");
+        assert_eq!(settle["ts_ms"], 1_772_368_498_000_i64, "the result line's time");
+        assert!(settle["kind"]["TurnSettled"]["stop_reason"].is_null(), "the call's stop reason, null as written");
+        assert_eq!(
+            settle["kind"]["TurnSettled"]["usage"],
+            json!({"input_tokens": 3, "output_tokens": 4, "cache_creation_input_tokens": 5, "cache_read_input_tokens": 6}),
+        );
+        assert_eq!(result["kind"]["ToolResult"]["tool_use_id"], "toolu-h");
+    }
+
+    #[test]
+    fn another_tools_result_does_not_settle_and_a_hand_back_with_no_open_turn_emits_no_settle() {
+        let other = sub_out(
+            "other-tool",
+            &[
+                r#"{"type":"assistant","uuid":"s-2","timestamp":"2026-03-01T12:34:57Z","isSidechain":true,"message":{"id":"m-b","model":"claude-haiku-5-5","role":"assistant","stop_reason":null,"content":[{"type":"tool_use","id":"toolu-b","name":"Bash","input":{}}]}}"#,
+                r#"{"type":"user","uuid":"s-3","timestamp":"2026-03-01T12:34:58Z","isSidechain":true,"message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu-b","content":"ok"}]}}"#,
+            ],
+        );
+        // The positive control: the file reads, so the negative below means something.
+        let other_kinds: Vec<&str> = other.iter().map(kind_of).collect();
+        assert_eq!(other_kinds, ["ModelChanged", "AssistantMessage", "ToolResult"], "{other:?}");
+        assert!(other.iter().all(|line| kind_of(line) != "TurnSettled"), "{other:?}");
+
+        // The hand-back's message is open; a plain end-of-turn message settles that turn first, so the
+        // result lands with no open turn and settles nothing.
+        let closed = sub_out(
+            "no-open-turn",
+            &[
+                r#"{"type":"assistant","uuid":"s-2","timestamp":"2026-03-01T12:34:57Z","isSidechain":true,"message":{"id":"m-h","model":"claude-haiku-5-5","role":"assistant","stop_reason":null,"content":[{"type":"tool_use","id":"toolu-h","name":"SubagentHandback","input":{}}]}}"#,
+                r#"{"type":"assistant","uuid":"s-4","timestamp":"2026-03-01T12:34:57.500Z","isSidechain":true,"message":{"id":"m-e","model":"claude-haiku-5-5","role":"assistant","stop_reason":"end_turn","content":[{"type":"text","text":"done"}]}}"#,
+                r#"{"type":"user","uuid":"s-5","timestamp":"2026-03-01T12:34:58Z","isSidechain":true,"message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu-h","content":"late"}]}}"#,
+            ],
+        );
+        let settles: Vec<&str> = closed.iter().filter(|line| kind_of(line) == "TurnSettled").filter_map(|line| line["id"].as_str()).collect();
+        assert_eq!(settles, ["settled-m-e"], "{closed:?}");
+    }
+
+    #[test]
+    fn a_hand_back_whose_call_comes_after_its_result_settles_nothing() {
+        let out = sub_out(
+            "result-first",
+            &[
+                r#"{"type":"assistant","uuid":"s-1","timestamp":"2026-03-01T12:34:57Z","isSidechain":true,"message":{"id":"m-t","model":"claude-haiku-5-5","role":"assistant","stop_reason":null,"content":[{"type":"text","text":"working"}]}}"#,
+                r#"{"type":"user","uuid":"s-2","timestamp":"2026-03-01T12:34:58Z","isSidechain":true,"message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu-h","content":"early"}]}}"#,
+                r#"{"type":"assistant","uuid":"s-3","timestamp":"2026-03-01T12:34:59Z","isSidechain":true,"message":{"id":"m-h","model":"claude-haiku-5-5","role":"assistant","stop_reason":null,"content":[{"type":"tool_use","id":"toolu-h","name":"SubagentHandback","input":{}}]}}"#,
+            ],
+        );
+        // The positive control: the file reads, so the negative below means something.
+        let kinds: Vec<&str> = out.iter().map(kind_of).collect();
+        assert_eq!(kinds, ["ModelChanged", "AssistantMessage", "ToolResult", "AssistantMessage"], "{out:?}");
+        assert!(out.iter().all(|line| kind_of(line) != "TurnSettled"), "{out:?}");
     }
 }
