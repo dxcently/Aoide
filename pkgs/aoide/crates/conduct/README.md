@@ -1112,8 +1112,8 @@ blank one is refused too.
   fingerprint is the card's `received_at`. Doors: the default (Cli and the
   daemon hop); `--follow` is CLI-only. Kind `session`, verb `watch`, so the
   kinds golden carries it.
-- **`session trace <id> [--tail N] [--follow] [--json] [--clip line|detail]`
-  (P-EIDOLON slice E6, `docs/architecture/EIDOLON-TRACE.md`)** —
+- **`session trace <id> [--tail N] [--follow] [--json] [--clip line|detail]
+  [--turn <id>]` (P-EIDOLON slice E6, `docs/architecture/EIDOLON-TRACE.md`)** —
   `graph/trace.rs::session_trace`, the read surface over a harness's own TRACE:
   the whole run, record by record, where every other session command reads the
   roster or acts on a session. Human form is one line per record,
@@ -1122,7 +1122,8 @@ blank one is refused too.
   result shows its first line prefixed `!` when it errored, a settled turn shows
   its stop reason and input/output tokens; `--json` carries `data.lines`, the
   journal's own JSON lines (raw unsafe characters removed, JSON escapes kept, so
-  a decoded line holds untrusted strings; a consumer shows `data.steps`),
+  a decoded line holds untrusted strings; a consumer shows `data.steps`, and
+  `data.turns`/`data.spans` are the span view below),
   `--follow` re-reads every 500ms until Ctrl-C (CLI-only), `--tail N` shows the
   last N (default 50). A follow resumes after the last record it printed, keyed
   by the record's own id (a line's hash when it is not a trace record), never by
@@ -1174,20 +1175,43 @@ blank one is refused too.
   line breaks (≤ `DETAIL_MAX_LINES`) and a few hundred characters and adds a
   `tool_use`'s arguments. Every cut is named in `Step::clipped`; an unknown
   `--clip` word is a taught usage error, never a silent widening.
+- **The span view (`graph/spans.rs`) — the same window, as turns and OTel
+  GenAI spans.** `data.turns` lists every turn of the window, oldest first, as
+  `{id, start, end, status, partial, steps, tools, failed}`. Closers are
+  `TurnSettled` and `Cancelled`; openers are `UserMessage` and
+  `ExternalMessage`. A turn starts at its first opener (its id is that record's
+  id). A run whose first `AssistantMessage` comes before any opener is `partial`
+  and starts at its first record. A run with neither is no turn, and the run
+  after the last closer is `running` with a null `end`. `data.spans` is ONE
+  turn's tree, the one `--turn <id>` names or else the newest, and `null` when
+  the window holds none: the root `invoke_agent <agent>`, one `step <n>` per
+  `AssistantMessage`, and each step's `chat <model>` and `execute_tool <name>`
+  per `tool_use`. The model in force is the latest `SessionStart` or
+  `ModelChanged` at or before the record, split at its first colon. The root's
+  usage comes from `TurnSettled.usage`, Anthropic-style: cached tokens are added
+  to input, and a cache count is named only when non-zero. `Turns::new` takes
+  `&[TraceRecord]`, so the projection never sees a line or a harness name.
+  Bounded: the newest 100 turns (`turnsOmitted`) and 1000 spans per tree (whole
+  newest steps kept, `spansOmitted`). Stated limits: records follow line order, so a
+  fork's abandoned branch is not separated; a model call still in flight has no
+  record, so no `chat` span; a window whose record ids are unreadable may repeat
+  a turn id, and `--turn` picks the first.
 - **The read-only trace QUERY over the bridge (`shellbridge.rs::SessionTrace`).**
-  `{"cmd":"sessiontrace","sessionId":…,"lines":N,"clip":"line|detail"}` re-execs
-  exactly `session trace <id> --tail N --clip … --json` through
-  `daemon::bin::core_bin()` (the `dispatch_usage_refresh`/
-  `dispatch_recheck_sessions` path) and answers ONE JSON line on the connection,
-  the `sessionaction` shape: `{ok, sessionId, clip, lines, trace, at, steps,
-  stepsOmitted}` or `{ok:false, …, reason, message}`, the CLI's own taught
+  `{"cmd":"sessiontrace","sessionId":…,"lines":N,"clip":"line|detail","turn":…}`
+  re-execs exactly `session trace <id> --tail N --clip … --json`, plus
+  `--turn <turn>` when `turn` is named, through `daemon::bin::core_bin()` (the
+  `dispatch_usage_refresh`/`dispatch_recheck_sessions` path), and answers ONE
+  JSON line on the connection, the `sessionaction` shape: `{ok, sessionId, clip,
+  lines, trace, at, steps, stepsOmitted, turns, turnsOmitted, spans,
+  spansOmitted}` or `{ok:false, …, reason, message}`, the CLI's own taught
   refusal verbatim (`reason` is the CLI's own machine name, plus this door's
   `no-answer`/`bad-request`). The gate refuses what it cannot answer honestly:
   a blank/non-id-shaped `sessionId`, a non-numeric or `0` `lines`, an unknown
-  `clip` (refused, never widened); `lines` is clamped to `TRACE_LINES_MAX` from
-  above, and on the core socket, a line NAMING this verb that fails that gate is
-  answered with the refusal rather than dropped silently, because its caller is
-  parked on a reply.
+  `clip` (refused, never widened), and a `turn` that is not id-shaped, checked
+  like `sessionId`; `lines` is clamped to `TRACE_LINES_MAX` from above, and on
+  the core socket, a line NAMING this verb that fails that gate is answered with
+  the refusal rather than dropped silently, because its caller is parked on a
+  reply.
   `run_core_bounded` holds the wall clock: a 10 s deadline (longer than the
   producer pull's own 5 s, so it never fires on a legitimate slow export), the
   child killed and reaped on expiry, both pipes read by SLOT-COUNTED reader

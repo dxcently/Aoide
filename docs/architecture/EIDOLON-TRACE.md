@@ -231,14 +231,38 @@ carries whatever the journal carries; that fix is harnox's.
   `logPath` inside the session logs dir is a terminal's transcript, and it is
   never the hint. `data.endedAt` is the ledger's `endedAt` for a session that
   has left the roster, and null otherwise.
+  `data.turns` lists the turns of the window, oldest first, as `{id, start,
+  end, status, partial, steps, tools, failed}`. A turn opens at a
+  `UserMessage` or `ExternalMessage` and closes at a `TurnSettled` (`status`
+  `ok`) or a `Cancelled` (`cancelled`). A run whose first `AssistantMessage`
+  comes before any opener is `partial` and starts at its first record. The run
+  after the last closer, when it holds a turn, is open: `running`, with a null
+  `end`. The newest 100 are listed, and `turnsOmitted` counts the rest.
+  `data.spans` is one turn as an OTel GenAI span tree. The root
+  `invoke_agent <agent>` holds one `step <n>` per assistant message; a step
+  holds its `chat <model>` (`chat` alone when no model is in force) and one
+  `execute_tool <name>` per `tool_use` block. The turn is the one `--turn <id>`
+  names, else the newest, and `null` when the window holds none. `spansOmitted`
+  counts the spans the 1000-span bound dropped, whole newest steps kept.
+  A chat starts at the input before it: the last user or external message, tool
+  result, or answered question. A tool ends at its own result. A failed result
+  is `error` (`error.type` `tool_error`). A settled turn whose call never got
+  one is `error` (`no_result`). A cancelled turn's is `cancelled`, and the open
+  turn's is `running`. Spans carry names, ids, times, status and counts, never
+  message text, thinking, tool arguments or results. `--turn` needs `--json`
+  and never combines with `--follow`.
 - The read-only trace QUERY over the bridge — one answered shellbridge verb,
-  `{"cmd":"sessiontrace","sessionId":…,"lines":N,"clip":"line|detail"}`, which
-  re-execs exactly the command above (`--tail N --clip … --json`) and answers
-  one JSON line: `{ok, sessionId, clip, lines, trace, at, steps, stepsOmitted}`
-  or `{ok:false, sessionId, clip, lines, reason, message}` carrying the CLI's
+  `{"cmd":"sessiontrace","sessionId":…,"lines":N,"clip":"line|detail","turn":…}`
+  (`turn` is optional: the turn `data.spans` carries, id-shaped and trimmed like
+  the session id; a non-id-shaped one refuses the line), which re-execs exactly
+  the command above (`--tail N --clip … --json`, plus `--turn <turn>` when one
+  is named) and answers one JSON line: `{ok, sessionId, clip, lines, trace, at,
+  steps, stepsOmitted, turns, turnsOmitted, spans, spansOmitted}` or
+  `{ok:false, sessionId, clip, lines, reason, message}` carrying the CLI's
   own taught refusal verbatim (`reason` ∈ `no-trace · no-presence ·
-  unknown-agent · remote-target · not-found · ambiguous`, plus the door's own
-  `no-answer`/`bad-request`). It resolves, reads and prints — it writes nothing.
+  unknown-agent · remote-target · not-found · ambiguous · no-turn`, plus the
+  door's own `no-answer`/`bad-request`). It resolves, reads and prints — it
+  writes nothing.
   Bounded by construction whatever the caller's cadence: `lines` default 12 and
   clamped to 40 from above (a non-number or 0 refused), an unknown `clip`
   refused, the re-exec'd child killed and reaped at a 10 s wall clock (longer

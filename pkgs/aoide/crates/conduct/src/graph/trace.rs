@@ -55,6 +55,13 @@
 //! arguments; `line` (the default, and the only spelling the human body and
 //! `--follow` use) is the terminal's own one-line clip.
 //!
+//! **`--json` also carries `data.turns` and `data.spans`** (`graph/spans.rs`):
+//! every turn of the window, oldest first (the newest hundred listed, with
+//! `turnsOmitted` counting the rest), and one turn's span tree, the one
+//! `--turn <id>` names or else the newest, or `null` when the window holds none.
+//! Both are read from the WHOLE window, never the `--tail` cut. `--turn` needs
+//! `--json` and never combines with `--follow`.
+//!
 //! **A session with no trace is a TAUGHT error, never an empty listing** —
 //! three separate reasons, each named: the harness keeps no trace at all
 //! (`TranscriptSpec::trace` is `None`), the presence metadata names none or
@@ -63,8 +70,9 @@
 
 use super::common::{require_args, stage_error};
 use super::model::{load_stage, resolved_parent, sessions_path, SessionRecord, SessionsFile};
+use super::spans::Turns;
 use aoide_protocol::agents::{agent_profile, eidolon_trace_record, TraceRecord};
-use aoide_protocol::output::Outcome;
+use aoide_protocol::output::{Fix, Kind, Outcome};
 use aoide_protocol::style::{Color, Stream, Style};
 use aoide_protocol::untrusted::strip_unsafe;
 use aoide_protocol::{Door, Invocation};
@@ -907,6 +915,21 @@ pub fn session_trace(inv: &Invocation) -> Outcome {
     };
     let json_mode = inv.flag_present("json");
     let follow = inv.flag_present("follow");
+    let turn = inv.flags.get("turn").map(|raw| raw.trim().to_string());
+    if turn.is_some() && follow {
+        return Outcome::usage(
+            cmd,
+            "`--turn` picks a turn from the `--json` answer, and `--follow` never answers; drop one of them",
+        )
+        .with_data(json!({ "reason": "turn-with-follow" }));
+    }
+    if turn.is_some() && !json_mode {
+        return Outcome::usage(
+            cmd,
+            "`--turn` picks the span tree `--json` carries (`data.spans`), so it needs `--json`",
+        )
+        .with_data(json!({ "reason": "turn-needs-json" }));
+    }
     let dim = inv.door == Door::Cli && Style::for_stream(Color::Auto, json_mode, Stream::Out) == Style::ON;
 
     // `<id>` resolves exactly like `send --to`: the ONE
@@ -1018,6 +1041,23 @@ pub fn session_trace(inv: &Invocation) -> Outcome {
     // the window, by blocks-per-record and by a whole-projection cap.
     let (steps, omitted) = steps_of_lines(&shown, clip);
     let steps: Vec<Value> = steps.iter().map(Step::json).collect();
+    // The span view reads the WHOLE window (the 1 MiB tail `lines` holds), never
+    // the `--tail` cut, so a render window never splits a turn.
+    let records: Vec<TraceRecord> =
+        lines.iter().filter_map(|line| eidolon_trace_record(line.as_str())).collect();
+    let turns = Turns::new(&records);
+    let (listing, turns_omitted) = turns.listing();
+    let picked = match &turn {
+        Some(wanted) => match turns.position(wanted) {
+            Some(index) => Some(index),
+            None => return no_turn(cmd, &id, wanted, &turns),
+        },
+        None => turns.newest(),
+    };
+    let (spans, spans_omitted) = match picked {
+        Some(index) => turns.tree(index, &agent, &id),
+        None => (Value::Null, 0),
+    };
     Outcome::ok(cmd, message)
         .with_data(json!({
             "sessionId": id,
@@ -1029,7 +1069,31 @@ pub fn session_trace(inv: &Invocation) -> Outcome {
             "steps": steps,
             "stepsOmitted": omitted,
             "endedAt": ended.as_ref().map(|e| strip_unsafe(&e.ended_at)),
+            "turns": listing,
+            "turnsOmitted": turns_omitted,
+            "spans": spans,
+            "spansOmitted": spans_omitted,
         }))
+}
+
+/// The taught refusal for a `--turn` the window does not hold: the newest ids it
+/// could have named, and the command that names one (or a wait, when it holds
+/// none yet).
+fn no_turn(cmd: &str, id: &str, wanted: &str, turns: &Turns<'_>) -> Outcome {
+    let newest = turns.newest_ids();
+    let fix = match newest.last() {
+        Some(latest) => Fix::Run(format!("aoide session trace {id} --json --turn {latest}")),
+        None => Fix::Wait("the session's next message opens its first turn".to_string()),
+    };
+    let wanted = strip_unsafe(wanted);
+    Outcome::refuse(
+        cmd,
+        Kind::Refused,
+        format!("`{wanted}` names no turn in this trace window"),
+        "the window is the trace's last 1 MiB, so an older turn is not in it; `turns` lists the newest ids it holds",
+        fix,
+    )
+    .with_fields(json!({ "reason": "no-turn", "turn": wanted, "turns": newest }))
 }
 
 /// What `--follow` prints for one trace line: the line, stripped, in JSON mode,
@@ -1175,6 +1239,12 @@ mod tests {
     const ASK: &str = r#"{"id":40,"parent":39,"ts_ms":1789626500000,"kind":{"AskUser":{"call_id":"call_x","prompt":"Overwrite?","answer":null}}}"#;
     const BUDGET: &str = r#"{"id":120,"parent":119,"ts_ms":1789606380000,"kind":{"TurnBudget":{"calls_left":8}}}"#;
     const EXTERNAL: &str = r#"{"id":55,"parent":54,"ts_ms":1789626700000,"kind":{"ExternalMessage":{"from":"orchestrator","channel":null,"text":"STOP: write the report now"}}}"#;
+
+    const SECOND_USER: &str = r#"{"id":132,"parent":131,"ts_ms":1789606500000,"kind":{"UserMessage":{"role":"user","content":[{"type":"text","text":"again"}]}}}"#;
+    const SECOND_SAY: &str = r#"{"id":133,"parent":132,"ts_ms":1789606510000,"kind":{"AssistantMessage":{"role":"assistant","content":[{"type":"text","text":"ok"}]}}}"#;
+    const SECOND_SETTLED: &str = r#"{"id":134,"parent":133,"ts_ms":1789606520000,"kind":{"TurnSettled":{"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":2}}}}"#;
+    // Two settled turns: the sample's own (opened by record 1), then one opened by 132.
+    const TWO_TURNS: [&str; 8] = [START, USER, ASSISTANT, RESULT, SETTLED, SECOND_USER, SECOND_SAY, SECOND_SETTLED];
 
     fn trace_invocation(args: &[&str], flags: &[(&str, &str)]) -> Invocation {
         Invocation {
@@ -1915,6 +1985,133 @@ mod tests {
         assert!(tool["text"].as_str().unwrap().contains("slots.md"), "{tool}");
         // The human body stays the one-line spelling under either clip.
         assert!(out.message.lines().skip(1).all(|l| !l.contains('\n')));
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn json_carries_every_turn_and_the_newest_turns_spans_by_default() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&env_keys());
+        let root = fixture("trace-turns-default", "Aoide-turns", "eidolon", &TWO_TURNS, true);
+
+        let out = session_trace(&trace_invocation(&["Aoide-turns"], &[("json", "true")]));
+        assert_eq!(out.status, Status::Ok, "msg: {}", out.message);
+        let data = out.data.clone().unwrap();
+        let ids: Vec<&str> = data["turns"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|t| t["id"].as_str())
+            .collect();
+        assert_eq!(ids, ["1", "132"], "oldest first: {data}");
+        assert_eq!(data["turnsOmitted"], 0);
+        assert_eq!(data["spans"]["id"], "turn-132", "the newest turn is the default");
+        assert_eq!(data["spansOmitted"], 0);
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn turn_picks_the_turn_whose_spans_it_carries() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&env_keys());
+        let root = fixture("trace-turns-pick", "Aoide-pick", "eidolon", &TWO_TURNS, true);
+
+        let out = session_trace(&trace_invocation(&["Aoide-pick"], &[("json", "true"), ("turn", "1")]));
+        assert_eq!(out.status, Status::Ok, "msg: {}", out.message);
+        let spans = out.data.clone().unwrap()["spans"].clone();
+        assert_eq!(spans["id"], "turn-1", "{spans}");
+        let tool = &spans["children"][0]["children"][1];
+        assert_eq!(tool["id"], "call_8vr43zri", "{spans}");
+        assert_eq!(tool["name"], "execute_tool read");
+        assert_eq!(tool["status"], "ok");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_turn_the_window_does_not_hold_is_a_taught_refusal_naming_the_newest_ids() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&env_keys());
+        let root = fixture("trace-turns-missing", "Aoide-missing", "eidolon", &TWO_TURNS, true);
+
+        let out = session_trace(&trace_invocation(&["Aoide-missing"], &[("json", "true"), ("turn", "999")]));
+        assert_eq!(out.status, Status::Error, "msg: {}", out.message);
+        let data = out.data.clone().unwrap();
+        assert_eq!(data["reason"], "no-turn", "{data}");
+        assert_eq!(data["turn"], "999");
+        assert_eq!(data["turns"], json!(["1", "132"]));
+        assert_eq!(data["refusal"]["kind"], "refused");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn turn_needs_json_and_refuses_follow_before_any_read() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&env_keys());
+        let root = fixture("trace-turns-usage", "Aoide-usage", "eidolon", &TWO_TURNS, true);
+        // A done session prints once and returns even with `--follow`, so a
+        // check that comes too late fails its assertion instead of blocking.
+        let sessions = root.join("stage").join("sessions.json");
+        let body = std::fs::read_to_string(&sessions).unwrap().replace("\"working\"", "\"done\"");
+        std::fs::write(&sessions, body).unwrap();
+
+        let out = session_trace(&trace_invocation(&["Aoide-usage"], &[("turn", "1")]));
+        assert_eq!(out.status, Status::Usage, "msg: {}", out.message);
+        assert_eq!(out.data.clone().unwrap()["reason"], "turn-needs-json");
+
+        let out = session_trace(&trace_invocation(&["Aoide-usage"], &[("turn", "1"), ("follow", "true")]));
+        assert_eq!(out.status, Status::Usage, "msg: {}", out.message);
+        assert_eq!(out.data.clone().unwrap()["reason"], "turn-with-follow");
+
+        let out = session_trace(&trace_invocation(
+            &["Aoide-usage"],
+            &[("turn", "1"), ("follow", "true"), ("json", "true")],
+        ));
+        assert_eq!(out.status, Status::Usage, "msg: {}", out.message);
+        assert_eq!(out.data.clone().unwrap()["reason"], "turn-with-follow");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn the_spans_read_the_whole_window_so_the_tail_never_splits_a_turn() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&env_keys());
+        let root = fixture("trace-turns-tail", "Aoide-tailed", "eidolon", &TWO_TURNS, true);
+
+        let out = session_trace(&trace_invocation(
+            &["Aoide-tailed"],
+            &[("json", "true"), ("tail", "1"), ("turn", "1")],
+        ));
+        assert_eq!(out.status, Status::Ok, "msg: {}", out.message);
+        let data = out.data.clone().unwrap();
+        assert_eq!(data["records"], 1, "the tail still shows one record");
+        assert_eq!(data["turns"].as_array().map(Vec::len), Some(2), "the listing is the whole window");
+        assert_eq!(data["spans"]["children"].as_array().map(Vec::len), Some(1), "{data}");
+        assert_eq!(
+            data["spans"]["children"][0]["children"].as_array().map(Vec::len),
+            Some(2),
+            "the chat and its tool"
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_window_with_no_turn_lists_none_and_has_null_spans() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&env_keys());
+        let root = fixture("trace-no-turn", "Aoide-none", "eidolon", &[START], true);
+
+        let out = session_trace(&trace_invocation(&["Aoide-none"], &[("json", "true")]));
+        assert_eq!(out.status, Status::Ok, "msg: {}", out.message);
+        let data = out.data.clone().unwrap();
+        assert_eq!(data["turns"], json!([]));
+        assert!(data["spans"].is_null(), "{data}");
+        assert_eq!(data["spansOmitted"], 0);
 
         let _ = std::fs::remove_dir_all(&root);
     }

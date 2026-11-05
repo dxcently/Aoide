@@ -116,16 +116,18 @@ pub enum BridgeCommand {
     /// a click closes a card. `"*"` clears the desk.
     NotificationsDismiss { id: String },
     /// `{ "cmd": "sessiontrace", "sessionId": "…", "lines": N, "clip":
-    /// "line|detail" }` — the conductor card's own READ-ONLY trace query: what
-    /// this one session has emitted (thinking, text, tool calls, tool results,
-    /// settled turns), projected by `session trace --json`'s `data.steps`.
+    /// "line|detail", "turn": "…" }` — the conductor card's own READ-ONLY trace
+    /// query: what this one session has emitted (thinking, text, tool calls,
+    /// tool results, settled turns), projected by `session trace --json`'s
+    /// `data.steps`, with its `data.turns` and one turn's `data.spans` beside it.
     ///
     /// It re-execs the existing CLI — `aoide session trace <id> --tail N
-    /// --clip <clip> --json` — through the same `core_bin()` path
-    /// [`Self::RefreshUsage`]/[`Self::RecheckSessions`] take, and answers on
-    /// this connection the way [`Self::SessionAction`] does. Nothing is
-    /// written, nothing is resolved here: the CLI's own resolver, capability
-    /// refusal and projection are the whole answer, carried verbatim.
+    /// --clip <clip> --json`, plus `--turn <turn>` when one is named — through
+    /// the same `core_bin()` path [`Self::RefreshUsage`]/[`Self::RecheckSessions`]
+    /// take, and answers on this connection the way [`Self::SessionAction`]
+    /// does. Nothing is written, nothing is resolved here: the CLI's own
+    /// resolver, capability refusal and projection are the whole answer, carried
+    /// verbatim.
     ///
     /// Bounded by construction, whatever the caller's cadence: `lines` is
     /// clamped to [`TRACE_LINES_MAX`] (absent → [`TRACE_LINES_DEFAULT`], a
@@ -134,8 +136,9 @@ pub enum BridgeCommand {
     /// and reaped on [`TRACE_QUERY_TIMEOUT`]. `sessionId` is non-blank and
     /// carries no whitespace/control characters, exactly like
     /// [`safe_session_id`]'s — it becomes one argv element, never a shell
-    /// word.
-    SessionTrace { session_id: String, lines: usize, clip: String },
+    /// word. `turn` is checked the same way when it is named, and a bad one is
+    /// REFUSED.
+    SessionTrace { session_id: String, lines: usize, clip: String, turn: Option<String> },
 }
 
 /// Parse ONE wire line into a core [`BridgeCommand`]. Pure and total: malformed
@@ -229,10 +232,25 @@ pub fn parse_command(line: &str) -> Option<BridgeCommand> {
                 },
                 Some(_) => return None,
             };
+            // `turn` names the turn the answer's spans carry: trimmed and checked
+            // like the session id, so a blank or non-id-shaped one is refused, and
+            // `null` or absent is the newest turn.
+            let turn = match v.get("turn") {
+                None | Some(Value::Null) => None,
+                Some(Value::String(s)) => {
+                    let s = s.trim();
+                    if !safe_session_id(s) {
+                        return None;
+                    }
+                    Some(s.to_string())
+                }
+                Some(_) => return None,
+            };
             Some(BridgeCommand::SessionTrace {
                 session_id,
                 lines,
                 clip: clip.to_string(),
+                turn,
             })
         }
         _ => None,
@@ -716,7 +734,8 @@ fn refuse_bad_trace(log: &Path, line: &str, reply: &mut Option<UnixStream>) -> F
         0,
         "bad-request",
         "a sessiontrace line takes a non-blank sessionId, a positive integer \
-         `lines` (clamped to 40 from above), and `clip` line|detail",
+         `lines` (clamped to 40 from above), `clip` line|detail, and an id-shaped \
+         `turn` when it names one",
     );
     let _ = daemon::audit(
         log,
@@ -749,18 +768,19 @@ fn trace_refusal(session_id: &str, clip: &str, lines: usize, reason: &str, messa
 }
 
 /// Dispatch ONE read-only trace query: re-exec the existing CLI
-/// (`aoide session trace <id> --tail N --clip <clip> --json`) and shape its
-/// own envelope into the ONE line the card reads — `{ok, sessionId, clip,
-/// lines, trace, at, steps, stepsOmitted}`, or a refusal
-/// ([`trace_refusal`]). Nothing is resolved, folded or re-parsed here: the
-/// CLI's resolver, capability refusal and projection ARE the answer, which is
-/// why this is a re-exec and not a second reader.
+/// (`aoide session trace <id> --tail N --clip <clip> --json`, with `--turn <turn>`
+/// when one is named) and shape its own envelope into the ONE line the card
+/// reads — `{ok, sessionId, clip, lines, trace, at, steps, stepsOmitted, turns,
+/// turnsOmitted, spans, spansOmitted}`, or a refusal ([`trace_refusal`]).
+/// Nothing is resolved, folded or re-parsed here: the CLI's resolver, capability
+/// refusal and projection ARE the answer, which is why this is a re-exec and not
+/// a second reader.
 ///
 /// The child is bounded by [`TRACE_QUERY_TIMEOUT`]; a spawn failure or a
 /// timeout is an honest refusal (`no-answer`), never an empty step list — the
 /// card must be able to tell "nothing was emitted" from "nobody answered".
-fn dispatch_session_trace(session_id: &str, lines: usize, clip: &str) -> Value {
-    let argv: Vec<String> = vec![
+fn dispatch_session_trace(session_id: &str, lines: usize, clip: &str, turn: Option<&str>) -> Value {
+    let mut argv: Vec<String> = vec![
         "session".to_string(),
         "trace".to_string(),
         session_id.to_string(),
@@ -770,6 +790,10 @@ fn dispatch_session_trace(session_id: &str, lines: usize, clip: &str) -> Value {
         clip.to_string(),
         "--json".to_string(),
     ];
+    if let Some(turn) = turn {
+        argv.push("--turn".to_string());
+        argv.push(turn.to_string());
+    }
     let (stdout, stderr) = match run_core_bounded(&argv, TRACE_QUERY_TIMEOUT) {
         Ok((_exited_ok, stdout, stderr)) => (stdout, stderr),
         Err(reason) => return trace_refusal(session_id, clip, lines, "no-answer", &reason),
@@ -825,6 +849,12 @@ fn dispatch_session_trace(session_id: &str, lines: usize, clip: &str) -> Value {
         // How many steps the projection's own caps dropped, so a bounded
         // answer says so instead of looking complete.
         "stepsOmitted": data.get("stepsOmitted").cloned().unwrap_or_else(|| json!(0)),
+        // The turns of the whole window and one turn's span tree, copied by name
+        // with their own bounds, so a bounded answer says what it left out.
+        "turns": data.get("turns").cloned().unwrap_or_else(|| json!([])),
+        "turnsOmitted": data.get("turnsOmitted").cloned().unwrap_or_else(|| json!(0)),
+        "spans": data.get("spans").cloned().unwrap_or(Value::Null),
+        "spansOmitted": data.get("spansOmitted").cloned().unwrap_or_else(|| json!(0)),
     })
 }
 
@@ -1674,7 +1704,7 @@ fn core_front(line: &str, reply: &mut Option<UnixStream>) -> Option<Flow> {
             Some(Flow::Next)
         }
 
-        BridgeCommand::SessionTrace { session_id, lines, clip } => {
+        BridgeCommand::SessionTrace { session_id, lines, clip, turn } => {
             let Some(mut reply) = reply.take() else {
                 let _ = daemon::audit(
                     &daemon::default_audit_log(),
@@ -1692,7 +1722,7 @@ fn core_front(line: &str, reply: &mut Option<UnixStream>) -> Option<Flow> {
             // why), never a tick-by-tick echo of what was looked at.
             std::thread::spawn(move || {
                 use std::io::Write;
-                let answer = dispatch_session_trace(&session_id, lines, &clip);
+                let answer = dispatch_session_trace(&session_id, lines, &clip, turn.as_deref());
                 if answer.get("ok").and_then(Value::as_bool) != Some(true) {
                     let reason = answer
                         .get("reason")
@@ -1835,6 +1865,7 @@ mod tests {
                 session_id: "Aoide-7d23".to_string(),
                 lines: TRACE_LINES_DEFAULT,
                 clip: "line".to_string(),
+                turn: None,
             })
         );
         // Trimmed like every session id, and an explicit clip is carried.
@@ -1844,6 +1875,7 @@ mod tests {
                 session_id: "Aoide-7d23".to_string(),
                 lines: 8,
                 clip: "detail".to_string(),
+                turn: None,
             })
         );
         // An explicit `null`/blank-shaped absence is the default, not a refusal.
@@ -1853,6 +1885,7 @@ mod tests {
                 session_id: "s1".to_string(),
                 lines: TRACE_LINES_DEFAULT,
                 clip: "line".to_string(),
+                turn: None,
             })
         );
         // Clamped from ABOVE: a caller asking for more gets the bound.
@@ -1862,6 +1895,7 @@ mod tests {
                 session_id: "s1".to_string(),
                 lines: TRACE_LINES_MAX,
                 clip: "line".to_string(),
+                turn: None,
             })
         );
         // `lines` at the cap is itself.
@@ -1871,6 +1905,27 @@ mod tests {
                 session_id: "s1".to_string(),
                 lines: TRACE_LINES_MAX,
                 clip: "line".to_string(),
+                turn: None,
+            })
+        );
+        // `turn` names the turn the answer's spans carry: trimmed like the id,
+        // and `null` is the same as absent.
+        assert_eq!(
+            parse_command(r#"{"cmd":"sessiontrace","sessionId":"s1","turn":" 6 "}"#),
+            Some(BridgeCommand::SessionTrace {
+                session_id: "s1".to_string(),
+                lines: TRACE_LINES_DEFAULT,
+                clip: "line".to_string(),
+                turn: Some("6".to_string()),
+            })
+        );
+        assert_eq!(
+            parse_command(r#"{"cmd":"sessiontrace","sessionId":"s1","turn":null}"#),
+            Some(BridgeCommand::SessionTrace {
+                session_id: "s1".to_string(),
+                lines: TRACE_LINES_DEFAULT,
+                clip: "line".to_string(),
+                turn: None,
             })
         );
     }
@@ -1903,6 +1958,10 @@ mod tests {
             r#"{"cmd":"sessiontrace","sessionId":"s1","clip":"detials"}"#,
             r#"{"cmd":"sessiontrace","sessionId":"s1","clip":true}"#,
             r#"{"cmd":"sessiontrace","sessionId":"s1","clip":""}"#,
+            r#"{"cmd":"sessiontrace","sessionId":"s1","turn":""}"#,
+            r#"{"cmd":"sessiontrace","sessionId":"s1","turn":"a b"}"#,
+            r#"{"cmd":"sessiontrace","sessionId":"s1","turn":"-1"}"#,
+            r#"{"cmd":"sessiontrace","sessionId":"s1","turn":6}"#,
         ] {
             assert_eq!(parse_command(line), None, "{line} must be refused");
         }
@@ -1924,18 +1983,18 @@ mod tests {
         let root = aoide_test_support::unique_tmp("shellbridge-trace-ok");
         std::fs::create_dir_all(&root).unwrap();
         let stub = root.join("stub-aoide");
-        // `$1 session $2 trace $3 <id> $4 --tail $5 N $6 --clip $7 <clip> $8 --json`
+        // `$1 session $2 trace $3 <id> $4 --tail $5 N $6 --clip $7 <clip> $8 --json $9 --turn $10 <turn>`
         std::fs::write(
             &stub,
             r#"#!/bin/sh
-printf '{"status":"ok","command":"session.trace","message":"1 record(s)","data":{"sessionId":"%s","trace":"%s.jsonl","clip":"%s","steps":[{"id":"2","ts":1789603009102,"kind":"thinking","text":"argv: %s %s %s %s %s","error":false,"clipped":true}],"stepsOmitted":3}}\n' "$3" "$3" "$7" "$4" "$5" "$6" "$7" "$8"
+printf '{"status":"ok","command":"session.trace","message":"1 record(s)","data":{"sessionId":"%s","trace":"%s.jsonl","clip":"%s","steps":[{"id":"2","ts":1789603009102,"kind":"thinking","text":"argv: %s %s %s %s %s %s %s","error":false,"clipped":true}],"stepsOmitted":3,"turns":[{"id":"6","start":1789603009102,"end":1789603009200,"status":"ok","partial":false,"steps":1,"tools":0,"failed":0}],"turnsOmitted":0,"spans":{"id":"turn-6","name":"invoke_agent eidolon","kind":"internal","start":1789603009102,"end":1789603009200,"status":"ok","attributes":{},"children":[]},"spansOmitted":4}}\n' "$3" "$3" "$7" "$4" "$5" "$6" "$7" "$8" "$9" "${10}"
 "#,
         )
         .unwrap();
         std::fs::set_permissions(&stub, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
         std::env::set_var("AOIDE_CORE_BIN", &stub);
 
-        let answer = dispatch_session_trace("Aoide-7d23", 5, "detail");
+        let answer = dispatch_session_trace("Aoide-7d23", 5, "detail", Some("6"));
         assert_eq!(answer["ok"], true, "{answer}");
         assert_eq!(answer["sessionId"], "Aoide-7d23");
         assert_eq!(answer["clip"], "detail");
@@ -1945,10 +2004,14 @@ printf '{"status":"ok","command":"session.trace","message":"1 record(s)","data":
         assert!(answer["at"].as_i64().unwrap_or(0) > 0, "the answer says when it was read");
         let text = answer["steps"][0]["text"].as_str().unwrap();
         assert_eq!(
-            text, "argv: --tail 5 --clip detail --json",
+            text, "argv: --tail 5 --clip detail --json --turn 6",
             "the id is one argv element, the flags are separate ones, no shell: {text}"
         );
         assert_eq!(answer["steps"][0]["clipped"], true);
+        assert_eq!(answer["turns"][0]["id"], "6", "{answer}");
+        assert_eq!(answer["turnsOmitted"], 0, "{answer}");
+        assert_eq!(answer["spans"]["id"], "turn-6", "{answer}");
+        assert_eq!(answer["spansOmitted"], 4, "the CLI's own tree bound is carried");
 
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -1978,7 +2041,7 @@ exit 1
         std::fs::set_permissions(&stub, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
         std::env::set_var("AOIDE_CORE_BIN", &stub);
 
-        let answer = dispatch_session_trace("Aoide-x", 12, "line");
+        let answer = dispatch_session_trace("Aoide-x", 12, "line", None);
         assert_eq!(answer["ok"], false, "{answer}");
         assert_eq!(answer["reason"], "no-trace");
         assert_eq!(answer["sessionId"], "Aoide-x", "the CLI's own resolved identity");
@@ -1988,7 +2051,7 @@ exit 1
         // A binary that prints no envelope at all is an honest `no-answer`,
         // never a silent empty step list.
         std::fs::write(&stub, "#!/bin/sh\necho 'aoided must be running'\nexit 1\n").unwrap();
-        let answer = dispatch_session_trace("Aoide-x", 12, "line");
+        let answer = dispatch_session_trace("Aoide-x", 12, "line", None);
         assert_eq!(answer["ok"], false);
         assert_eq!(answer["reason"], "no-answer");
         assert!(answer["message"].as_str().unwrap().contains("aoided must be running"), "{answer}");
@@ -3077,7 +3140,8 @@ exit 1
                 "lines": 0,
                 "reason": "bad-request",
                 "message": "a sessiontrace line takes a non-blank sessionId, a positive integer \
-                 `lines` (clamped to 40 from above), and `clip` line|detail",
+                 `lines` (clamped to 40 from above), `clip` line|detail, and an id-shaped \
+                 `turn` when it names one",
             }),
         );
 

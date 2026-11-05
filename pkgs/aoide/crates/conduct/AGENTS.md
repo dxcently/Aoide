@@ -870,6 +870,31 @@ in the message.
   `stepsOmitted`) — a silently shortened list is the bug these exist to
   prevent. `Clip::Detail` widens ONE clip (blocks' own line breaks, tool
   arguments); it never turns the projection into the journal.
+- **`data.turns` and `data.spans` are a PURE projection over records, in
+  `graph/spans.rs`.** `Turns::new` takes `&[TraceRecord]`, never lines and never
+  a harness name: each record is read by its kind and its fields, and the agent
+  and the conversation id arrive from `session_trace` as data. A second producer
+  reaches the same spans by translating its own log into the same record kinds,
+  so do not add a harness check or a second parser there.
+- **Spans carry no content, ever.** A span holds names, ids, times, status and
+  counts. Message text, thinking, tool arguments and results, an
+  `ExternalMessage`'s text and an `AskUser`'s prompt and answer never reach a
+  span or a turn; the marker test in `spans.rs` pins it. Producer strings (tool
+  name, model, provider, agent, ids) go through `one_line_clip` (stripped,
+  flattened, 200 characters). A new span field is a decision, not a default.
+- **The span view reads the WHOLE window, never the `--tail` cut.**
+  `session_trace` builds `Turns` from every readable line `read_trace` returned
+  (the 1 MiB tail), and `--tail` only shapes `lines` and `steps`. A turn the
+  tail cuts reads as `partial`, never as a shorter turn.
+- **`--turn` is JSON-only, never follows, and never falls back.** The usage
+  errors (`turn-with-follow`, then `turn-needs-json`) are checked before any
+  read. A named turn the window does not hold is a taught `no-turn` refusal
+  listing the newest ids; it never quietly picks the newest turn instead.
+- **The span bounds are named, like the step bounds.** `MAX_TURNS` (newest
+  kept, `turnsOmitted`) and `MAX_SPANS` (whole newest steps kept,
+  `spansOmitted`) are the only cuts; `Turns::tree` never drops a span uncounted.
+  A change to the turn rules or to a span's name or attributes changes
+  `docs/architecture/EIDOLON-TRACE.md`'s consumer section in the same commit.
 - **The bridge's trace query is bounded by the DOOR, not by the caller's
   cadence.** A polled read (`sessiontrace`) must answer or refuse on the
   connection; never leave a parked caller. `parse_command` refuses a blank

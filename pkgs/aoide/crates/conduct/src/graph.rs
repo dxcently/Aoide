@@ -94,6 +94,7 @@ pub(crate) mod testutil;
 // daemon, no lock.
 mod chat;
 mod trace;
+mod spans;
 mod grant;
 mod manage;
 mod undying;
