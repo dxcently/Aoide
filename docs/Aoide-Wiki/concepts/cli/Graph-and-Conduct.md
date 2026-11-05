@@ -854,7 +854,7 @@ aoide session find [<query>…] [--related <ref>] [--all] [--json]
 ### aoide session trace
 
 ```
-aoide session trace <id> [--tail N] [--clip line|detail] [--follow] [--json] [--turn <turn>]
+aoide session trace <id> [--tail N] [--clip line|detail] [--follow] [--json] [--turn <turn>] [--subagent <call id>]
 ```
 
 - **Reads:** `state/stage/sessions.json` (for `<id>`'s own record — its
@@ -910,7 +910,11 @@ aoide session trace <id> [--tail N] [--clip line|detail] [--follow] [--json] [--
   arguments). `--turn <turn>` picks the turn whose tree `data.spans` carries
   (the newest without it); it needs `--json` and never combines with
   `--follow`. The usage errors (exit 2: `bad-tail`, `bad-clip`,
-  `turn-with-follow`, `turn-needs-json`) are checked before anything is read.
+  `turn-with-follow`, `turn-needs-json`, `bad-subagent`) are checked before
+  anything is read. `--subagent <call id>` reads the sub-agent that tool call
+  started, in the same shape (`data.trace` is its file, `data.subagent` the call
+  id); `--follow` re-reads that file. A sub-agent stopped with no closer and no
+  hand-back reads as `running`, since its file holds no turn marker to cancel it.
 - **Errors (exit 1), each naming WHY:** `not-found` (`<id>` matches no local
   session), `ambiguous`, `remote-target` (a `node/<rest>` target — a trace is
   a file on the node that wrote it; run the command there), `unknown-agent`
@@ -919,7 +923,8 @@ aoide session trace <id> [--tail N] [--clip line|detail] [--follow] [--json] [--
   `no-presence` (no transcript or journal resolves to a file), `no-trace` (the
   turn log it names is not there, or does not read),
   `no-turn` (`--turn` names no turn in the window; the refusal lists the
-  newest turn ids and the command that names the latest).
+  newest turn ids and the command that names the latest), `no-subagent`
+  (`--subagent` names no sub-agent transcript in the session).
   A trace that EXISTS and holds no records yet is an honest `0 record(s)`,
   not an error.
 - **Notes:** the trace is a contract aoide READS and the harness owns — file,

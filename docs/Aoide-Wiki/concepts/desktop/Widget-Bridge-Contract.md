@@ -212,11 +212,12 @@ no session id.)
 
 ## The trace query — a READ the bridge answers
 
-`{cmd:"sessiontrace", sessionId, lines, clip:"line"|"detail", turn}` asks for
+`{cmd:"sessiontrace", sessionId, lines, clip:"line"|"detail", turn, subagent}` asks for
 ONE session's emitted blocks: what it THOUGHT, SAID, called and got back, and
 the span tree of one of its turns (the newest, or the one the optional `turn`
 string names). The daemon re-execs the existing CLI (`aoide session trace <id>
---tail N --clip … --json`, plus `--turn <turn>` when one is named,
+--tail N --clip … --json`, plus `--turn <turn>` when one is named and
+`--subagent <call>` when `subagent` is,
 [[Eidolon-Trace]]) and answers one JSON line:
 
 ```json

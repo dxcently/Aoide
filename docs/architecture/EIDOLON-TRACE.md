@@ -198,9 +198,9 @@ carries whatever the journal carries; that fix is harnox's.
   reader every other consumer uses (so a producer that publishes no mirror still
   feeds the state fold), and the presence rule kept exactly as it was whenever
   no trace is reachable.
-- `aoide session trace <id> [--tail N] [--follow] [--json] [--clip line|detail]`
-  — `<id>` resolved like `send --to` (id / tail4 / petname); human form is one
-  line per record (`#id  hh:mm:ss  kind  summary` — assistant: thinking dimmed
+- `aoide session trace <id> [--tail N] [--follow] [--json] [--clip line|detail]
+  [--turn <id>] [--subagent <call id>]` — `<id>` resolved like `send --to`
+  (id / tail4 / petname); human form is one line per record (`#id  hh:mm:ss  kind  summary` — assistant: thinking dimmed
   and cut, text, tool names; tool result: first line, `!` on error;
   settled: stop reason, tokens), and the summary is RENDERED from the same
   projector `--json` publishes, so the two cannot drift. `--json` carries
@@ -252,13 +252,18 @@ carries whatever the journal carries; that fix is harnox's.
   one is `error` (`no_result`). A cancelled turn's is `cancelled`, and the open
   turn's is `running`. Spans carry names, ids, times, status and counts, never
   message text, thinking, tool arguments or results. `--turn` needs `--json`
-  and never combines with `--follow`.
+  and never combines with `--follow`. `--subagent <call id>` (Claude only today)
+  reads the sub-agent transcript that tool call started, through the harness's
+  `subagent_records` reader; `data.trace` names that file and `data.subagent`
+  the call id. A sub-agent stopped with no closer and no hand-back reads as
+  `running`.
 - The read-only trace QUERY over the bridge — one answered shellbridge verb,
   `{"cmd":"sessiontrace","sessionId":…,"lines":N,"clip":"line|detail","turn":…}`
   (`turn` is optional: the turn `data.spans` carries, id-shaped and trimmed like
   the session id; a non-id-shaped one refuses the line), which re-execs exactly
-  the command above (`--tail N --clip … --json`, plus `--turn <turn>` when one
-  is named) and answers one JSON line: `{ok, sessionId, clip, lines, trace, at,
+  the command above (`--tail N --clip … --json`, plus `--turn <turn>` and
+  `--subagent <call>` when named) and answers one JSON line:
+  `{ok, sessionId, clip, lines, trace, at,
   steps, stepsOmitted, turns, turnsOmitted, spans, spansOmitted}` or
   `{ok:false, sessionId, clip, lines, reason, message}` carrying the CLI's
   own taught refusal verbatim (`reason` ∈ `no-trace · no-presence ·

@@ -71,6 +71,7 @@
 use super::common::{require_args, stage_error};
 use super::model::{load_stage, resolved_parent, sessions_path, SessionRecord, SessionsFile};
 use super::spans::Turns;
+use crate::shellbridge::safe_session_id;
 use aoide_protocol::agents::{agent_profile, eidolon_trace_record, TraceRecord};
 use aoide_protocol::output::{Fix, Kind, Outcome};
 use aoide_protocol::style::{Color, Stream, Style};
@@ -930,6 +931,14 @@ pub fn session_trace(inv: &Invocation) -> Outcome {
         )
         .with_data(json!({ "reason": "turn-needs-json" }));
     }
+    let subagent = inv.flags.get("subagent").map(|raw| raw.trim().to_string());
+    if subagent.as_deref().is_some_and(|call| !safe_session_id(call)) {
+        return Outcome::usage(
+            cmd,
+            "`--subagent` takes the id of the tool call that started the sub-agent: one word, with no whitespace, no control characters and no leading `-`",
+        )
+        .with_data(json!({ "reason": "bad-subagent" }));
+    }
     let dim = inv.door == Door::Cli && Style::for_stream(Color::Auto, json_mode, Stream::Out) == Style::ON;
 
     // `<id>` resolves exactly like `send --to`: the ONE
@@ -962,19 +971,20 @@ pub fn session_trace(inv: &Invocation) -> Outcome {
         )
         .with_data(json!({ "reason": "unknown-agent", "sessionId": id, "agent": agent }));
     };
-    let Some(read_records) = profile.transcript.records else {
-        return Outcome::error(
-            cmd,
-            format!(
-                "`{name}` runs `{agent}`, which keeps no turn log that reads as records: \
-                 `session trace` reads the records a harness keeps, its own journal or its \
-                 transcript read as records. This harness keeps neither"
-            ),
-        )
-        .with_data(json!({
+    let reader = match subagent {
+        Some(_) => profile.transcript.subagent_records,
+        None => profile.transcript.records,
+    };
+    let Some(read_records) = reader else {
+        let kept = match subagent {
+            Some(_) => "keeps no sub-agent transcript that reads as records: `session trace --subagent` reads the sub-agent files a harness keeps, as records",
+            None => "keeps no turn log that reads as records: `session trace` reads the records a harness keeps, its own journal or its transcript read as records. This harness keeps neither",
+        };
+        return Outcome::error(cmd, format!("`{name}` runs `{agent}`, which {kept}")).with_data(json!({
             "reason": "no-trace-capability",
             "sessionId": id,
             "agent": agent,
+            "subagent": subagent,
         }));
     };
 
@@ -992,15 +1002,28 @@ pub fn session_trace(inv: &Invocation) -> Outcome {
         row.and_then(|r| r.log_path.as_deref())
             .or(ended.as_ref().and_then(|e| e.log_path.as_deref())),
     );
-    let Some(path) = (profile.transcript.locate)(&id, Some(&cwd), hint.as_deref()) else {
-        return Outcome::error(
-            cmd,
-            format!(
-                "`{name}` has no readable turn log on this host: no file its record or \
-                 its presence names resolves to one"
-            ),
-        )
-        .with_data(json!({ "reason": "no-presence", "sessionId": id }));
+    let path = match subagent.as_deref() {
+        Some(call) => {
+            let found = (profile.transcript.subagents_dir)(&id, Some(&cwd))
+                .and_then(|dir| (profile.transcript.find_subagent)(&dir, call));
+            match found {
+                Some(path) => path,
+                None => return no_subagent(cmd, &id, call),
+            }
+        }
+        None => match (profile.transcript.locate)(&id, Some(&cwd), hint.as_deref()) {
+            Some(path) => path,
+            None => {
+                return Outcome::error(
+                    cmd,
+                    format!(
+                        "`{name}` has no readable turn log on this host: no file its record or \
+                         its presence names resolves to one"
+                    ),
+                )
+                .with_data(json!({ "reason": "no-presence", "sessionId": id }));
+            }
+        },
     };
     let Some(lines) = read_records(&path) else {
         return Outcome::error(
@@ -1054,8 +1077,15 @@ pub fn session_trace(inv: &Invocation) -> Outcome {
         },
         None => turns.newest(),
     };
+    // A sub-agent's span root names the sub-agent's own type, else the session's agent.
+    let root = match subagent {
+        Some(_) => (profile.transcript.subagent_name)(&path)
+            .map(|n| strip_unsafe(&n))
+            .unwrap_or_else(|| agent.clone()),
+        None => agent.clone(),
+    };
     let (spans, spans_omitted) = match picked {
-        Some(index) => turns.tree(index, &agent, &id),
+        Some(index) => turns.tree(index, &root, &id),
         None => (Value::Null, 0),
     };
     Outcome::ok(cmd, message)
@@ -1073,6 +1103,7 @@ pub fn session_trace(inv: &Invocation) -> Outcome {
             "turnsOmitted": turns_omitted,
             "spans": spans,
             "spansOmitted": spans_omitted,
+            "subagent": subagent,
         }))
 }
 
@@ -1096,6 +1127,21 @@ fn no_turn(cmd: &str, id: &str, wanted: &str, turns: &Turns<'_>) -> Outcome {
         fix,
     )
     .with_fields(json!({ "reason": "no-turn", "turn": wanted, "turns": newest }))
+}
+
+/// The taught refusal for a `--subagent` call the session holds no sub-agent
+/// transcript for.
+fn no_subagent(cmd: &str, id: &str, call: &str) -> Outcome {
+    let call = strip_unsafe(call);
+    Outcome::refuse(
+        cmd,
+        Kind::Refused,
+        format!("this session holds no sub-agent transcript for `{call}`"),
+        "a sub-agent's transcript sits in its session's `subagents` directory, and its \
+         meta file names the tool call that started it (`toolUseId`)",
+        Fix::None("pass the id of the tool call that started the sub-agent"),
+    )
+    .with_fields(json!({ "reason": "no-subagent", "sessionId": id, "subagent": call }))
 }
 
 /// What `--follow` prints for one trace line: the line, stripped, in JSON mode,
@@ -1727,6 +1773,146 @@ mod tests {
         assert_eq!(tool["status"], "cancelled");
         assert_eq!(tool["attributes"]["error.type"], "cancelled");
 
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// `agent-a2` of the sub-agent fixture: a `general-purpose` run, one prompt
+    /// and one settled reply, every record a sidechain.
+    const GENERAL_SUBAGENT: &str = concat!(
+        r#"{"type":"user","uuid":"a2-1","timestamp":"2026-01-01T00:02:03.000Z","isSidechain":true,"message":{"role":"user","content":"look into it"}}"#,
+        "\n",
+        r#"{"type":"assistant","uuid":"a2-2","timestamp":"2026-01-01T00:02:30.000Z","isSidechain":true,"message":{"id":"msg_a2","model":"claude-haiku-5-5","role":"assistant","stop_reason":"end_turn","content":[{"type":"text","text":"done"}],"usage":{"input_tokens":1,"output_tokens":2,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}"#,
+        "\n",
+    );
+
+    /// A Claude session `claude-subagents` in `/srv/project` under a test HOME, with
+    /// its sub-agent directory beside it: `agent-a1` is the fixture's
+    /// `claude-code-guide` run (started by `toolu_9001`), `agent-a2` the
+    /// `general-purpose` run above (started by `toolu_9002`).
+    fn subagent_fixture(tag: &str) -> std::path::PathBuf {
+        let root = claude_fixture(tag, "claude-subagents", "");
+        let home = root.join("home");
+        let subs = home.join(".claude/projects/-srv-project/claude-subagents/subagents");
+        std::fs::create_dir_all(&subs).unwrap();
+        std::fs::write(
+            subs.join("agent-a1.jsonl"),
+            include_str!("../../../protocol/tests/fixtures/claude-subagent.jsonl"),
+        )
+        .unwrap();
+        std::fs::write(
+            subs.join("agent-a1.meta.json"),
+            include_str!("../../../protocol/tests/fixtures/claude-subagent.meta.json"),
+        )
+        .unwrap();
+        std::fs::write(subs.join("agent-a2.jsonl"), GENERAL_SUBAGENT).unwrap();
+        std::fs::write(
+            subs.join("agent-a2.meta.json"),
+            r#"{"toolUseId":"toolu_9002","agentType":"general-purpose"}"#,
+        )
+        .unwrap();
+        std::env::set_var("HOME", &home);
+        root
+    }
+
+    #[test]
+    fn a_subagent_call_reads_the_file_its_call_started() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&env_keys());
+        let root = subagent_fixture("subagent-fixture");
+
+        // toolu_9001 started the fixture run: its one turn is the whole file.
+        let out = session_trace(&trace_invocation(
+            &["claude-subagents"],
+            &[("json", "true"), ("subagent", "toolu_9001")],
+        ));
+        assert_eq!(out.status, Status::Ok, "msg: {}", out.message);
+        let data = out.data.clone().unwrap();
+        assert_eq!(data["subagent"], "toolu_9001", "{data}");
+        assert!(data["trace"].as_str().unwrap().ends_with("agent-a1.jsonl"), "{data}");
+        let turns = data["turns"].as_array().expect("a turns list");
+        assert_eq!(turns.len(), 1, "{data}");
+        assert_eq!(turns[0]["id"], "u-0001", "{data}");
+        assert_eq!(turns[0]["status"], "ok", "{data}");
+        assert_eq!(turns[0]["partial"], false, "{data}");
+        assert_eq!(
+            (turns[0]["steps"].as_u64(), turns[0]["tools"].as_u64(), turns[0]["failed"].as_u64()),
+            (Some(11), Some(15), Some(0)),
+            "{data}"
+        );
+        assert_eq!(data["spans"]["name"], "invoke_agent claude-code-guide", "{data}");
+        assert_eq!(data["spans"]["attributes"]["gen_ai.usage.input_tokens"], 496_473, "{data}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_subagent_started_by_a_later_call_reads_its_own_turn() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&env_keys());
+        let root = subagent_fixture("subagent-general");
+
+        let out = session_trace(&trace_invocation(
+            &["claude-subagents"],
+            &[("json", "true"), ("subagent", "toolu_9002")],
+        ));
+        assert_eq!(out.status, Status::Ok, "msg: {}", out.message);
+        let data = out.data.clone().unwrap();
+        assert_eq!(data["subagent"], "toolu_9002", "{data}");
+        assert!(data["trace"].as_str().unwrap().ends_with("agent-a2.jsonl"), "{data}");
+        let turns = data["turns"].as_array().expect("a turns list");
+        assert_eq!(turns.len(), 1, "{data}");
+        assert_eq!(turns[0]["status"], "ok", "{data}");
+        assert_eq!(data["spans"]["name"], "invoke_agent general-purpose", "{data}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_subagent_call_with_no_file_is_a_taught_refusal() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&env_keys());
+        let root = subagent_fixture("subagent-missing");
+
+        // toolu_9999 started no sub-agent in this session.
+        let out = session_trace(&trace_invocation(
+            &["claude-subagents"],
+            &[("json", "true"), ("subagent", "toolu_9999")],
+        ));
+        assert_eq!(out.status, Status::Error, "msg: {}", out.message);
+        let data = out.data.clone().unwrap();
+        assert_eq!(data["reason"], "no-subagent", "{data}");
+        assert_eq!(data["sessionId"], "claude-subagents", "{data}");
+        assert_eq!(data["subagent"], "toolu_9999", "{data}");
+        assert!(out.message.contains("toolu_9999"), "{}", out.message);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_bad_subagent_is_a_usage_error_checked_before_anything_is_read() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&env_keys());
+        let root = subagent_fixture("subagent-bad");
+
+        let out = session_trace(&trace_invocation(&["claude-subagents"], &[("subagent", "a b")]));
+        assert_eq!(out.status, Status::Usage, "msg: {}", out.message);
+        assert_eq!(out.data.clone().unwrap()["reason"], "bad-subagent");
+        // The check precedes the session lookup: a session that is not there gets it too.
+        let out = session_trace(&trace_invocation(&["no-such-session"], &[("subagent", "a b")]));
+        assert_eq!(out.status, Status::Usage, "msg: {}", out.message);
+        assert_eq!(out.data.clone().unwrap()["reason"], "bad-subagent");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_harness_with_no_subagent_transcript_refuses_the_call() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&env_keys());
+        // A kimi session keeps no sub-agent transcript that reads as records.
+        let root = fixture("subagent-kimi", "kimi-s", "kimi", &[], false);
+
+        let out = session_trace(&trace_invocation(&["kimi-s"], &[("subagent", "toolu_9002")]));
+        assert_eq!(out.status, Status::Error, "msg: {}", out.message);
+        let data = out.data.clone().unwrap();
+        assert_eq!(data["reason"], "no-trace-capability", "{data}");
+        assert_eq!(data["subagent"], "toolu_9002", "{data}");
         let _ = std::fs::remove_dir_all(&root);
     }
 

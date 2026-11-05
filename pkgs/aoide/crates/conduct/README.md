@@ -1113,7 +1113,7 @@ blank one is refused too.
   daemon hop); `--follow` is CLI-only. Kind `session`, verb `watch`, so the
   kinds golden carries it.
 - **`session trace <id> [--tail N] [--follow] [--json] [--clip line|detail]
-  [--turn <id>]` (P-EIDOLON slice E6, `docs/architecture/EIDOLON-TRACE.md`)** —
+  [--turn <id>] [--subagent <call id>]` (P-EIDOLON slice E6, `docs/architecture/EIDOLON-TRACE.md`)** —
   `graph/trace.rs::session_trace`, the read surface over a harness's own turn
   log:
   the whole run, record by record, where every other session command reads the
@@ -1204,10 +1204,21 @@ blank one is refused too.
   fork's abandoned branch is not separated; a model call still in flight has no
   record, so no `chat` span; a window whose record ids are unreadable may repeat
   a turn id, and `--turn` picks the first.
+- **`session trace <id> --subagent <call id>`** — the sub-agent the tool call
+  `<call id>` started, read through the harness's `subagent_records` reader
+  (Claude's `subagents/agent-<id>.jsonl`, found by its meta file's `toolUseId`)
+  and shaped exactly like a session's own trace. `data.trace` is that file,
+  `data.subagent` the call id, and the span root names the sub-agent's own type
+  (`subagent_name`), else the session's agent; `gen_ai.conversation.id` stays the
+  session id. The usage error `bad-subagent` is checked before any read; a miss
+  is `no-subagent`; a harness with no `subagent_records` is
+  `no-trace-capability`. Stated limit: a sub-agent stopped with no closer and no
+  hand-back reads as `running`, since its file holds no turn marker to cancel it.
 - **The read-only trace QUERY over the bridge (`shellbridge.rs::SessionTrace`).**
-  `{"cmd":"sessiontrace","sessionId":…,"lines":N,"clip":"line|detail","turn":…}`
+  `{"cmd":"sessiontrace","sessionId":…,"lines":N,"clip":"line|detail","turn":…,"subagent":…}`
   re-execs exactly `session trace <id> --tail N --clip … --json`, plus
-  `--turn <turn>` when `turn` is named, through `daemon::bin::core_bin()` (the
+  `--turn <turn>` when `turn` is named and `--subagent <call>` when `subagent`
+  is, through `daemon::bin::core_bin()` (the
   `dispatch_usage_refresh`/`dispatch_recheck_sessions` path), and answers ONE
   JSON line on the connection, the `sessionaction` shape: `{ok, sessionId, clip,
   lines, trace, at, steps, stepsOmitted, turns, turnsOmitted, spans,

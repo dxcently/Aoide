@@ -202,7 +202,8 @@ should follow).
   record: the run, step by step (see "Agents enrolled from outside" above).
   `--tail N` shows the last N records (default 50), `--follow` re-reads for
   new ones until Ctrl-C (CLI-only), `--json` adds the lines, their steps, the
-  window's turns and one turn's span tree (`--turn <turn>` picks which).
+  window's turns and one turn's span tree (`--turn <turn>` picks which;
+  `--subagent <call id>` reads the sub-agent that tool call started instead).
   `<id>` resolves like `send --to` — id, tail4, or petname.
 - **`session permit`** — publish a permission SUMMONS card to
   `state/stage/notifications.json` for a session blocked on a tool/permission prompt;
@@ -297,7 +298,8 @@ the presence rule — never the frozen record.
 The file, its line shape, the record table and the state rule are one
 contract — `docs/architecture/EIDOLON-TRACE.md`, restated at CONTRACTS.md §4.
 The producer owns the file; aoide reads it. `aoide session trace <id>
-[--tail N] [--clip line|detail] [--follow] [--json] [--turn <turn>]` renders it
+[--tail N] [--clip line|detail] [--follow] [--json] [--turn <turn>]
+[--subagent <call id>]` renders it
 step by step, one line per record (`#<id>  <hh:mm:ss local>  <kind>  <summary>`)
 — an assistant message shows
 its thinking (dimmed, cut) then its text then each `→ tool(name)`, a tool

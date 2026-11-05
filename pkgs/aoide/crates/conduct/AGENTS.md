@@ -903,6 +903,12 @@ in the message.
   errors (`turn-with-follow`, then `turn-needs-json`) are checked before any
   read. A named turn the window does not hold is a taught `no-turn` refusal
   listing the newest ids; it never quietly picks the newest turn instead.
+- **`--subagent` reads the file its call started, and nothing else.** The usage
+  error `bad-subagent` is checked before any read, like `--turn`'s. The file
+  comes from `subagents_dir` and `find_subagent`; a miss is `no-subagent`, and a
+  harness with no `subagent_records` refuses `no-trace-capability`. The span
+  root is `subagent_name`'s type, else the session's agent, and
+  `gen_ai.conversation.id` stays the session id.
 - **The span bounds are named, like the step bounds.** `MAX_TURNS` (newest
   kept, `turnsOmitted`) and `MAX_SPANS` (whole newest steps kept,
   `spansOmitted`) are the only cuts; `Turns::tree` never drops a span uncounted.
