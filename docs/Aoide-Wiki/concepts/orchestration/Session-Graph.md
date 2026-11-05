@@ -198,7 +198,7 @@ should follow).
   rank. `--related <ref>` shows <ref>'s carries and the sessions that share a
   reason with it. The grammar and the reasons are in
   `docs/architecture/SESSION-FIND.md`.
-- **`session trace <id>`** — render a session's own trace file, one line per
+- **`session trace <id>`** — render a session's own turn log, one line per
   record: the run, step by step (see "Agents enrolled from outside" above).
   `--tail N` shows the last N records (default 50), `--follow` re-reads for
   new ones until Ctrl-C (CLI-only), `--json` adds the lines, their steps, the
@@ -304,9 +304,9 @@ its thinking (dimmed, cut) then its text then each `→ tool(name)`, a tool
 result shows its first line prefixed `!` when it errored, a settled turn
 shows its stop reason and tokens — and `--follow` re-reads for new records
 until Ctrl-C. The command is read-only: it writes nothing, takes no stage
-lock, and never reaches the daemon. A session whose harness keeps no trace,
-or whose presence names none, is a taught error naming which of the two it
-is, never an empty listing.
+lock, and never reaches the daemon. A session whose harness keeps no turn log
+that reads as records, or whose record names no file, is a taught error
+naming which of the two it is, never an empty listing.
 
 **And the parent hears it.** The same tick that folds the state also reads what
 each child just did and, under the resident daemon alone, delivers ONE line

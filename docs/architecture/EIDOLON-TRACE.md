@@ -431,3 +431,11 @@ carries whatever the journal carries; that fix is harnox's.
   delivery itself makes), not conductable, already `done` — is judged
   before the far node is asked anything, so it neither spends a request nor
   consumes events it would not have shown.
+- `protocol/src/agents/claude_trace.rs` — `CLAUDE_PROFILE.transcript.records`:
+  Claude's own transcript read as trace lines, for `session trace` alone. The
+  span view reads it the way it reads this trace: a turn opens at the user
+  record that carries `turnPosition`, a model call is the run of assistant
+  records that share a `message.id`, and the turn settles on that message's last
+  record once its stop reason is set. Claude keeps `trace: None`, so ping-back
+  never reads a translated line. The transcript is Claude Code's internal
+  format, not a contract; its fixtures are CLI 2.1.308 and 2.1.309.

@@ -859,10 +859,11 @@ aoide session trace <id> [--tail N] [--clip line|detail] [--follow] [--json] [--
 
 - **Reads:** `state/stage/sessions.json` (for `<id>`'s own record — its
   `agent` selects the profile, its `cwd` feeds the locator) and the session's
-  own TRACE file, found through the producer's presence metadata
-  (`$XDG_RUNTIME_DIR/eidolon/<id>/meta.json`'s `trace` field, via the
-  harness profile's `TranscriptSpec::locate` — the same locator the reaper's
-  transcript refresh uses). `<id>` resolves like `send --to`: an exact
+  own turn log: the harness profile's `TranscriptSpec::records`, found through
+  `TranscriptSpec::locate` (the same locator the reaper's transcript refresh
+  uses) from the record's transcript or journal path. Eidolon's log is its
+  trace; Claude's is its transcript, read as trace lines. `<id>` resolves like
+  `send --to`: an exact
   session id, its tail4, or its petname (`aoide_storage::addr::resolve`, the
   one resolver).
 - **Writes:** nothing. Read-only — no stage lock, no daemon dispatch, no file
@@ -895,7 +896,8 @@ aoide session trace <id> [--tail N] [--clip line|detail] [--follow] [--json] [--
   and `data.spans` (one turn's span tree in OTel GenAI names: `invoke_agent`,
   then `step <n>`, then `chat <model>` and `execute_tool <name>`; names, ids,
   times, status and token counts, never content; with `spansOmitted`). Turns
-  and spans are read from the whole window, the trace's last 1 MiB, never
+  and spans are read from the whole window, the turn log's last 1 MiB (an
+  eidolon trace) or 8 MiB (a claude transcript), never
   from the `--tail` cut. The shapes are in the conduct crate's README.
 - **Flags:** `--tail N` shows the last N records (a non-numeric or zero value
   is a usage error, never a silently empty listing). `--follow` re-reads the
@@ -913,9 +915,9 @@ aoide session trace <id> [--tail N] [--clip line|detail] [--follow] [--json] [--
   session), `ambiguous`, `remote-target` (a `node/<rest>` target — a trace is
   a file on the node that wrote it; run the command there), `unknown-agent`
   (no profile for the record's `agent`), `no-trace-capability` (the harness
-  keeps no trace at all — `eidolon` is the one that does today),
-  `no-presence` (the presence metadata is gone), `no-trace` (the presence
-  names no trace file, or names one that is not there — an older eidolon),
+  keeps no turn log that reads as records — `eidolon` and `claude` do today),
+  `no-presence` (no transcript or journal resolves to a file), `no-trace` (the
+  turn log it names is not there, or does not read),
   `no-turn` (`--turn` names no turn in the window; the refusal lists the
   newest turn ids and the command that names the latest).
   A trace that EXISTS and holds no records yet is an honest `0 record(s)`,

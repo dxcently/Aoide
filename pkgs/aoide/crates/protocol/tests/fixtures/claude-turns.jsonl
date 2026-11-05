@@ -1,0 +1,141 @@
+{"type":"user","uuid":"u-0001","parentUuid":"u-0002","timestamp":"2026-01-01T00:00:00.000Z","isSidechain":false,"turnOrigin":"human","version":"2.1.308","turnPosition":{"promptIndex":0,"turnIndex":1},"promptId":"p-0001","origin":{"kind":"human"},"message":{"role":"user","content":"prompt 1"}}
+{"type":"attachment","uuid":"u-0003","parentUuid":"u-0001","timestamp":"2025-12-31T23:59:59.998Z","isSidechain":false,"version":"2.1.308"}
+{"type":"attachment","uuid":"u-0004","parentUuid":"u-0003","timestamp":"2026-01-01T00:00:00.044Z","isSidechain":false,"version":"2.1.308"}
+{"type":"file-history-snapshot"}
+{"type":"api-request","timestamp":"2026-01-01T00:00:00.134Z","version":"2.1.308"}
+{"type":"assistant","uuid":"u-0005","parentUuid":"u-0004","timestamp":"2026-01-01T00:00:16.307Z","isSidechain":false,"apiBlockIndex":0,"version":"2.1.308","requestId":"req_0001","message":{"role":"assistant","id":"msg_0001","model":"claude-opus-5-5","type":"message","stop_reason":"tool_use","usage":{"input_tokens":2,"cache_creation_input_tokens":373,"cache_read_input_tokens":277060,"output_tokens":1487},"content":[{"type":"thinking","thinking":"","signature":"sig"}]}}
+{"type":"assistant","uuid":"u-0006","parentUuid":"u-0005","timestamp":"2026-01-01T00:00:17.890Z","isSidechain":false,"apiBlockIndex":1,"version":"2.1.308","requestId":"req_0001","message":{"role":"assistant","id":"msg_0001","model":"claude-opus-5-5","type":"message","stop_reason":"tool_use","usage":{"input_tokens":2,"cache_creation_input_tokens":373,"cache_read_input_tokens":277060,"output_tokens":1487},"content":[{"type":"tool_use","id":"toolu_0001","name":"Bash","input":{"arg":"input 2"}}]}}
+{"type":"user","uuid":"u-0007","parentUuid":"u-0006","sourceToolAssistantUUID":"u-0006","timestamp":"2026-01-01T00:00:18.685Z","isSidechain":false,"version":"2.1.308","promptId":"p-0001","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_0001","content":"result 3","is_error":false}]}}
+{"type":"attachment","uuid":"u-0008","parentUuid":"u-0007","timestamp":"2026-01-01T00:00:18.702Z","isSidechain":false,"version":"2.1.308"}
+{"type":"api-request-blob"}
+{"type":"api-request","timestamp":"2026-01-01T00:00:18.779Z","version":"2.1.308"}
+{"type":"assistant","uuid":"u-0009","parentUuid":"u-0008","timestamp":"2026-01-01T00:00:31.441Z","isSidechain":false,"apiBlockIndex":0,"version":"2.1.308","requestId":"req_0002","message":{"role":"assistant","id":"msg_0002","model":"claude-opus-5-5","type":"message","stop_reason":"end_turn","usage":{"input_tokens":2,"cache_creation_input_tokens":1705,"cache_read_input_tokens":277433,"output_tokens":1000},"content":[{"type":"thinking","thinking":"","signature":"sig"}]}}
+{"type":"assistant","uuid":"u-0010","parentUuid":"u-0009","timestamp":"2026-01-01T00:00:31.461Z","isSidechain":false,"apiBlockIndex":1,"version":"2.1.308","requestId":"req_0002","message":{"role":"assistant","id":"msg_0002","model":"claude-opus-5-5","type":"message","stop_reason":"end_turn","usage":{"input_tokens":2,"cache_creation_input_tokens":1705,"cache_read_input_tokens":277433,"output_tokens":1000},"content":[{"type":"text","text":"text 4"}]}}
+{"type":"last-prompt"}
+{"type":"custom-title"}
+{"type":"agent-name"}
+{"type":"mode"}
+{"type":"atis-latch"}
+{"type":"frame-link","timestamp":"2026-01-01T00:00:31.564Z"}
+{"type":"history-suppression"}
+{"type":"bridge-session"}
+{"type":"system","subtype":"stop_hook_summary","uuid":"u-0011","parentUuid":"u-0010","timestamp":"2026-01-01T00:00:34.709Z","isSidechain":false,"version":"2.1.308"}
+{"type":"queue-operation","timestamp":"2026-01-01T00:00:34.738Z"}
+{"type":"queue-operation","timestamp":"2026-01-01T00:00:34.822Z"}
+{"type":"user","uuid":"u-0012","parentUuid":"u-0013","timestamp":"2026-01-01T20:30:26.224Z","isSidechain":false,"turnOrigin":"task_notification","version":"2.1.308","turnPosition":{"promptIndex":1,"turnIndex":2},"promptId":"p-0002","origin":{"kind":"task-notification"},"message":{"role":"user","content":"prompt 5"}}
+{"type":"attachment","uuid":"u-0014","parentUuid":"u-0012","timestamp":"2026-01-01T20:30:26.270Z","isSidechain":false,"version":"2.1.308"}
+{"type":"last-prompt"}
+{"type":"custom-title"}
+{"type":"agent-name"}
+{"type":"mode"}
+{"type":"atis-latch"}
+{"type":"frame-link","timestamp":"2026-01-01T20:30:26.282Z"}
+{"type":"history-suppression"}
+{"type":"bridge-session"}
+{"type":"api-request-blob"}
+{"type":"api-request-blob"}
+{"type":"api-request","timestamp":"2026-01-01T20:30:26.349Z","version":"2.1.308"}
+{"type":"assistant","uuid":"u-0015","parentUuid":"u-0014","timestamp":"2026-01-01T20:30:34.546Z","isSidechain":false,"apiBlockIndex":0,"version":"2.1.308","requestId":"req_0003","message":{"role":"assistant","id":"msg_0003","model":"claude-opus-5-5","type":"message","stop_reason":"refusal","usage":{"input_tokens":2,"cache_creation_input_tokens":3298,"cache_read_input_tokens":159070,"output_tokens":748},"content":[{"type":"thinking","thinking":"","signature":"sig"}]}}
+{"type":"system","subtype":"informational","uuid":"u-0016","parentUuid":"u-0015","timestamp":"2026-01-01T20:30:34.593Z","isSidechain":false,"isMeta":false,"version":"2.1.308"}
+{"type":"user","uuid":"u-0017","parentUuid":"u-0016","timestamp":"2026-01-01T20:30:34.593Z","isSidechain":false,"isMeta":true,"version":"2.1.308","promptId":"p-0002","message":{"role":"user","content":"prompt 6"}}
+{"type":"api-request-blob"}
+{"type":"api-request","timestamp":"2026-01-01T20:30:34.666Z","version":"2.1.308"}
+{"type":"assistant","uuid":"u-0018","parentUuid":"u-0017","timestamp":"2026-01-01T20:30:54.724Z","isSidechain":false,"isApiErrorMessage":true,"version":"2.1.308","requestId":"req_0004","message":{"role":"assistant","id":"msg_0004","model":"<synthetic>","type":"message","stop_reason":"refusal","usage":{"input_tokens":0,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":0},"content":[{"type":"text","text":"text 7"}]}}
+{"type":"queue-operation","timestamp":"2026-01-01T20:30:54.755Z"}
+{"type":"user","uuid":"u-0019","parentUuid":"u-0020","timestamp":"2026-01-05T21:24:21.523Z","isSidechain":false,"isMeta":true,"turnOrigin":"peer","version":"2.1.308","turnPosition":{"promptIndex":2,"turnIndex":3},"promptId":"p-0003","origin":{"kind":"peer","from":"peer-1"},"message":{"role":"user","content":"prompt 8"}}
+{"type":"attachment","uuid":"u-0021","parentUuid":"u-0019","timestamp":"2026-01-05T21:24:21.650Z","isSidechain":false,"version":"2.1.308"}
+{"type":"last-prompt"}
+{"type":"custom-title"}
+{"type":"agent-name"}
+{"type":"mode"}
+{"type":"atis-latch"}
+{"type":"frame-link","timestamp":"2026-01-05T21:24:21.699Z"}
+{"type":"history-suppression"}
+{"type":"bridge-session"}
+{"type":"api-request","timestamp":"2026-01-05T21:24:21.782Z","version":"2.1.308"}
+{"type":"assistant","uuid":"u-0022","parentUuid":"u-0021","timestamp":"2026-01-05T21:24:23.261Z","isSidechain":false,"apiBlockIndex":0,"version":"2.1.308","requestId":"req_0005","message":{"role":"assistant","id":"msg_0005","model":"claude-opus-5-5","type":"message","stop_reason":"tool_use","usage":{"input_tokens":2,"cache_creation_input_tokens":1174,"cache_read_input_tokens":322232,"output_tokens":380},"content":[{"type":"thinking","thinking":"","signature":"sig"}]}}
+{"type":"assistant","uuid":"u-0023","parentUuid":"u-0022","timestamp":"2026-01-05T21:24:25.307Z","isSidechain":false,"apiBlockIndex":1,"version":"2.1.308","requestId":"req_0005","message":{"role":"assistant","id":"msg_0005","model":"claude-opus-5-5","type":"message","stop_reason":"tool_use","usage":{"input_tokens":2,"cache_creation_input_tokens":1174,"cache_read_input_tokens":322232,"output_tokens":380},"content":[{"type":"tool_use","id":"toolu_0002","name":"Bash","input":{"arg":"input 9"}}]}}
+{"type":"user","uuid":"u-0024","parentUuid":"u-0023","sourceToolAssistantUUID":"u-0023","timestamp":"2026-01-05T21:24:27.179Z","isSidechain":false,"version":"2.1.308","promptId":"p-0003","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_0002","content":"result 10","is_error":false}]}}
+{"type":"attachment","uuid":"u-0025","parentUuid":"u-0024","timestamp":"2026-01-05T21:24:21.689Z","isSidechain":false,"version":"2.1.308"}
+{"type":"queue-operation","timestamp":"2026-01-05T21:24:27.205Z"}
+{"type":"api-request-blob"}
+{"type":"api-request","timestamp":"2026-01-05T21:24:27.289Z","version":"2.1.308"}
+{"type":"assistant","uuid":"u-0026","parentUuid":"u-0025","timestamp":"2026-01-05T21:24:28.487Z","isSidechain":false,"apiBlockIndex":0,"version":"2.1.308","requestId":"req_0006","message":{"role":"assistant","id":"msg_0006","model":"claude-opus-5-5","type":"message","stop_reason":"tool_use","usage":{"input_tokens":2,"cache_creation_input_tokens":994,"cache_read_input_tokens":323406,"output_tokens":195},"content":[{"type":"thinking","thinking":"","signature":"sig"}]}}
+{"type":"assistant","uuid":"u-0027","parentUuid":"u-0026","timestamp":"2026-01-05T21:24:28.492Z","isSidechain":false,"apiBlockIndex":1,"version":"2.1.308","requestId":"req_0006","message":{"role":"assistant","id":"msg_0006","model":"claude-opus-5-5","type":"message","stop_reason":"tool_use","usage":{"input_tokens":2,"cache_creation_input_tokens":994,"cache_read_input_tokens":323406,"output_tokens":195},"content":[{"type":"text","text":"text 11"}]}}
+{"type":"assistant","uuid":"u-0028","parentUuid":"u-0027","timestamp":"2026-01-05T21:24:29.372Z","isSidechain":false,"apiBlockIndex":2,"version":"2.1.308","requestId":"req_0006","message":{"role":"assistant","id":"msg_0006","model":"claude-opus-5-5","type":"message","stop_reason":"tool_use","usage":{"input_tokens":2,"cache_creation_input_tokens":994,"cache_read_input_tokens":323406,"output_tokens":195},"content":[{"type":"tool_use","id":"toolu_0003","name":"Bash","input":{"arg":"input 12"}}]}}
+{"type":"user","uuid":"u-0029","parentUuid":"u-0028","sourceToolAssistantUUID":"u-0028","timestamp":"2026-01-05T21:24:30.111Z","isSidechain":false,"version":"2.1.308","promptId":"p-0003","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_0003","content":"result 13","is_error":true}]}}
+{"type":"api-request","timestamp":"2026-01-05T21:24:30.203Z","version":"2.1.308"}
+{"type":"assistant","uuid":"u-0030","parentUuid":"u-0029","timestamp":"2026-01-05T21:24:32.161Z","isSidechain":false,"apiBlockIndex":0,"version":"2.1.308","requestId":"req_0007","message":{"role":"assistant","id":"msg_0007","model":"claude-opus-5-5","type":"message","stop_reason":"tool_use","usage":{"input_tokens":2,"cache_creation_input_tokens":219,"cache_read_input_tokens":324400,"output_tokens":165},"content":[{"type":"tool_use","id":"toolu_0004","name":"Bash","input":{"arg":"input 14"}}]}}
+{"type":"user","uuid":"u-0031","parentUuid":"u-0030","sourceToolAssistantUUID":"u-0030","timestamp":"2026-01-05T21:24:33.454Z","isSidechain":false,"version":"2.1.308","promptId":"p-0003","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_0004","content":"result 15","is_error":false}]}}
+{"type":"api-request","timestamp":"2026-01-05T21:24:33.537Z","version":"2.1.308"}
+{"type":"assistant","uuid":"u-0032","parentUuid":"u-0031","timestamp":"2026-01-05T21:24:37.362Z","isSidechain":false,"apiBlockIndex":0,"version":"2.1.308","requestId":"req_0008","message":{"role":"assistant","id":"msg_0008","model":"claude-opus-5-5","type":"message","stop_reason":"tool_use","usage":{"input_tokens":2,"cache_creation_input_tokens":195,"cache_read_input_tokens":324619,"output_tokens":479},"content":[{"type":"tool_use","id":"toolu_0005","name":"Bash","input":{"arg":"input 16"}}]}}
+{"type":"last-prompt"}
+{"type":"custom-title"}
+{"type":"agent-name"}
+{"type":"mode"}
+{"type":"atis-latch"}
+{"type":"frame-link","timestamp":"2026-01-05T21:24:38.194Z"}
+{"type":"history-suppression"}
+{"type":"bridge-session"}
+{"type":"user","uuid":"u-0033","parentUuid":"u-0032","sourceToolAssistantUUID":"u-0032","timestamp":"2026-01-05T21:24:38.299Z","isSidechain":false,"version":"2.1.308","promptId":"p-0003","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_0005","content":"result 17","is_error":false}]}}
+{"type":"api-request","timestamp":"2026-01-05T21:24:38.370Z","version":"2.1.308"}
+{"type":"assistant","uuid":"u-0034","parentUuid":"u-0033","timestamp":"2026-01-05T21:24:41.242Z","isSidechain":false,"apiBlockIndex":0,"version":"2.1.308","requestId":"req_0009","message":{"role":"assistant","id":"msg_0009","model":"claude-opus-5-5","type":"message","stop_reason":"end_turn","usage":{"input_tokens":2,"cache_creation_input_tokens":679,"cache_read_input_tokens":324814,"output_tokens":205},"content":[{"type":"thinking","thinking":"","signature":"sig"}]}}
+{"type":"assistant","uuid":"u-0035","parentUuid":"u-0034","timestamp":"2026-01-05T21:24:41.251Z","isSidechain":false,"apiBlockIndex":1,"version":"2.1.308","requestId":"req_0009","message":{"role":"assistant","id":"msg_0009","model":"claude-opus-5-5","type":"message","stop_reason":"end_turn","usage":{"input_tokens":2,"cache_creation_input_tokens":679,"cache_read_input_tokens":324814,"output_tokens":205},"content":[{"type":"text","text":"text 18"}]}}
+{"type":"system","subtype":"stop_hook_summary","uuid":"u-0036","parentUuid":"u-0035","timestamp":"2026-01-05T21:24:43.491Z","isSidechain":false,"version":"2.1.308"}
+{"type":"queue-operation","timestamp":"2026-01-05T21:31:27.431Z"}
+{"type":"queue-operation","timestamp":"2026-01-05T21:31:27.506Z"}
+{"type":"queue-operation","timestamp":"2026-01-05T21:31:27.560Z"}
+{"type":"user","uuid":"u-0037","parentUuid":"u-0038","timestamp":"2026-01-08T00:44:23.971Z","isSidechain":false,"isMeta":true,"turnOrigin":"peer","version":"2.1.308","turnPosition":{"promptIndex":3,"turnIndex":4},"promptId":"p-0004","origin":{"kind":"peer","from":"peer-2"},"message":{"role":"user","content":"prompt 19"}}
+{"type":"attachment","uuid":"u-0039","parentUuid":"u-0037","timestamp":"2026-01-08T00:44:24.040Z","isSidechain":false,"version":"2.1.308"}
+{"type":"last-prompt"}
+{"type":"custom-title"}
+{"type":"agent-name"}
+{"type":"mode"}
+{"type":"atis-latch"}
+{"type":"frame-link","timestamp":"2026-01-08T00:44:24.054Z"}
+{"type":"history-suppression"}
+{"type":"bridge-session"}
+{"type":"api-request","timestamp":"2026-01-08T00:44:24.146Z","version":"2.1.308"}
+{"type":"api-request","timestamp":"2026-01-08T00:44:24.324Z","version":"2.1.308"}
+{"type":"assistant","uuid":"u-0040","parentUuid":"u-0039","timestamp":"2026-01-08T00:44:27.119Z","isSidechain":false,"apiBlockIndex":0,"version":"2.1.308","requestId":"req_0010","message":{"role":"assistant","id":"msg_0010","model":"claude-opus-5-5","type":"message","stop_reason":"tool_use","usage":{"input_tokens":2,"cache_creation_input_tokens":146368,"cache_read_input_tokens":40088,"output_tokens":421},"content":[{"type":"thinking","thinking":"","signature":"sig"}]}}
+{"type":"assistant","uuid":"u-0041","parentUuid":"u-0040","timestamp":"2026-01-08T00:44:29.539Z","isSidechain":false,"apiBlockIndex":1,"version":"2.1.308","requestId":"req_0010","message":{"role":"assistant","id":"msg_0010","model":"claude-opus-5-5","type":"message","stop_reason":"tool_use","usage":{"input_tokens":2,"cache_creation_input_tokens":146368,"cache_read_input_tokens":40088,"output_tokens":421},"content":[{"type":"tool_use","id":"toolu_0006","name":"Bash","input":{"arg":"input 20"}}]}}
+{"type":"user","uuid":"u-0042","parentUuid":"u-0041","sourceToolAssistantUUID":"u-0041","timestamp":"2026-01-08T00:44:30.604Z","isSidechain":false,"version":"2.1.308","promptId":"p-0004","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_0006","content":"result 21","is_error":false}]}}
+{"type":"attachment","uuid":"u-0043","parentUuid":"u-0042","timestamp":"2026-01-08T00:44:24.036Z","isSidechain":false,"version":"2.1.308"}
+{"type":"queue-operation","timestamp":"2026-01-08T00:44:30.626Z"}
+{"type":"api-request-blob"}
+{"type":"api-request","timestamp":"2026-01-08T00:44:30.693Z","version":"2.1.308"}
+{"type":"assistant","uuid":"u-0044","parentUuid":"u-0043","timestamp":"2026-01-08T00:44:31.866Z","isSidechain":false,"apiBlockIndex":0,"version":"2.1.308","requestId":"req_0011","message":{"role":"assistant","id":"msg_0011","model":"claude-opus-5-5","type":"message","stop_reason":"tool_use","usage":{"input_tokens":2,"cache_creation_input_tokens":1198,"cache_read_input_tokens":186456,"output_tokens":140},"content":[{"type":"tool_use","id":"toolu_0007","name":"Read","input":{"arg":"input 22"}}]}}
+{"type":"user","uuid":"u-0045","parentUuid":"u-0044","sourceToolAssistantUUID":"u-0044","timestamp":"2026-01-08T00:44:31.975Z","isSidechain":false,"version":"2.1.308","promptId":"p-0004","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_0007","content":[{"type":"text","text":"result 23"}]}]}}
+{"type":"assistant","uuid":"u-0046","parentUuid":"u-0045","timestamp":"2026-01-08T00:44:32.238Z","isSidechain":false,"apiBlockIndex":1,"version":"2.1.308","requestId":"req_0011","message":{"role":"assistant","id":"msg_0011","model":"claude-opus-5-5","type":"message","stop_reason":"tool_use","usage":{"input_tokens":2,"cache_creation_input_tokens":1198,"cache_read_input_tokens":186456,"output_tokens":140},"content":[{"type":"tool_use","id":"toolu_0008","name":"Read","input":{"arg":"input 24"}}]}}
+{"type":"user","uuid":"u-0047","parentUuid":"u-0046","sourceToolAssistantUUID":"u-0046","timestamp":"2026-01-08T00:44:32.333Z","isSidechain":false,"version":"2.1.308","promptId":"p-0004","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_0008","content":[{"type":"text","text":"result 25"}]}]}}
+{"type":"last-prompt"}
+{"type":"custom-title"}
+{"type":"agent-name"}
+{"type":"mode"}
+{"type":"atis-latch"}
+{"type":"frame-link","timestamp":"2026-01-08T00:44:32.355Z"}
+{"type":"history-suppression"}
+{"type":"bridge-session"}
+{"type":"api-request-blob"}
+{"type":"api-request-blob"}
+{"type":"api-request","timestamp":"2026-01-08T00:44:32.419Z","version":"2.1.308"}
+{"type":"last-prompt"}
+{"type":"custom-title"}
+{"type":"agent-name"}
+{"type":"mode"}
+{"type":"atis-latch"}
+{"type":"frame-link","timestamp":"2026-01-08T00:44:32.548Z"}
+{"type":"history-suppression"}
+{"type":"bridge-session"}
+{"type":"assistant","uuid":"u-0048","parentUuid":"u-0047","timestamp":"2026-01-08T00:44:34.251Z","isSidechain":false,"apiBlockIndex":0,"version":"2.1.308","requestId":"req_0012","message":{"role":"assistant","id":"msg_0012","model":"claude-opus-5-5","type":"message","stop_reason":"tool_use","usage":{"input_tokens":2,"cache_creation_input_tokens":2598,"cache_read_input_tokens":187654,"output_tokens":569},"content":[{"type":"thinking","thinking":"","signature":"sig"}]}}
+{"type":"assistant","uuid":"u-0049","parentUuid":"u-0048","timestamp":"2026-01-08T00:44:37.711Z","isSidechain":false,"apiBlockIndex":1,"version":"2.1.308","requestId":"req_0012","message":{"role":"assistant","id":"msg_0012","model":"claude-opus-5-5","type":"message","stop_reason":"tool_use","usage":{"input_tokens":2,"cache_creation_input_tokens":2598,"cache_read_input_tokens":187654,"output_tokens":569},"content":[{"type":"tool_use","id":"toolu_0009","name":"Bash","input":{"arg":"input 26"}}]}}
+{"type":"user","uuid":"u-0050","parentUuid":"u-0049","sourceToolAssistantUUID":"u-0049","timestamp":"2026-01-08T00:44:42.211Z","isSidechain":false,"version":"2.1.308","promptId":"p-0004","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_0009","content":"result 27","is_error":false}]}}
+{"type":"api-request","timestamp":"2026-01-08T00:44:42.278Z","version":"2.1.308"}
+{"type":"assistant","uuid":"u-0051","parentUuid":"u-0050","timestamp":"2026-01-08T00:44:44.491Z","isSidechain":false,"apiBlockIndex":0,"version":"2.1.308","requestId":"req_0013","message":{"role":"assistant","id":"msg_0013","model":"claude-opus-5-5","type":"message","stop_reason":"tool_use","usage":{"input_tokens":2,"cache_creation_input_tokens":927,"cache_read_input_tokens":190252,"output_tokens":200},"content":[{"type":"tool_use","id":"toolu_0010","name":"SendUserFile","input":{"arg":"input 28"}}]}}
+{"type":"user","uuid":"u-0052","parentUuid":"u-0051","sourceToolAssistantUUID":"u-0051","timestamp":"2026-01-08T00:44:47.319Z","isSidechain":false,"version":"2.1.308","promptId":"p-0004","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_0010","content":"result 29"}]}}
+{"type":"api-request","timestamp":"2026-01-08T00:44:47.400Z","version":"2.1.308"}
+{"type":"assistant","uuid":"u-0053","parentUuid":"u-0052","timestamp":"2026-01-08T00:44:54.961Z","isSidechain":false,"apiBlockIndex":0,"version":"2.1.308","requestId":"req_0014","message":{"role":"assistant","id":"msg_0014","model":"claude-opus-5-5","type":"message","stop_reason":"end_turn","usage":{"input_tokens":2,"cache_creation_input_tokens":330,"cache_read_input_tokens":191179,"output_tokens":726},"content":[{"type":"text","text":"text 30"}]}}
+{"type":"system","subtype":"stop_hook_summary","uuid":"u-0054","parentUuid":"u-0053","timestamp":"2026-01-08T00:44:59.500Z","isSidechain":false,"version":"2.1.308"}
+{"type":"artifact-autoreact-ledger"}
+{"type":"queue-operation","timestamp":"2026-01-08T03:11:47.636Z"}
+{"type":"queue-operation","timestamp":"2026-01-08T03:11:47.639Z"}

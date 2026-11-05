@@ -271,6 +271,26 @@
   (`ChatSupport::Adapter`), or names the reason it has none
   (`ChatSupport::Unsupported`). A profile with a trace reader must have an
   adapter (`tests/chat_profiles.rs`).
+- **`TranscriptSpec::records` is the one turn log `session trace` reads;
+  ping-back never does.** `trace` is eidolon's own trace, and only ping-back
+  and the presence fold read it. A translated transcript goes on `records`
+  alone, so no ping-back can ever source from it. The translator
+  (`agents/claude_trace.rs`) keeps these rules, each pinned by a test there:
+  an unnamed shape (no uuid, no `message.id`, content that is not a list,
+  a sidechain, a `<synthetic>` stand-in) is no line; a
+  meta record that opens no turn is no line; a turn opens at a record with
+  `turnPosition`, and an opener while one is open first emits `Cancelled` at
+  the last timed line; a settle is the last record of a message whose stop
+  reason is set and is neither `tool_use` nor `pause_turn`, and a message's
+  usage is its last record's, since earlier records can carry partial usage;
+  an external opener is named by its `origin.from`, else its `origin.kind`,
+  else its `turnOrigin`; a tool result carries its call id, content and error
+  flag, and its id is the record's uuid, or `uuid.<block index>` when the
+  record holds several results; a tool call's input is a JSON string; the
+  model's provider half is empty, since the transcript never says which API
+  served it; the window is the transcript's last 8 MiB. The format is
+  Claude Code's own, read from the CLI 2.1.308 and 2.1.309 fixtures in
+  `tests/fixtures/`, so a CLI change shows first in the translator's tests.
 - **A new agent harness** (beyond `claude`/`kimi`/`pi`/`eidolon`) is a new
   `agents::agent_profile` table entry, not a scatter of `if harness == ...`
   conditionals elsewhere. A harness need not fill every field to qualify —

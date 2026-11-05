@@ -822,7 +822,7 @@ in the message.
   calls `aoide_client::daemon::daemon_dispatch` (the L4 dual-writer prefix
   every `session start/phase/end`, `session hook`, `session reap` and
   `session grant exempt` carries), and writes nothing — it loads
-  `sessions.json`, reads a trace file and prints. Don't fold it into that
+  `sessions.json`, reads the turn log and prints. Don't fold it into that
   family "for consistency": there is nothing to route to the daemon.
   `<id>` resolves through `aoide_storage::addr::resolve`, the SAME resolver
   `send --to` and bare `session`'s filter use (never a second one, and no
@@ -889,9 +889,10 @@ in the message.
   name, model, provider, agent, ids) go through `one_line_clip` (stripped,
   flattened, 200 characters). A new span field is a decision, not a default.
 - **The span view reads the WHOLE window, never the `--tail` cut.**
-  `session_trace` builds `Turns` from every readable line `read_trace` returned
-  (the 1 MiB tail), and `--tail` only shapes `lines` and `steps`. A turn the
-  1 MiB window cuts reads as `partial`, never as a shorter turn.
+  `session_trace` builds `Turns` from every readable line `read_records`
+  returned (the reader's window: the last 1 MiB of an eidolon trace, the last
+  8 MiB of a claude transcript), and `--tail` only shapes `lines` and `steps`.
+  A turn the window cuts reads as `partial`, never as a shorter turn.
 - **`--follow` prints by identity, never by a line count.** `follow_trace`
   keeps the keys of the last window it read and prints each line whose key is
   not among them (`follow_tick`). A record's key is its journal id; an

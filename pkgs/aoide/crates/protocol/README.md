@@ -246,10 +246,14 @@ crate; beyond that no `aoide-*` crate sits beneath it, and every other
   `Some` only for a harness that keeps one JSON record per journal record and
   can hand those lines to a caller that cannot decode the journal itself
   (eidolon, via `eidolon_trace_tail`); `None` for every harness whose only
-  on-disk turn log is its transcript. It is what lets a consumer that needs a
-  trace test for one without ever naming a harness by string (`if agent ==
-  "eidolon"` is exactly the scatter this table exists to avoid) — `aoide
-  session trace` is its first caller. `eidolon_transcript_locate` answers the
+  on-disk turn log is its transcript. Ping-back and the presence fold read it
+  and nothing else: a caller that needs a trace tests for it, never a
+  harness's name (`if agent == "eidolon"` is exactly the scatter this table
+  exists to avoid). `TranscriptSpec::records` is the turn log `aoide session
+  trace` reads: eidolon's own trace, and Claude's transcript read as trace
+  lines by `agents/claude_trace.rs`; `None` for kimi and pi, whose turn log is
+  not records. Claude keeps `trace: None`: a translated transcript is never a
+  ping-back source. `eidolon_transcript_locate` answers the
   producer generation that is actually installed: a mirror that is still
   current, else the journal itself when the producer's own read-only export
   door proves there (`eidolon log --json …`, probed per program identity,

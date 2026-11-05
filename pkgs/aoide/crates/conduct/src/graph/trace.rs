@@ -962,14 +962,13 @@ pub fn session_trace(inv: &Invocation) -> Outcome {
         )
         .with_data(json!({ "reason": "unknown-agent", "sessionId": id, "agent": agent }));
     };
-    let Some(read_trace) = profile.transcript.trace else {
+    let Some(read_records) = profile.transcript.records else {
         return Outcome::error(
             cmd,
             format!(
-                "`{name}` runs `{agent}`, which keeps no trace — a trace is one JSON record per \
-                 journal record, published by the harness itself (a mirror file, or its own \
-                 read-only export door), and resolved through the record's presence metadata; \
-                 `eidolon` is the one harness that does today (docs/architecture/EIDOLON-TRACE.md)"
+                "`{name}` runs `{agent}`, which keeps no turn log that reads as records: \
+                 `session trace` reads the records a harness keeps, its own journal or its \
+                 transcript read as records. This harness keeps neither"
             ),
         )
         .with_data(json!({
@@ -986,23 +985,24 @@ pub fn session_trace(inv: &Invocation) -> Outcome {
         .map(|r| r.cwd.clone())
         .or_else(|| ended.as_ref().map(|e| e.cwd.clone()))
         .unwrap_or_default();
-    // The journal the session named is the hint. A path inside the session logs
-    // dir is a terminal's transcript, never a journal, so it is never passed.
-    let log_path = row
-        .and_then(|r| r.log_path.clone())
-        .or_else(|| ended.as_ref().and_then(|e| e.log_path.clone()))
-        .filter(|p| !aoide_storage::fs::inside_session_logs(p));
-    let Some(path) = (profile.transcript.locate)(&id, Some(&cwd), log_path.as_deref()) else {
+    // The turn log's hint is the record's transcript, else its journal, by the
+    // rule `session chat` uses.
+    let hint = super::chat::session_hint(
+        row.and_then(|r| r.transcript_path.as_deref()),
+        row.and_then(|r| r.log_path.as_deref())
+            .or(ended.as_ref().and_then(|e| e.log_path.as_deref())),
+    );
+    let Some(path) = (profile.transcript.locate)(&id, Some(&cwd), hint.as_deref()) else {
         return Outcome::error(
             cmd,
             format!(
-                "`{name}` has no readable presence metadata — looked for \
-                 $XDG_RUNTIME_DIR/eidolon/{id}/meta.json (a torn-down or never-registered presence)"
+                "`{name}` has no readable turn log on this host: no file its record or \
+                 its presence names resolves to one"
             ),
         )
         .with_data(json!({ "reason": "no-presence", "sessionId": id }));
     };
-    let Some(lines) = read_trace(&path) else {
+    let Some(lines) = read_records(&path) else {
         return Outcome::error(
             cmd,
             format!(
@@ -1021,7 +1021,7 @@ pub fn session_trace(inv: &Invocation) -> Outcome {
 
     // An ended session has no presence left to follow: its window is printed once.
     if follow && ended.is_none() && !row.is_some_and(|r| r.state == "done") {
-        return follow_trace(cmd, &id, &name, &path, read_trace, tail, json_mode, dim);
+        return follow_trace(cmd, &id, &name, &path, read_records, tail, json_mode, dim);
     }
 
     let shown = last_lines(&lines, tail);
@@ -1041,7 +1041,7 @@ pub fn session_trace(inv: &Invocation) -> Outcome {
     // the window, by blocks-per-record and by a whole-projection cap.
     let (steps, omitted) = steps_of_lines(&shown, clip);
     let steps: Vec<Value> = steps.iter().map(Step::json).collect();
-    // The span view reads the WHOLE window (the 1 MiB tail `lines` holds), never
+    // The span view reads the WHOLE window (the tail `lines` holds), never
     // the `--tail` cut, so a render window never splits a turn.
     let records: Vec<TraceRecord> =
         lines.iter().filter_map(|line| eidolon_trace_record(line.as_str())).collect();
@@ -1090,7 +1090,9 @@ fn no_turn(cmd: &str, id: &str, wanted: &str, turns: &Turns<'_>) -> Outcome {
         cmd,
         Kind::Refused,
         format!("`{wanted}` names no turn in this trace window"),
-        "the window is the trace's last 1 MiB, so an older turn is not in it; `turns` lists the newest ids it holds",
+        "the window is the newest part of the turn log the reader holds \
+         (1 MiB of an eidolon trace, 8 MiB of a claude transcript), so an older turn \
+         is not in it; `turns` lists the newest ids it holds",
         fix,
     )
     .with_fields(json!({ "reason": "no-turn", "turn": wanted, "turns": newest }))
@@ -1164,7 +1166,7 @@ fn follow_trace(
     id: &str,
     name: &str,
     path: &Path,
-    read_trace: fn(&Path) -> Option<Vec<String>>,
+    read_records: fn(&Path) -> Option<Vec<String>>,
     tail: usize,
     json_mode: bool,
     dim: bool,
@@ -1182,7 +1184,7 @@ fn follow_trace(
     let mut printed = 0usize;
     let mut gaps = 0usize;
     let mut ident = file_identity(path);
-    if let Some(lines) = read_trace(path) {
+    if let Some(lines) = read_records(path) {
         for line in last_lines(&lines, tail) {
             emit(line);
             printed += 1;
@@ -1194,7 +1196,7 @@ fn follow_trace(
         if INTERRUPTED.load(Ordering::SeqCst) {
             break;
         }
-        let Some(lines) = read_trace(path) else {
+        let Some(lines) = read_records(path) else {
             continue; // the file is momentarily not there — keep waiting
         };
         // A new file (a new inode) starts over: its ids may repeat the ones
@@ -1538,6 +1540,196 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    /// A Claude session on disk: its roster record names the transcript a hook
+    /// admitted, the way `transcriptPath` is recorded, and the transcript holds
+    /// `transcript`.
+    fn claude_fixture(tag: &str, id: &str, transcript: &str) -> std::path::PathBuf {
+        let root = unique_stage(tag);
+        let stage = root.join("stage");
+        std::fs::create_dir_all(&stage).unwrap();
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        std::env::set_var("AOIDE_STATE_DIR", root.join("state"));
+        std::env::set_var("XDG_RUNTIME_DIR", &root);
+        let path = root.join("transcript.jsonl");
+        std::fs::write(&path, transcript).unwrap();
+        let sessions = serde_json::json!({
+            "schemaVersion": "0",
+            "sessions": [{
+                "sessionId": id,
+                "agent": "claude",
+                "cwd": "/srv/project",
+                "state": "working",
+                "startedAt": "2026-09-12T00:00:00Z",
+                "petname": "brave-otter",
+                "transcriptPath": path.display().to_string(),
+            }],
+        });
+        std::fs::write(stage.join("sessions.json"), sessions.to_string()).unwrap();
+        root
+    }
+
+    #[test]
+    fn a_claude_session_reads_its_turns_from_its_transcript() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&env_keys());
+        let root = claude_fixture(
+            "turns-of-a-claude-session",
+            "claude-turns",
+            include_str!("../../../protocol/tests/fixtures/claude-turns.jsonl"),
+        );
+
+        let out = session_trace(&trace_invocation(&["claude-turns"], &[("json", "true")]));
+        assert_eq!(out.status, Status::Ok, "msg: {}", out.message);
+        let data = out.data.clone().unwrap();
+        let turns: Vec<(&str, u64, u64, u64)> = data["turns"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|t| {
+                (
+                    t["id"].as_str().unwrap(),
+                    t["steps"].as_u64().unwrap(),
+                    t["tools"].as_u64().unwrap(),
+                    t["failed"].as_u64().unwrap(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            turns,
+            [("u-0001", 2, 1, 0), ("u-0012", 1, 0, 0), ("u-0019", 5, 4, 1), ("u-0037", 5, 5, 0)],
+            "{data}"
+        );
+        assert_eq!(data["spans"]["id"], "turn-u-0037", "the newest turn is the default");
+        assert_eq!(data["spans"]["attributes"]["gen_ai.usage.input_tokens"], 947_060);
+        assert_eq!(data["spans"]["attributes"]["gen_ai.usage.output_tokens"], 2056);
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_claude_turn_is_five_steps_with_its_read_pair_in_order() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&env_keys());
+        let root = claude_fixture(
+            "tree-of-a-claude-turn",
+            "claude-tree",
+            include_str!("../../../protocol/tests/fixtures/claude-turns.jsonl"),
+        );
+
+        let out = session_trace(&trace_invocation(&["claude-tree"], &[("json", "true")]));
+        assert_eq!(out.status, Status::Ok, "msg: {}", out.message);
+        let spans = out.data.clone().unwrap()["spans"].clone();
+        assert_eq!(spans["id"], "turn-u-0037");
+        assert_eq!(spans["status"], "ok");
+        assert_eq!(spans["attributes"]["gen_ai.request.model"], "claude-opus-5-5");
+        assert!(spans["attributes"].get("gen_ai.provider.name").is_none(), "{spans}");
+        let steps = spans["children"].as_array().expect("steps");
+        assert_eq!(steps.len(), 5, "{spans}");
+        let read_step = steps.iter().find(|step| step["id"] == "step-u-0044").expect("msg_0011's step");
+        let reads: Vec<&serde_json::Value> = read_step["children"]
+            .as_array()
+            .expect("a step's spans")
+            .iter()
+            .filter(|span| span["name"] == "execute_tool Read")
+            .collect();
+        assert_eq!(reads.len(), 2, "{read_step}");
+        assert_eq!(reads[0]["start"], 1_767_833_071_866_i64);
+        assert_eq!(reads[0]["end"], 1_767_833_071_975_i64);
+        assert_eq!(reads[1]["start"], 1_767_833_072_238_i64);
+        assert!(reads[1]["start"].as_i64() > reads[0]["end"].as_i64());
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_claude_window_is_one_partial_running_turn_of_two_steps() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&env_keys());
+        let root = claude_fixture(
+            "window-of-a-claude-session",
+            "claude-window",
+            include_str!("../../../protocol/tests/fixtures/claude-compact-window.jsonl"),
+        );
+
+        let out = session_trace(&trace_invocation(&["claude-window"], &[("json", "true")]));
+        assert_eq!(out.status, Status::Ok, "msg: {}", out.message);
+        let data = out.data.clone().unwrap();
+        let turns = data["turns"].as_array().expect("turns");
+        assert_eq!(turns.len(), 1, "{data}");
+        assert_eq!(turns[0]["partial"], true);
+        assert_eq!(turns[0]["status"], "running");
+        assert!(turns[0]["end"].is_null(), "{data}");
+        assert_eq!(
+            (turns[0]["steps"].as_u64(), turns[0]["tools"].as_u64(), turns[0]["failed"].as_u64()),
+            (Some(2), Some(2), Some(0)),
+            "{data}"
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_claude_read_tool_session_is_one_settled_turn_with_its_input_tokens() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&env_keys());
+        let root = claude_fixture(
+            "read-tool-of-a-claude-session",
+            "claude-read",
+            include_str!("../../../protocol/tests/fixtures/claude-real-read-tool.jsonl"),
+        );
+
+        let out = session_trace(&trace_invocation(&["claude-read"], &[("json", "true")]));
+        assert_eq!(out.status, Status::Ok, "msg: {}", out.message);
+        let data = out.data.clone().unwrap();
+        let turns = data["turns"].as_array().expect("turns");
+        assert_eq!(turns.len(), 1, "{data}");
+        assert_eq!(turns[0]["status"], "ok");
+        assert_eq!((turns[0]["steps"].as_u64(), turns[0]["tools"].as_u64()), (Some(2), Some(1)), "{data}");
+        assert_eq!(data["spans"]["attributes"]["gen_ai.usage.input_tokens"], 74_129);
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_claude_turn_cut_before_its_result_is_cancelled_with_its_tool() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&env_keys());
+        let source: Vec<&str> = include_str!("../../../protocol/tests/fixtures/claude-turns.jsonl").lines().collect();
+        let call = source.iter().position(|line| line.contains("\"type\":\"tool_use\"")).expect("a tool call");
+        let next = source.iter().position(|line| line.contains("\"uuid\":\"u-0012\"")).expect("the next opener");
+        let mut cut = source[..=call].join("\n");
+        cut.push('\n');
+        cut.push_str(source[next]);
+        cut.push('\n');
+        let root = claude_fixture("cut-claude-turn", "claude-cut", &cut);
+
+        let listed = session_trace(&trace_invocation(&["claude-cut"], &[("json", "true")]));
+        assert_eq!(listed.status, Status::Ok, "msg: {}", listed.message);
+        let data = listed.data.clone().unwrap();
+        let first = data["turns"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .find(|turn| turn["id"] == "u-0001")
+            .expect("u-0001's turn");
+        assert_eq!(first["status"], "cancelled", "{data}");
+
+        let shown = session_trace(&trace_invocation(&["claude-cut"], &[("json", "true"), ("turn", "u-0001")]));
+        assert_eq!(shown.status, Status::Ok, "msg: {}", shown.message);
+        let spans = shown.data.clone().unwrap()["spans"].clone();
+        assert_eq!(spans["status"], "cancelled");
+        let tool = spans["children"][0]["children"]
+            .as_array()
+            .expect("a step's spans")
+            .iter()
+            .find(|span| span["attributes"]["gen_ai.operation.name"] == "execute_tool")
+            .expect("the cut tool call");
+        assert_eq!(tool["status"], "cancelled");
+        assert_eq!(tool["attributes"]["error.type"], "cancelled");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     #[test]
     fn a_session_without_a_trace_gets_a_taught_error_naming_why() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -1552,13 +1744,13 @@ mod tests {
         assert!(out.message.contains("read-only export door"), "{}", out.message);
         let _ = std::fs::remove_dir_all(&root);
 
-        // 2. A harness that keeps none by construction (claude's profile has
-        //    `transcript.trace == None`).
-        let root = fixture("trace-claude", "claude-1", "claude", &[SETTLED], true);
-        let out = session_trace(&trace_invocation(&["claude-1"], &[]));
+        // 2. A harness whose turn log is not records: kimi's profile has
+        //    `transcript.records == None`.
+        let root = fixture("trace-kimi", "kimi-1", "kimi", &[SETTLED], true);
+        let out = session_trace(&trace_invocation(&["kimi-1"], &[]));
         assert_eq!(out.status, Status::Error, "msg: {}", out.message);
         assert_eq!(out.data.clone().unwrap()["reason"], "no-trace-capability");
-        assert!(out.message.contains("keeps no trace"), "{}", out.message);
+        assert!(out.message.contains("keeps no turn log"), "{}", out.message);
         let _ = std::fs::remove_dir_all(&root);
 
         // 3. An eidolon record whose presence is gone entirely.
@@ -1567,7 +1759,7 @@ mod tests {
         let out = session_trace(&trace_invocation(&["Aoide-gone"], &[]));
         assert_eq!(out.status, Status::Error, "msg: {}", out.message);
         assert_eq!(out.data.clone().unwrap()["reason"], "no-presence");
-        assert!(out.message.contains("no readable presence metadata"), "{}", out.message);
+        assert!(out.message.contains("no readable turn log"), "{}", out.message);
         let _ = std::fs::remove_dir_all(&root);
     }
 

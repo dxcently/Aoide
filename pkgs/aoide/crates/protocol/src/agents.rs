@@ -83,6 +83,8 @@ pub fn claude_transcript_refusal(path: &Path, session_id: &str) -> Option<&'stat
     transcript_refusal(path, session_id, unsafe { libc::geteuid() } as u32)
 }
 
+mod claude_trace;
+
 type TraceReader = fn(path: &Path) -> Option<Vec<String>>;
 
 /// Locator + extractors for an agent's on-disk transcript (claude: the
@@ -124,17 +126,23 @@ pub struct TranscriptSpec {
     /// `docs/architecture/EIDOLON-TRACE.md`); `None` for every harness whose
     /// only on-disk turn log is its transcript.
     ///
-    /// This is the CAPABILITY test a caller that needs a trace must make —
-    /// `aoide session trace` is the first one — so no consumer ever names a
-    /// harness by string (`if agent == "eidolon"` is exactly the scatter
-    /// this table exists to avoid; see this crate's `AGENTS.md`). The
-    /// returned lines are whole JSONL lines off the END of the trace —
-    /// whether that trace is a file the producer wrote or the producer's own
-    /// export door — the same shape every other `tail` here returns; `None`
-    /// means the path is not a trace at all (the presence stand-in `locate`
-    /// falls back to), which a caller must be able to tell apart from a trace
-    /// that is merely empty right now.
+    /// Ping-back and the presence fold read this, and nothing else: a caller
+    /// that needs a trace tests this `Option`, never a harness's name. The
+    /// returned lines are whole JSONL lines off the END of the trace — whether
+    /// that trace is a file the producer wrote or the producer's own export
+    /// door — the same shape every other `tail` here returns; `None` means the
+    /// path is not a trace at all (the presence stand-in `locate` falls back
+    /// to), which a caller must be able to tell apart from a trace that is
+    /// merely empty right now. A translated reader never goes here: a
+    /// transcript read as trace lines is not a ping-back source, so Claude
+    /// keeps `None`.
     pub trace: Option<TraceReader>,
+    /// The session's turn log as trace lines, the shape `eidolon_trace_record`
+    /// reads. Only `session trace` reads it, for its span view and `--follow`:
+    /// eidolon's own trace, and claude's transcript read by
+    /// `claude_trace::claude_trace_tail`. `None` where the turn log is not
+    /// records (kimi, pi).
+    pub records: Option<TraceReader>,
 }
 
 /// The on-disk format of an agent's hook-settings file.
@@ -923,6 +931,8 @@ pub static CLAUDE_PROFILE: AgentProfile = AgentProfile {
         find_subagent: find_subagent_transcript,
         // No mirrored trace — claude's own transcript IS its turn log.
         trace: None,
+        // Read as trace lines for `session trace` only (`claude_trace.rs`).
+        records: Some(claude_trace::claude_trace_tail),
     },
     chat: crate::chat::ChatSupport::Adapter(crate::chat::ChatAdapter {
         read: claude_chat_read,
@@ -1378,6 +1388,7 @@ pub static KIMI_PROFILE: AgentProfile = AgentProfile {
         find_subagent: kimi_find_subagent,
         // No mirrored trace: kimi's own wire log IS its turn record.
         trace: None,
+        records: None,
     },
     chat: crate::chat::ChatSupport::Unsupported(
         "no chat adapter yet: kimi's transcript is not projected into chat lines",
@@ -1718,6 +1729,7 @@ pub static PI_PROFILE: AgentProfile = AgentProfile {
         find_subagent: pi_find_subagent,
         // No mirrored trace: pi's transcript IS its turn record.
         trace: None,
+        records: None,
     },
     chat: crate::chat::ChatSupport::Unsupported(
         "no chat adapter yet: pi's transcript is not projected into chat lines",
@@ -3133,6 +3145,7 @@ pub static EIDOLON_PROFILE: AgentProfile = AgentProfile {
         // why the capability lives on the spec rather than a name compare at
         // the call site.
         trace: Some(eidolon_trace_tail),
+        records: Some(eidolon_trace_tail),
     },
     // Eidolon has no hook file at all — its config is Nix-owned and
     // read-only to the harness (`~/eidolon/AGENTS.md`: "Configuration is
@@ -4324,6 +4337,12 @@ mod tests {
         assert!(CLAUDE_PROFILE.transcript.trace.is_none());
         assert!(KIMI_PROFILE.transcript.trace.is_none());
         assert!(PI_PROFILE.transcript.trace.is_none());
+        // `records` is the turn log `session trace` reads: eidolon's trace and
+        // claude's transcript, read as trace lines.
+        assert!(EIDOLON_PROFILE.transcript.records.is_some());
+        assert!(CLAUDE_PROFILE.transcript.records.is_some());
+        assert!(KIMI_PROFILE.transcript.records.is_none());
+        assert!(PI_PROFILE.transcript.records.is_none());
         // And the reader refuses a path that is not a trace file at all --
         // the presence stand-in `locate` falls back to. That distinction is
         // the whole reason it returns `Option`: "keeps no trace" and "an

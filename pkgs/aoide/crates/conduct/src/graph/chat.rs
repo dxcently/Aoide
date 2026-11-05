@@ -236,12 +236,12 @@ fn read_tick(
         (Some(r), _) => (
             r.state.clone(),
             r.cwd.clone(),
-            r.transcript_path.clone().or_else(|| r.log_path.clone()).filter(|p| !aoide_storage::fs::inside_session_logs(p)),
+            session_hint(r.transcript_path.as_deref(), r.log_path.as_deref()),
         ),
         (None, Some(e)) => (
             "done".to_string(),
             e.cwd.clone(),
-            e.log_path.clone().filter(|p| !aoide_storage::fs::inside_session_logs(p)),
+            session_hint(None, e.log_path.as_deref()),
         ),
         (None, None) => return Err(Outcome::error(cmd, format!("no session record for `{id}`"))),
     };
@@ -290,6 +290,17 @@ fn read_tick(
     }
     let done = ended.is_some() || state == "done";
     Ok(Tick { lines, done })
+}
+
+/// The turn log a reader is pointed at for a session: its transcript path,
+/// else its journal's log path, and never a file inside the session logs dir
+/// (a terminal's transcript, not a journal). `session chat` and `session
+/// trace` share this rule.
+pub(super) fn session_hint(transcript: Option<&str>, log: Option<&str>) -> Option<String> {
+    transcript
+        .or(log)
+        .filter(|path| !aoide_storage::fs::inside_session_logs(path))
+        .map(str::to_string)
 }
 
 pub fn session_chat(inv: &Invocation) -> Outcome {

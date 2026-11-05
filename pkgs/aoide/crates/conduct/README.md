@@ -1114,7 +1114,8 @@ blank one is refused too.
   kinds golden carries it.
 - **`session trace <id> [--tail N] [--follow] [--json] [--clip line|detail]
   [--turn <id>]` (P-EIDOLON slice E6, `docs/architecture/EIDOLON-TRACE.md`)** —
-  `graph/trace.rs::session_trace`, the read surface over a harness's own TRACE:
+  `graph/trace.rs::session_trace`, the read surface over a harness's own turn
+  log:
   the whole run, record by record, where every other session command reads the
   roster or acts on a session. Human form is one line per record,
   `#<id>  <hh:mm:ss local>  <kind>  <summary>` — an assistant message shows its
@@ -1144,17 +1145,19 @@ blank one is refused too.
   `aoide_storage::addr::resolve`, the SAME resolver `send --to` and bare
   `session`'s filter use (a `node/<rest>` target is a taught refusal: a trace is
   a file on the node that wrote it, and the hub preference is `send`'s routing
-  rule, not a reader's); the trace is reached through the harness CAPABILITY
-  `TranscriptSpec::trace` and its path through `TranscriptSpec::locate`, never
-  by naming a harness by string. A session whose harness keeps no trace, whose
-  presence names none, or whose agent has no registered profile is a taught
-  error naming which — never an empty listing; a trace that EXISTS and holds no
-  records yet is an honest `0 record(s)`. A session that has left the roster is
+  rule, not a reader's); the turn log is reached through the harness CAPABILITY
+  `TranscriptSpec::records` and its path through `TranscriptSpec::locate`, never
+  by naming a harness by string. A session whose harness keeps no turn log that
+  reads as records, whose record names no file, or whose agent has no
+  registered profile is a taught error naming which — never an empty listing; a
+  trace that EXISTS and holds no records yet is an honest `0 record(s)`. A
+  session that has left the roster is
   named by its ledger line when its `sessionId` is exactly the target: the
   line's agent, cwd and `logPath` stand in for the roster row, the message says
   the session ended and when, and `--follow` prints its window and returns. A
   `done` record prints its window the same way, and `--follow` returns for it
-  too. A `logPath` is the hint unless it lies in `session_logs_dir()`. Nothing
+  too. The hint is the record's `transcriptPath`, else its `logPath`, unless it
+  lies in `session_logs_dir()`. Nothing
   else is matched against the ledger. Every text the trace prints or puts in its
   data is stripped of the characters no terminal may be handed
   (`aoide_protocol::untrusted::strip_unsafe`), under the trace's own clips,

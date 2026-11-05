@@ -78,7 +78,7 @@ fn content_lines(session: &str, id: &str, content: Option<&Value>, speaker: Role
 
 /// A tool result's text: a plain string, or the `text` blocks of a list joined
 /// by newlines.
-fn result_text(content: Option<&Value>) -> String {
+pub(crate) fn result_text(content: Option<&Value>) -> String {
     match content {
         Some(Value::String(s)) => s.clone(),
         Some(Value::Array(blocks)) => blocks
