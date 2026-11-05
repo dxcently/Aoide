@@ -239,8 +239,10 @@ carries whatever the journal carries; that fix is harnox's.
   after the last closer, when it holds a turn, is open: `running`, with a null
   `end`. The newest 100 are listed, and `turnsOmitted` counts the rest.
   `data.spans` is one turn as an OTel GenAI span tree. The root
-  `invoke_agent <agent>` holds one `step <n>` per assistant message; a step
-  holds its `chat <model>` (`chat` alone when no model is in force) and one
+  `invoke_agent <agent>` holds one `step <n>` per model call: the assistant
+  records that share a `message_id` (one response, written block by block; a
+  record with none is a call of its own). A step holds its `chat <model>`
+  (`chat` alone when no model is in force) and one
   `execute_tool <name>` per `tool_use` block. The turn is the one `--turn <id>`
   names, else the newest, and `null` when the window holds none. `spansOmitted`
   counts the spans the 1000-span bound dropped, whole newest steps kept.

@@ -1185,8 +1185,10 @@ blank one is refused too.
   after the last closer is `running` with a null `end`. `data.spans` is ONE
   turn's tree, the one `--turn <id>` names or else the newest, and `null` when
   the window holds none: the root `invoke_agent <agent>`, one `step <n>` per
-  `AssistantMessage`, and each step's `chat <model>` and `execute_tool <name>`
-  per `tool_use`. The model in force is the latest `SessionStart` or
+  model call, and each step's `chat <model>` and `execute_tool <name>` per
+  `tool_use`. A model call is the run of `AssistantMessage` records that share
+  a `message_id` (one response, written block by block); a record with none is
+  a call of its own. The model in force is the latest `SessionStart` or
   `ModelChanged` at or before the record, split at its first colon. The root's
   usage comes from `TurnSettled.usage`, Anthropic-style: cached tokens are added
   to input, and a cache count is named only when non-zero. `Turns::new` takes

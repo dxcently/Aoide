@@ -16,11 +16,13 @@
 //! opener is not a turn. The last run with no closer is the open turn.
 //!
 //! **The tree of one turn** (OTel GenAI names, epoch-millisecond times): the
-//! root `invoke_agent <agent>` holds one `step <n>` per `AssistantMessage`, and
-//! a step holds its `chat <model>` and one `execute_tool <name>` per
-//! `tool_use` block. A tool ends at the `ToolResult` carrying its id; a call
-//! that never got one ends at the `Cancelled` that closed its turn, or is
-//! `running` in the open turn.
+//! root `invoke_agent <agent>` holds one `step <n>` per model call, and a step
+//! holds its `chat <model>` and one `execute_tool <name>` per `tool_use` block.
+//! A model call is the run of `AssistantMessage` records that share a
+//! `message_id` (one response, written block by block); a record with no
+//! `message_id` is a call of its own. A tool ends at the `ToolResult` carrying
+//! its id; a call that never got one ends at the `Cancelled` that closed its
+//! turn, or is `running` in the open turn.
 //!
 //! **Limits, stated.** Records follow line order, so a fork's abandoned branch
 //! is not separated. A model call still in flight has no record yet, so it has
@@ -34,6 +36,7 @@
 use super::trace::one_line_clip;
 use aoide_protocol::agents::TraceRecord;
 use serde_json::{json, Map, Value};
+use std::collections::HashMap;
 
 /// Turns `data.turns` lists: the newest, with the rest counted in `turnsOmitted`.
 pub(in crate::graph) const MAX_TURNS: usize = 100;
@@ -165,13 +168,11 @@ impl<'a> Turns<'a> {
     /// are kept within [`MAX_SPANS`]; the second value counts the spans left out.
     fn root(&self, turn: &Turn, agent: &str, conversation: &str) -> (Span, usize) {
         let records = self.records;
-        let assistants: Vec<usize> = (turn.first..=turn.last)
-            .filter(|&i| records[i].kind == "AssistantMessage")
-            .collect();
-        let steps: Vec<Span> = assistants
+        let calls = model_calls(records, turn.first, turn.last);
+        let steps: Vec<Span> = calls
             .iter()
             .enumerate()
-            .map(|(n, &a)| self.step(turn, a, n + 1, agent, conversation))
+            .map(|(n, call)| self.step(turn, call, n + 1, agent, conversation))
             .collect();
 
         let total = 1 + steps.iter().map(Span::count).sum::<usize>();
@@ -188,7 +189,7 @@ impl<'a> Turns<'a> {
         let shown = 1 + kept;
         let children: Vec<Span> = steps.into_iter().skip(first_kept).collect();
 
-        let model_at = assistants.first().copied().unwrap_or(turn.last);
+        let model_at = calls.first().map_or(turn.last, |call| call[0]);
         let (provider, model) = model_parts(self.in_force[model_at]);
         let mut attributes = Map::new();
         put(&mut attributes, "gen_ai.operation.name", json!("invoke_agent"));
@@ -218,15 +219,16 @@ impl<'a> Turns<'a> {
         (root, total - shown)
     }
 
-    /// One assistant message: its `chat`, then one `execute_tool` per `tool_use`.
-    fn step(&self, turn: &Turn, a: usize, n: usize, agent: &str, conversation: &str) -> Span {
+    /// One model call: its `chat`, then one `execute_tool` per `tool_use` block of
+    /// any of its records. `call` lists the records of one response, in order.
+    fn step(&self, turn: &Turn, call: &[usize], n: usize, agent: &str, conversation: &str) -> Span {
         let records = self.records;
-        let message = &records[a];
-        let chat_start = match self.input_before(turn, a) {
+        let (first, last) = (call[0], call[call.len() - 1]);
+        let chat_start = match self.input_before(turn, first) {
             Some(j) => records[j].ts_ms,
-            None => message.ts_ms,
+            None => records[first].ts_ms,
         };
-        let (provider, model) = model_parts(self.in_force[a]);
+        let (provider, model) = model_parts(self.in_force[first]);
         let mut attributes = Map::new();
         put(&mut attributes, "gen_ai.operation.name", json!("chat"));
         if let Some(provider) = &provider {
@@ -236,25 +238,28 @@ impl<'a> Turns<'a> {
             put(&mut attributes, "gen_ai.request.model", json!(model));
         }
         put(&mut attributes, "gen_ai.conversation.id", json!(conversation));
-        put(&mut attributes, "aoide.blocks", json!(block_types(message).join(",")));
+        let blocks = block_types(call.iter().map(|&r| &records[r])).join(",");
+        put(&mut attributes, "aoide.blocks", json!(blocks));
         let chat = Span {
-            id: format!("chat-{}", record_id(message)),
+            id: format!("chat-{}", record_id(&records[first])),
             name: match &model {
                 Some(model) => format!("chat {model}"),
                 None => "chat".to_string(),
             },
             kind: "client",
             start: chat_start,
-            end: message.ts_ms,
+            end: records[last].ts_ms,
             status: "ok",
             attributes: Value::Object(attributes),
             children: Vec::new(),
         };
 
         let mut children = vec![chat];
-        for (index, block) in content(message).iter().enumerate() {
-            if block_type(block) == "tool_use" {
-                children.push(self.tool(turn, a, index, block, agent, conversation));
+        for &r in call {
+            for (index, block) in content(&records[r]).iter().enumerate() {
+                if block_type(block) == "tool_use" {
+                    children.push(self.tool(turn, r, index, block, agent, conversation));
+                }
             }
         }
         let status = if children.iter().any(|c| c.status == "running") {
@@ -269,7 +274,7 @@ impl<'a> Turns<'a> {
             _ => children.iter().filter_map(|c| c.end).max(),
         };
         Span {
-            id: format!("step-{}", record_id(message)),
+            id: format!("step-{}", record_id(&records[first])),
             name: format!("step {n}"),
             kind: "internal",
             start: chat_start,
@@ -280,12 +285,13 @@ impl<'a> Turns<'a> {
         }
     }
 
-    /// One `tool_use` block, paired with the `ToolResult` that carries its call id
-    /// inside the turn. A block with no call id gets a positional id and no pair.
+    /// One `tool_use` block of record `r`, paired with the `ToolResult` that carries
+    /// its call id after that record. A block with no call id gets a positional id
+    /// and no pair.
     fn tool(
         &self,
         turn: &Turn,
-        a: usize,
+        r: usize,
         index: usize,
         block: &Value,
         agent: &str,
@@ -295,7 +301,7 @@ impl<'a> Turns<'a> {
         let call = block.get("id").and_then(Value::as_str).filter(|s| !s.is_empty());
         let name = block.get("name").and_then(Value::as_str).map(clip).filter(|s| !s.is_empty());
         let result = call.and_then(|call| {
-            (a + 1..=turn.last).find(|&j| {
+            (r + 1..=turn.last).find(|&j| {
                 records[j].kind == "ToolResult"
                     && payload_str(&records[j], "tool_use_id") == Some(call)
             })
@@ -327,14 +333,14 @@ impl<'a> Turns<'a> {
         Span {
             id: match call {
                 Some(call) => clip(call),
-                None => format!("tool-{}-{index}", record_id(&records[a])),
+                None => format!("tool-{}-{index}", record_id(&records[r])),
             },
             name: match &name {
                 Some(name) => format!("execute_tool {name}"),
                 None => "execute_tool".to_string(),
             },
             kind: "internal",
-            start: records[a].ts_ms,
+            start: records[r].ts_ms,
             end,
             status,
             attributes: Value::Object(attributes),
@@ -399,18 +405,44 @@ fn close_run(records: &[TraceRecord], from: usize, last: usize, close: Close) ->
         (Some(_), Some(_)) => (from, true),
     };
     let range = &records[first..=last];
-    let assistants: Vec<&TraceRecord> =
-        range.iter().filter(|r| r.kind == "AssistantMessage").collect();
     Some(Turn {
         id: record_id(&records[first]),
         first,
         last,
         close,
         partial,
-        steps: assistants.len(),
-        tools: assistants.iter().copied().map(tool_calls).sum::<usize>(),
+        steps: model_calls(records, first, last).len(),
+        tools: range
+            .iter()
+            .filter(|r| r.kind == "AssistantMessage")
+            .map(tool_calls)
+            .sum::<usize>(),
         failed: range.iter().filter(|r| r.kind == "ToolResult" && is_error(r)).count(),
     })
+}
+
+/// The model calls of records `first..=last`, each as the record indexes it holds in
+/// order. Records that share a `message_id` are one call, listed at its first
+/// record; a record with no `message_id` is a call of its own.
+fn model_calls(records: &[TraceRecord], first: usize, last: usize) -> Vec<Vec<usize>> {
+    let mut calls: Vec<Vec<usize>> = Vec::new();
+    let mut by_id: HashMap<&str, usize> = HashMap::new();
+    for (i, record) in records.iter().enumerate().take(last + 1).skip(first) {
+        if record.kind != "AssistantMessage" {
+            continue;
+        }
+        match payload_str(record, "message_id").filter(|id| !id.is_empty()) {
+            Some(id) => match by_id.get(id) {
+                Some(&k) => calls[k].push(i),
+                None => {
+                    by_id.insert(id, calls.len());
+                    calls.push(vec![i]);
+                }
+            },
+            None => calls.push(vec![i]),
+        }
+    }
+    calls
 }
 
 fn is_opener(record: &TraceRecord) -> bool {
@@ -447,10 +479,10 @@ fn block_type(block: &Value) -> &str {
     block.get("type").and_then(Value::as_str).unwrap_or("")
 }
 
-/// The distinct block types of a message, in the order it emitted them.
-fn block_types(message: &TraceRecord) -> Vec<String> {
+/// The distinct block types of the given messages, in the order they were emitted.
+fn block_types<'a>(messages: impl Iterator<Item = &'a TraceRecord>) -> Vec<String> {
     let mut seen: Vec<String> = Vec::new();
-    for block in content(message) {
+    for block in messages.flat_map(content) {
         let kind = clip(block_type(block));
         if !kind.is_empty() && !seen.contains(&kind) {
             seen.push(kind);
@@ -1045,5 +1077,47 @@ mod tests {
         let turns = Turns::new(&w);
         let (_, omitted) = turns.tree(0, "eidolon", "Aoide-x");
         assert_eq!(omitted, 0);
+    }
+
+    // One model response, three AssistantMessage records sharing message_id
+    // "m1". The first tool's result lands between the first and second record,
+    // as a Claude transcript writes it.
+    const GA0: &str = r#"{"id":0,"parent":null,"ts_ms":100,"kind":{"UserMessage":{"role":"user","content":[{"type":"text","text":"go"}]}}}"#;
+    const GA1: &str = r#"{"id":1,"parent":0,"ts_ms":200,"kind":{"AssistantMessage":{"role":"assistant","message_id":"m1","content":[{"type":"tool_use","id":"g1","name":"read","input":"{}"}]}}}"#;
+    const GA2: &str = r#"{"id":2,"parent":1,"ts_ms":230,"kind":{"ToolResult":{"tool_use_id":"g1","content":"one","is_error":false}}}"#;
+    const GA3: &str = r#"{"id":3,"parent":2,"ts_ms":240,"kind":{"AssistantMessage":{"role":"assistant","message_id":"m1","content":[{"type":"tool_use","id":"g2","name":"grep","input":"{}"}]}}}"#;
+    const GA4: &str = r#"{"id":4,"parent":3,"ts_ms":260,"kind":{"ToolResult":{"tool_use_id":"g2","content":"two","is_error":false}}}"#;
+    const GA5: &str = r#"{"id":5,"parent":4,"ts_ms":270,"kind":{"AssistantMessage":{"role":"assistant","message_id":"m1","content":[{"type":"text","text":"done"}]}}}"#;
+    const GA6: &str = r#"{"id":6,"parent":5,"ts_ms":280,"kind":{"TurnSettled":{"stop_reason":"end_turn","usage":{"input_tokens":3,"output_tokens":4}}}}"#;
+
+    #[test]
+    fn records_sharing_a_message_id_are_one_model_call_and_each_tool_starts_at_its_own_record() {
+        let w = window(&[GA0, GA1, GA2, GA3, GA4, GA5, GA6]);
+        let turns = Turns::new(&w);
+        let (listed, _) = turns.listing();
+        assert_eq!(listed[0]["steps"], 1, "three records, one model call: {listed:?}");
+        assert_eq!(listed[0]["tools"], 2, "{listed:?}");
+        let (root, _) = turns.tree(0, "eidolon", "Aoide-x");
+        assert_eq!(kids(&root), 1, "one step for the call: {root}");
+        let step = &root["children"][0];
+        assert_eq!(step["id"], "step-1", "the step is named by the call's first record");
+        assert_eq!(step["start"], 100, "the chat starts at the input before the call's first record");
+        assert_eq!(step["end"], 270, "the step ends at the latest of its children");
+        assert_eq!(kids(step), 3, "one chat and one span per tool: {step}");
+        let chat = &step["children"][0];
+        assert_eq!(chat["id"], "chat-1");
+        assert_eq!(chat["end"], 270, "the chat ends at the call's LAST record");
+        assert_eq!(
+            chat["attributes"]["aoide.blocks"], "tool_use,text",
+            "the call's block types in order, without repeats"
+        );
+        let first = &step["children"][1];
+        assert_eq!(first["id"], "g1");
+        assert_eq!(first["start"], 200, "the first tool starts at its record's time");
+        assert_eq!(first["end"], 230, "and ends at its own result");
+        let second = &step["children"][2];
+        assert_eq!(second["id"], "g2");
+        assert_eq!(second["start"], 240, "the second tool starts at its own record, after the first result");
+        assert_eq!(second["end"], 260, "and ends at its own result");
     }
 }

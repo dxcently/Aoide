@@ -876,6 +876,12 @@ in the message.
   and the conversation id arrive from `session_trace` as data. A second producer
   reaches the same spans by translating its own log into the same record kinds,
   so do not add a harness check or a second parser there.
+- **A model call is the run of records that share a `message_id`.** `Turns`
+  groups `AssistantMessage` records by that payload field; a record with none
+  is a call of its own. A call's chat starts at the input before its FIRST
+  record and ends at its LAST, and its tools are every `tool_use` block of the
+  group. The rule reads a field and names no harness, so an Eidolon window
+  whose records carry no `message_id` keeps one step per record.
 - **Spans carry no content, ever.** A span holds names, ids, times, status and
   counts. Message text, thinking, tool arguments and results, an
   `ExternalMessage`'s text and an `AskUser`'s prompt and answer never reach a
