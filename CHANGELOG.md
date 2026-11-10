@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### cadenza's project-tab rails focus on a click
+
+- A click on an agent or a terminal in the rails of cadenza's project tabs focuses its window. The board's click handler was named `focus`, the name of Qt's final `Item.focus` property, so Qt 6.11 dropped the handler and the click did nothing.
+
 ### Strillix keeps the terminal list
 
 - The desktop's window listener writes every terminal window the compositor shows to `$STRILLIX_ROOT/stage/terminals.json` when the list changes and on each reconnect to the compositor, whether or not aoided runs. A terminal is a shown window of a terminal class: kitty, foot, alacritty, wezterm, ghostty and the rest. The file names no session: a reader finds the sessions in a terminal in `sessions.json`, by `windowAddress`.

@@ -712,3 +712,7 @@ reads a fixture path.
   window no session runs in, so such a window is a bare, idle `shell` card
   with no petname, its project the one its cwd falls under, and a click
   focuses it by address.
+- 2026-11-10 — a click in a project tab's agents or tty rail focuses its
+  window. The board's handler was `focus(row)`, and `focus` is Item's final
+  property, so Qt 6.11 dropped the function and every rail click threw. It
+  is `focusRow(row)` now.

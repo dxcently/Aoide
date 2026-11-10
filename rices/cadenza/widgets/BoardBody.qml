@@ -597,7 +597,8 @@ Item {
     onTabsChanged: if (board.tabs.indexOf(board.tab) < 0 && board.projects.length > 0) board.tab = "overview"
 
     // ══ ACTIONS (the only doors: the bridge) ══════════════════════════════
-    function focus(row) {
+    // not `focus`: a function of that name loses to Item's final `focus` property
+    function focusRow(row) {
         if (!row || !row.s || !board.bridge) return
         var s = row.s
         var id = (board.kindOf(s) === "subagent" && s.parentSessionId) ? s.parentSessionId : s.sessionId

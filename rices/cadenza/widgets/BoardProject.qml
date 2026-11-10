@@ -229,7 +229,7 @@ Item {
                 MouseArea {
                     anchors.fill: parent
                     cursorShape: Qt.PointingHandCursor
-                    onClicked: root.board.focus(ra.modelData)
+                    onClicked: root.board.focusRow(ra.modelData)
                 }
             }
         }
@@ -264,7 +264,7 @@ Item {
                 MouseArea {
                     anchors.fill: parent
                     cursorShape: Qt.PointingHandCursor
-                    onClicked: root.board.focus(rt.modelData)
+                    onClicked: root.board.focusRow(rt.modelData)
                 }
             }
         }
