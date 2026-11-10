@@ -1,15 +1,15 @@
-//! The untracked-terminal roster from the desktop side: each terminal-class client becomes a
-//! `TermWindow` (its cwd read from `/proc`), and the roster goes to core through the door. Core's
-//! reconciler writes the `win:*` records. A roster goes out when its content changes, or when the
-//! sessions that claim its windows change ([`RosterGate`]).
+//! The terminal list: every terminal window the compositor shows, written whole to
+//! `stage/terminals.json` under the rice runtime root whenever it changes ([`TerminalList`]). Core
+//! is not told: a terminal is a session only once something tracks it.
 
-use super::door::{self, Latch};
-use aoide_conduct::graph::{load_stage, normalize_addr, proc_cwd, sessions_path, SessionsFile, TermWindow};
-use serde_json::Value;
+use super::door::Latch;
+use aoide_conduct::graph::{proc_cwd, TermWindow};
+use aoide_storage::stage::write_stage;
+use serde_json::{json, Value};
 
 /// Extract a [`TermWindow`] from one `hyprctl clients -j` client object, reading
 /// its owning process's cwd from `/proc/<pid>/cwd`. `None` for a client with no
-/// usable `address`. The one I/O seam over the pure [`reconcile_untracked_terminals`].
+/// usable `address`. The one client read the terminal list and the sweep share.
 pub(crate) fn term_window_from_client(c: &Value) -> Option<TermWindow> {
     let address = c.get("address").and_then(Value::as_str)?.trim().to_string();
     if address.is_empty() {
@@ -31,8 +31,8 @@ pub(crate) fn term_window_from_client(c: &Value) -> Option<TermWindow> {
         .and_then(Value::as_i64);
     // Checked, not `as i32`: hyprctl's JSON pid is an i64, and a value outside
     // i32's range would otherwise silently wrap into an arbitrary in-range
-    // pid before it's used both for `/proc/<pid>/cwd` below and, later, a
-    // widening `as u32` in `reconcile_untracked_terminals`. `try_from` simply
+    // pid before it's used both for `/proc/<pid>/cwd` below and, later, as the
+    // window's owner pid in the sweep. `try_from` simply
     // drops an out-of-range value (`None`) rather than wrapping it into a
     // bogus one.
     let pid = c
@@ -55,83 +55,120 @@ pub(crate) fn term_window_from_client(c: &Value) -> Option<TermWindow> {
     })
 }
 
-/// What the roster verb would be told this tick: the terminal windows the compositor shows, and the
-/// window addresses the tracked sessions already hold. Core keeps a terminal's record while no
-/// session claims its window, so a change in either makes a publish owed. A `win:*` record is core's
-/// own roster entry, not a claim, so publishing it changes nothing here.
-#[derive(Clone, PartialEq)]
-pub(crate) struct Roster {
-    windows: Vec<TermWindow>,
-    claims: Vec<String>,
+/// The window classes the terminal list counts, compared trimmed and lowercased.
+const TERMINAL_CLASSES: &[&str] = &[
+    "kitty",
+    "foot",
+    "footclient",
+    "alacritty",
+    "wezterm",
+    "org.wezfurlong.wezterm",
+    "ghostty",
+    "com.mitchellh.ghostty",
+    "xterm",
+    "uxterm",
+    "konsole",
+    "urxvt",
+    "rxvt",
+    "termite",
+    "tilix",
+    "contour",
+    "rio",
+    "st",
+    "kgx",
+    "org.gnome.console",
+    "blackbox",
+    "terminator",
+    "sakura",
+    "wave",
+    "xfce4-terminal",
+    "gnome-terminal",
+    "qterminal",
+    "lxterminal",
+    "deepin-terminal",
+];
+
+/// Whether the list counts a window: a shown one, of a terminal class.
+fn is_terminal(w: &TermWindow) -> bool {
+    w.mapped && TERMINAL_CLASSES.contains(&w.class.trim().to_ascii_lowercase().as_str())
 }
 
-impl Roster {
-    /// The roster this tick would publish, from the live clients and the stage's current claims.
-    pub(crate) fn of(clients: &[Value]) -> Self {
-        let windows: Vec<TermWindow> = clients.iter().filter_map(term_window_from_client).collect();
-        let mut claims: Vec<String> = load_stage::<SessionsFile>(&sessions_path())
-            .map(|file| {
-                file.sessions
-                    .iter()
-                    .filter(|s| !s.session_id.starts_with("win:") && !s.window_address.is_empty())
-                    .map(|s| normalize_addr(&s.window_address))
-                    .collect()
+/// The list this tick: each terminal window, in the clients' order.
+fn terminal_list(clients: &[Value]) -> Value {
+    let terminals: Vec<Value> = clients
+        .iter()
+        .filter_map(term_window_from_client)
+        .filter(is_terminal)
+        .map(|w| {
+            json!({
+                "address": w.address,
+                "class": w.class,
+                "title": w.title,
+                "workspace": w.workspace,
+                "pid": w.pid,
+                "cwd": w.cwd,
             })
-            .unwrap_or_default();
-        claims.sort();
-        claims.dedup();
-        Self { windows, claims }
+        })
+        .collect();
+    json!({ "schemaVersion": "0", "terminals": terminals })
+}
+
+/// Writes the terminal list to `stage/terminals.json` under the rice runtime root when it differs
+/// from the list last written. A write that fails is logged once and tried again on the next
+/// event or tick. [`TerminalList::forget`], called on each reconnect, makes the next settle write
+/// the list again.
+#[derive(Default)]
+pub(crate) struct TerminalList {
+    written: Option<Value>,
+}
+
+impl TerminalList {
+    pub(crate) fn forget(&mut self) {
+        self.written = None;
+    }
+
+    pub(crate) fn settle(&mut self, clients: &[Value], latch: &mut Latch) {
+        let list = terminal_list(clients);
+        if self.written.as_ref() == Some(&list) {
+            return;
+        }
+        match write_stage(&strillix_rice::paths::stage_dir().join("terminals.json"), &list) {
+            Ok(()) => {
+                latch.recovered("terminals-write");
+                self.written = Some(list);
+            }
+            Err(e) => latch.problem(
+                "terminals-write",
+                &format!("[strillix/shellbridge] the terminal list was not written: {e}"),
+            ),
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::hypr::testutil::{session, unique_stage, EnvVars};
-    use aoide_conduct::graph::{write_stage, SessionsFile};
-    use serde_json::json;
 
-    /// A `win:*` record is core's roster entry, not a claim. Its window is not held by a session, so
-    /// the roster names no claims, and publishing a terminal does not make the next roster owed.
+    /// The list holds each shown window of a terminal class, in the clients' order, with `null` for
+    /// a workspace or pid the compositor gives none of and `""` for a cwd it cannot read. A hidden
+    /// terminal and a window of another class are left out.
     #[test]
-    fn a_win_record_holds_no_claim() {
-        let _guard = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _env = EnvVars::save(&["AOIDE_STAGE_DIR"]);
-        let stage = unique_stage("roster-win-claim");
-        std::env::set_var("AOIDE_STAGE_DIR", &stage);
-        let mut win = session("win:aa", "", "running", "", None);
-        win.window_address = "0xAA".into();
-        let file = SessionsFile { schema_version: "0".into(), sessions: vec![win] };
-        write_stage(&aoide_conduct::graph::sessions_path(), &file).unwrap();
-        let clients = [json!({ "address": "0xAA", "class": "kitty" })];
-        assert!(Roster::of(&clients).claims.is_empty());
-        let _ = std::fs::remove_dir_all(&stage);
-    }
-}
-
-/// Publishes the roster when it differs from the one core last answered. A roster that core
-/// accepts, or refuses while aoided listens, or that skips for want of a binary, is recorded as
-/// sent: it goes out again when the roster or its claims change, or on a reconnect. A roster that
-/// was not sent (aoided not listening, including a no given once aoided stopped listening, or an
-/// exec that failed) stays owed and goes out on a later tick.
-#[derive(Default)]
-pub(crate) struct RosterGate {
-    sent: Option<Roster>,
-}
-
-impl RosterGate {
-    pub(crate) fn forget(&mut self) {
-        self.sent = None;
-    }
-
-    pub(crate) fn settle(&mut self, roster: Roster, latch: &mut Latch) {
-        if self.sent.as_ref() == Some(&roster) {
-            return;
-        }
-        let payload = serde_json::to_string(&roster.windows).unwrap_or_else(|_| "[]".to_string());
-        let reply = door::call(&["session", "window", "roster"], Some(&payload));
-        self.sent = latch
-            .reply("roster".to_string(), "publishing the terminal roster", reply)
-            .then_some(roster);
+    fn the_list_holds_the_shown_terminal_windows() {
+        let clients = [
+            json!({ "address": "0xAA", "class": "kitty", "title": "t", "workspace": { "id": 2 } }),
+            json!({ "address": "0xBB", "class": "Foot" }),
+            json!({ "address": "0xCC", "class": "firefox" }),
+            json!({ "address": "0xDD", "class": "kitty", "mapped": false }),
+        ];
+        let list = terminal_list(&clients);
+        assert_eq!(list["schemaVersion"], "0");
+        let rows = list["terminals"].as_array().unwrap();
+        let addresses: Vec<&str> = rows.iter().map(|r| r["address"].as_str().unwrap()).collect();
+        assert_eq!(addresses, ["0xAA", "0xBB"]);
+        assert_eq!(rows[0]["workspace"], 2);
+        assert_eq!(
+            rows[1],
+            json!({ "address": "0xBB", "class": "Foot", "title": "", "workspace": null, "pid": null, "cwd": "" })
+        );
     }
 }

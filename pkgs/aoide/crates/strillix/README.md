@@ -594,7 +594,7 @@ window and runs no `hyprctl`: it stores what this module reports.
 | `focus.rs` | `focus_window`, `focus_session`, `focus_workspace`, `focused_workspace`, `NO_COMPOSITOR` |
 | `listener.rs` | the event socket (`socket2`), `run_hypr_window_listener` (spawned by the `shellbridge` command), and `Owed`: the calls the desktop still owes core |
 | `sweep.rs` | `resolve_windows`: turns the clients into `TermWindow`s and asks core's `window_bindings` which pending session runs in which window and which bound session moved workspace; each answer is `aoide session window attach` |
-| `terminals.rs` | a terminal-class client as a `TermWindow` (cwd from `/proc`), and `RosterGate`: the roster published through `aoide session window roster` when it changes |
+| `terminals.rs` | a terminal-class client as a `TermWindow` (cwd from `/proc`), and `TerminalList`: every shown terminal window, written to `$STRILLIX_ROOT/stage/terminals.json` when the list changes |
 | `watch.rs` | `follow_window_events`, `WatchEvent`, `WatchEnd`: the event socket followed for `window watch`; each connect is `aoide_protocol::local_socket::connect_bounded`, `Lost` is emitted once per ended connection, and the backoff waits only before the next connect |
 
 ```
@@ -604,22 +604,22 @@ request socket ──► client.rs ─┬─► focus.rs                      fo
 event socket   ──► listener.rs ─┬─ closewindow ─────────────────► door ─► session window closed
                                 ├─ openwindow, reconnect ─────► door ─► session codex sync
                                 ├─ open, move, retitle, reconnect, tick ─► sweep.rs ─► door ─► session window attach
-                                └─ any event, any tick ───────► terminals.rs ─► door ─► session window roster
+                                └─ any event, any tick ───────► terminals.rs ─► $STRILLIX_ROOT/stage/terminals.json
 event socket   ──► watch.rs ──► commands/window.rs (window watch)
 ```
 
 A closed window is reported once per event. The codex sync runs on an appearance
 (`openwindow`) and on each reconnect; a move or a retitle owes it nothing. The sweep
 runs on each window event but a close, on each tick and on each reconnect, and calls
-core for a binding that changed and that core has not refused. The roster goes out on
-a reconnect and whenever its windows or the sessions' claims change. A yes from core
+core for a binding that changed and that core has not refused. The terminal list is
+written on a reconnect and whenever it changes, and core is never told. A yes from core
 is final, and so is a no given while aoided listens: that call is not sent again for
 the same fact. A no given while aoided's socket does not answer leaves the call owed,
 since the verb may already have reached aoided. A call that did not run stays owed and
 goes out on a later tick. An owed call made while aoided's socket does not answer is
 not sent: it waits, logged once, and goes out on the first tick after aoided answers.
 With no aoide binary each call is skipped, with one log line and no error. The sweep
-and the roster read `sessions.json` and write nothing in it.
+reads `sessions.json` and writes nothing in it.
 
 ## What it consumes
 

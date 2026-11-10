@@ -1,7 +1,8 @@
 //! The desktop's Hyprland adapter. The compositor is read here and nowhere else. The desktop reports
 //! what it sees to core through the door (`aoide session window ...`, `aoide session codex sync`),
 //! one gated and audited call per change, and core reads no window itself. The bridge and the
-//! shellbridge command use the names re-exported below.
+//! shellbridge command use the names re-exported below. The terminal list is the desktop's own:
+//! `terminals.rs` writes it to the rice stage, and core is not told.
 
 mod client;
 mod door;

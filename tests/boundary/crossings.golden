@@ -160,8 +160,8 @@ name strillix pkgs/aoide/crates/strillix/src/hypr/door.rs 11
 name strillix pkgs/aoide/crates/strillix/src/hypr/focus.rs 5
 name strillix pkgs/aoide/crates/strillix/src/hypr/listener.rs 2
 name strillix pkgs/aoide/crates/strillix/src/hypr/sweep.rs 2
-name strillix pkgs/aoide/crates/strillix/src/hypr/terminals.rs 6
-name strillix pkgs/aoide/crates/strillix/src/hypr/tests.rs 102
+name strillix pkgs/aoide/crates/strillix/src/hypr/terminals.rs 2
+name strillix pkgs/aoide/crates/strillix/src/hypr/tests.rs 97
 name strillix pkgs/aoide/crates/strillix/src/hypr/testutil.rs 12
 name strillix pkgs/aoide/crates/strillix/src/hypr/watch.rs 1
 name strillix pkgs/aoide/crates/strillix/src/lib.rs 2

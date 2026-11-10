@@ -19,10 +19,8 @@
 # Session-jump flow (Terminal Commander, concepts/Terminal-Commander.md):
 #   widget click → shellbridge unix socket → hyprctl dispatch focuswindow address:…
 #
-# Session registration: when the aoide spawn wrapper starts a claude-CLI
-# session it registers { sessionId, windowAddress } with shellbridge via the
-# socket. The roster is written atomically to state/stage/sessions.json;
-# the Quickshell bar widget reads it for the Terminal Commander roster.
+# Terminal list: the window listener writes every terminal window to
+# $STRILLIX_ROOT/stage/terminals.json (CONTRACTS.md §4).
 #
 # Hook states (Notification / Stop / Pre-PostToolUse) are posted through
 # shellbridge, making the bar's connection-state widget a live reflection of
@@ -218,8 +216,9 @@ lib.mkIf config.strillix.enable {
   # constants, not build-time configuration:
   #
   #   $STRILLIX_ROOT/stage/theme.json     — resolved note colours (written by the native theme engine)
-  #   state/stage/sessions.json — agent session roster (written by shellbridge)
-  #   state/stage/hooks.json    — live Claude Code hook states (written by shellbridge)
+  #   $STRILLIX_ROOT/stage/terminals.json — the terminal windows (written by the window listener)
+  #   state/stage/sessions.json — agent session roster (core's; Strillix never writes it)
+  #   state/stage/hooks.json    — live Claude Code hook states (core's; Strillix never writes it)
   #
   # sessions.json schema (v0):
   # {

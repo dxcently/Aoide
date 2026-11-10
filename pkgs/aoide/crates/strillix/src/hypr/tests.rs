@@ -1,5 +1,5 @@
 //! The desktop's Hyprland tests: the request socket, the focus verbs, the event listener, the
-//! terminal roster, and the session-window sweep, each against a fake request socket or a
+//! terminal list, and the session-window sweep, each against a fake request socket or a
 //! fake `hyprctl` shim, never a live compositor.
 
 use super::client::*;
@@ -576,7 +576,7 @@ fn no_compositor() -> EnvVars {
 // -- The owed calls: each is held to what it is owed --
 //
 // A closed window is reported once per event, the codex sync runs on an appearance or a
-// reconnect, the roster goes out when its content or its claims change, a call core answers is
+// reconnect, the terminal list is written when it changes and never sent to core, a call core answers is
 // settled, a call that did not run is tried on the next tick, and with no aoide binary every call is
 // skipped with one log line.
 
@@ -658,72 +658,54 @@ fn the_codex_sync_is_owed_on_an_appearance_and_a_reconnect_and_never_on_a_tick()
     assert_eq!(core_calls(&core_root), ["session codex sync --json"; 2]);
 }
 
-/// The roster goes out once when it first exists, then when the terminal windows or the sessions'
-/// claims change, and again on each reconnect.
+/// The terminal list is written to the rice stage when it first exists, again only when it changes,
+/// and again on each reconnect. Core is never told.
 #[cfg(unix)]
 #[test]
-fn the_roster_goes_out_on_a_change_and_on_a_reconnect_and_never_on_an_unchanged_tick() {
+fn the_terminal_list_is_written_on_a_change_and_on_a_reconnect_and_never_sent_to_core() {
     let _guard = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-    let _env = EnvVars::save(&["AOIDE_STAGE_DIR", "AOIDE_TEST_CLIENT_CLASS"]);
-    let stage = unique_stage("owed-roster");
-    std::env::set_var("AOIDE_STAGE_DIR", &stage);
-    let (_core, core_root) = stub_core_door("owed-roster");
-    let (_hypr, _hypr_root) = fake_hypr_socket("owed-roster");
+    let _env = EnvVars::save(&["AOIDE_TEST_CLIENT_CLASS"]);
+    let (_core, core_root) = stub_core_door("owed-terminals");
+    let (_hypr, hypr_root) = fake_hypr_socket("owed-terminals");
     std::env::set_var("AOIDE_TEST_CLIENT_CLASS", "kitty");
+    let file = hypr_root.join("strillix").join("stage").join("terminals.json");
+    let read = || -> serde_json::Value { serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap() };
     let mut owed = Owed::default();
 
-    owed.settle_roster();
-    owed.settle_roster();
-    assert_eq!(core_calls(&core_root).len(), 1, "the first roster goes out, an unchanged one does not");
-
-    write_stage(
-        &sessions_path(),
-        &SessionsFile {
-            schema_version: "0".into(),
-            sessions: vec![SessionRecord { window_address: "0xAA".into(), ..session("claimant", "/w", "working", "t", None) }],
-        },
-    )
-    .unwrap();
-    owed.settle_roster();
-    assert_eq!(core_calls(&core_root).len(), 2, "a session claiming the window changes the roster");
-    owed.settle_roster();
-    assert_eq!(core_calls(&core_root).len(), 2);
+    owed.settle_terminals();
+    assert_eq!(read()["terminals"][0]["address"], "0xAA");
+    std::fs::remove_file(&file).unwrap();
+    owed.settle_terminals();
+    assert!(!file.exists(), "an unchanged list is not written again");
 
     std::env::set_var("AOIDE_TEST_CLIENT_CLASS", "firefox");
-    owed.settle_roster();
-    assert_eq!(core_calls(&core_root).len(), 3, "a window that is no longer a terminal changes it");
+    owed.settle_terminals();
+    assert_eq!(read()["terminals"], json!([]), "a window that is no longer a terminal leaves the list");
 
+    std::fs::remove_file(&file).unwrap();
     owed.reconnected();
-    owed.settle_roster();
-    assert_eq!(core_calls(&core_root).len(), 4, "a reconnect sends the roster again");
-    let _ = std::fs::remove_dir_all(&stage);
+    owed.settle_terminals();
+    assert!(file.exists(), "a reconnect writes the list again");
+    assert!(core_calls(&core_root).is_empty(), "the list never goes to core");
 }
 
-/// A refused roster is final: idle ticks send nothing more, and a changed roster is sent once.
+/// A terminal list that cannot be written is logged once, however often it is tried, and is written
+/// on the first try after the rice stage can take it.
 #[cfg(unix)]
 #[test]
-fn a_refused_roster_is_not_sent_again_until_the_roster_changes() {
+fn a_terminal_list_that_cannot_be_written_is_logged_once_and_written_once_it_can_be() {
     let _guard = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-    let _env = EnvVars::save(&["AOIDE_STAGE_DIR", "AOIDE_TEST_CLIENT_CLASS"]);
-    let stage = unique_stage("owed-roster-refused");
-    std::env::set_var("AOIDE_STAGE_DIR", &stage);
-    let (_core, core_root) = stub_core_door("owed-roster-refused");
-    let (_hypr, _hypr_root) = fake_hypr_socket("owed-roster-refused");
-    std::env::set_var("AOIDE_TEST_CLIENT_CLASS", "kitty");
-    std::fs::write(core_root.join("refuse"), "").unwrap();
+    let (_hypr, hypr_root) = fake_hypr_socket("owed-terminals-unwritable");
+    let root = hypr_root.join("strillix");
+    std::fs::write(&root, "").unwrap();
     let mut owed = Owed::default();
-    owed.settle_roster();
-    assert_eq!(core_calls(&core_root).len(), 1, "a refused roster is sent once");
-    for _ in 0..10 {
-        owed.tick();
-    }
-    assert_eq!(core_calls(&core_root).len(), 1, "idle ticks send nothing more");
-    std::env::set_var("AOIDE_TEST_CLIENT_CLASS", "firefox");
-    owed.tick();
-    assert_eq!(core_calls(&core_root).len(), 2, "a changed roster is sent once");
-    owed.tick();
-    assert_eq!(core_calls(&core_root).len(), 2, "and not again while it stays refused");
-    let _ = std::fs::remove_dir_all(&stage);
+    owed.settle_terminals();
+    owed.settle_terminals();
+    owed.settle_terminals();
+    assert_eq!(owed.logged(), 1, "the failed write is logged once");
+    std::fs::remove_file(&root).unwrap();
+    owed.settle_terminals();
+    assert!(root.join("stage").join("terminals.json").exists(), "the list is written once it can be");
 }
 
 /// Without an aoide binary every owed call is skipped: none errors, and each is logged once however
@@ -743,7 +725,7 @@ fn with_no_aoide_binary_each_owed_call_is_skipped_and_logged_once() {
     owed.settle_calls();
     owed.tick();
     owed.tick();
-    assert_eq!(owed.logged(), 3, "the codex sync, the closed window and the roster, each once");
+    assert_eq!(owed.logged(), 2, "the codex sync and the closed window, each once");
     let _ = std::fs::remove_dir_all(&stage);
 }
 
@@ -959,7 +941,7 @@ fn a_stale_daemon_socket_counts_as_absent() {
     let _ = std::fs::remove_dir_all(&stage);
 }
 
-/// An appearance owes the codex sync: a move and a retitle reconcile the sweep and the roster.
+/// An appearance owes the codex sync: a move and a retitle reconcile the sweep and the terminal list.
 #[cfg(unix)]
 #[test]
 fn a_retitle_owes_no_codex_sync_and_an_appearance_does() {

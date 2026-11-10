@@ -5467,6 +5467,44 @@ Base dirs are `$HOME/.icons`, then each data dir's `icons/`; a theme's index is
 the `index.theme` of the first base dir that has one. `icon-theme.cache` is
 never read.
 
+### `/stage/terminals.json` — **v0**
+
+The terminal windows the compositor shows: the desktop's own terminal list,
+under the rice runtime root, so a reader sees every terminal whether or not
+anything tracks it, and whether or not aoided runs. Core is not told: a
+terminal becomes a session only when something tracks it.
+
+**The single writer is the window listener of `strillix shellbridge --run`**
+(`pkgs/aoide/crates/strillix/src/hypr/terminals.rs`). It writes the whole file
+(write-temp-then-rename) when the list changes, checked on each window event
+and each 5 s tick, and again on each reconnect to the compositor. With no
+compositor it writes nothing, so the file can still name windows that closed
+until the next write.
+
+A row is a window the compositor shows (`mapped`) whose class is a terminal's
+(`TERMINAL_CLASSES` in `terminals.rs`, compared lowercased), in the
+compositor's client order. `workspace` and `pid` are `null` when the
+compositor gives none; `cwd` is read from `/proc/<pid>/cwd`, `""` when it
+cannot be. The file names no session: a reader finds the sessions in a
+terminal in `state/stage/sessions.json`, as the records whose `windowAddress`
+is the row's `address`, compared without case or a `0x` prefix.
+
+```json
+{
+  "schemaVersion": "0",
+  "terminals": [
+    {
+      "address": "0x55aabbccdd00",
+      "class": "kitty",
+      "title": "~/src",
+      "workspace": 2,
+      "pid": 4242,
+      "cwd": "/home/user/src"
+    }
+  ]
+}
+```
+
 ### `state/mail/` — **v0** (messaging plan P-M1, 2026-09-07)
 
 The addressed, signed, append-only mailbase — the durable per-host message

@@ -1,12 +1,12 @@
 //! The Hyprland event listener: one `socket2` stream, the window events the desktop reports to core
-//! through the door, and the 5 s tick between them. What the listener owes core is [`Owed`]: a call
-//! core answers is settled unless aoided stops listening during it, and a call that did not run
-//! stays owed.
+//! through the door, the terminal list it writes to the rice stage, and the 5 s tick between them.
+//! What the listener owes is [`Owed`]: a call core answers is settled unless core stops listening
+//! during it, a call that did not run stays owed, and the terminal list is written when it changes.
 
 use super::client::hyprctl_clients;
 use super::door::{self, Latch};
 use super::sweep::resolve_windows;
-use super::terminals::{Roster, RosterGate};
+use super::terminals::TerminalList;
 #[cfg(unix)]
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
@@ -33,11 +33,11 @@ pub fn hypr_event_socket_path() -> Option<PathBuf> {
 /// other event line maps to `None` and is ignored.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HyprWindowEvent {
-    /// A window opened: the codex threads, the pending session windows and the roster are reconciled.
-    /// `address` is the raw event address (no `0x` prefix); the sweep resolves off the live `hyprctl
-    /// clients` list rather than trusting it, so it is advisory.
+    /// A window opened: the codex threads, the pending session windows and the terminal list are
+    /// reconciled. `address` is the raw event address (no `0x` prefix); the sweep resolves off the
+    /// live `hyprctl clients` list rather than trusting it, so it is advisory.
     Appeared { address: String },
-    /// A known window moved or was retitled: the pending session windows and the roster are
+    /// A known window moved or was retitled: the pending session windows and the terminal list are
     /// reconciled. Nothing new opened, so no codex sync is owed.
     Changed { address: String },
     /// A window closed: core is told its address (`session window closed`), which ends the sessions
@@ -95,40 +95,41 @@ pub(crate) fn is_read_timeout(e: &std::io::Error) -> bool {
     )
 }
 
-/// The calls the desktop still owes core. A closed window is reported once per event, a codex sync
-/// runs on each appearance and each reconnect, a sweep runs on each tick, each reconnect and each
-/// window event but a close, and the roster goes out when its content changes ([`RosterGate`]). A
-/// yes from core settles a call, and so does a no given while aoided listens; a no given while
-/// aoided stops listening leaves the call owed. A call that did not run stays owed and is tried
-/// again on a later tick; a call with aoided not listening waits, unsent, until it does.
+/// What the desktop still owes: core's calls, and the terminal list. A closed window is reported
+/// once per event, a codex sync runs on each appearance and each reconnect, a sweep runs on each
+/// tick, each reconnect and each window event but a close, and the terminal list is written to the
+/// rice stage when it changes and on each reconnect ([`TerminalList`]). A yes from core settles a
+/// call, and so does a no given while core listens; a no given once core stops listening leaves
+/// the call owed. A call that did not run stays owed and is tried again on a later tick; a call
+/// made while core is not listening waits, unsent, until it does.
 #[derive(Default)]
 pub(crate) struct Owed {
     closed: Vec<String>,
     codex: bool,
-    roster: RosterGate,
+    terminals: TerminalList,
     latch: Latch,
 }
 
 impl Owed {
-    /// One window event, and what it owes core now. An appearance owes the codex sync: a
-    /// retitle or a move reconciles the sweep and the roster, which do nothing unless they change.
+    /// One window event, and what it owes now. An appearance owes the codex sync: a retitle or a
+    /// move reconciles the sweep and the terminal list, which do nothing unless they change.
     pub(crate) fn event(&mut self, event: HyprWindowEvent) {
         match event {
             HyprWindowEvent::Appeared { .. } => {
                 self.codex = true;
                 self.settle_calls();
                 self.sweep();
-                self.settle_roster();
+                self.settle_terminals();
             }
             HyprWindowEvent::Changed { .. } => {
                 self.settle_calls();
                 self.sweep();
-                self.settle_roster();
+                self.settle_terminals();
             }
             HyprWindowEvent::Closed { address } => {
                 self.window_closed(address);
                 self.settle_calls();
-                self.settle_roster();
+                self.settle_terminals();
             }
         }
     }
@@ -141,10 +142,10 @@ impl Owed {
     }
 
     /// A (re)connect is the start of the listener and of every restart: owe core a codex sync, and
-    /// forget the sent roster so it goes out again.
+    /// forget the written terminal list so it is written again.
     pub(crate) fn reconnected(&mut self) {
         self.codex = true;
-        self.roster.forget();
+        self.terminals.forget();
     }
 
     /// Run the owed calls that need no compositor read: each closed window, and the codex sync when
@@ -170,10 +171,10 @@ impl Owed {
         resolve_windows(&mut self.latch);
     }
 
-    /// Publish the roster when it changed. Nothing when there is no compositor to read.
-    pub(crate) fn settle_roster(&mut self) {
+    /// Write the terminal list when it changed. Nothing when there is no compositor to read.
+    pub(crate) fn settle_terminals(&mut self) {
         if let Some(clients) = hyprctl_clients() {
-            self.roster.settle(Roster::of(&clients), &mut self.latch);
+            self.terminals.settle(&clients, &mut self.latch);
         }
     }
 
@@ -181,7 +182,7 @@ impl Owed {
     pub(crate) fn tick(&mut self) {
         self.settle_calls();
         self.sweep();
-        self.settle_roster();
+        self.settle_terminals();
     }
 
     #[cfg(test)]
@@ -194,8 +195,9 @@ impl Owed {
 /// service spawns this on a background thread so it can never block or kill the
 /// socket accept loop. It connects to the `socket2` event stream and reports each
 /// window event to core through the door: an appearing window owes a codex sync,
-/// a sweep and the roster; a moved or retitled window owes a sweep and the roster;
-/// a closed window owes its address; a pending bind and a changed roster go out on the same ticks.
+/// a sweep and the terminal list; a moved or retitled window owes a sweep and the
+/// terminal list; a closed window owes its address and the terminal list; a pending
+/// bind and a changed terminal list are settled on the same ticks.
 /// Degrades gracefully — no Hyprland signature logs once and
 /// returns (headless/non-Hypr aoide is unaffected); a failed connect or a dropped
 /// socket logs and retries after a short backoff. It does not panic. A ~5s read timeout
@@ -217,7 +219,7 @@ pub fn run_hypr_window_listener() {
                 owed.reconnected();
                 owed.settle_calls();
                 owed.sweep();
-                owed.settle_roster();
+                owed.settle_terminals();
                 // Coarse read timeout so a blocking read wakes every ~5s even when no window
                 // event fires. Best-effort: if it fails the listener still works, just event-driven.
                 let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(5)));

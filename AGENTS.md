@@ -97,19 +97,18 @@ ShellBridge.qml  (one table: cmd -> socket)
 - Strillix writes core state through core's door, `aoide <verb> --json`:
   `session window closed <address>` for each window that closes,
   `session window attach <id> <window>` for each binding core's
-  `window_bindings` hands the sweep, `session window roster` (JSON on stdin)
-  when the terminal roster changes and on each reconnect, where core places the
-  sessions those windows host and then publishes the rest as `win:*` records,
-  and `session codex sync` when a window appears and on each
-  reconnect. It asks `session show <id>` for a session's window when it focuses
-  one; that read runs whether or not aoided listens. Core checks and audits each
-  call. A yes from core settles a call, and so does a no given while aoided
-  listens. A call that was not sent waits: while aoided's socket does not answer
-  nothing is sent, and the call goes out once it does. A no given while aoided's
-  socket does not answer leaves the call owed, since the verb may already have
-  reached aoided. A call whose exec failed is tried again on a later tick. The
-  desktop reads core's stage file (`sessions.json`) directly for the window sweep
-  and the roster's claims.
+  `window_bindings` hands the sweep, and `session codex sync` when a window
+  appears and on each reconnect. It asks `session show <id>` for a session's
+  window when it focuses one; that read runs whether or not aoided listens. Core
+  checks and audits each call. A yes from core settles a call, and so does a no
+  given while aoided listens. A call that was not sent waits: while aoided's
+  socket does not answer nothing is sent, and the call goes out once it does. A
+  no given while aoided's socket does not answer leaves the call owed, since the
+  verb may already have reached aoided. A call whose exec failed is tried again
+  on a later tick. The desktop reads core's stage file (`sessions.json`) directly
+  for the window sweep.
+- The terminal list is Strillix's own: the window listener writes every terminal
+  window to `$STRILLIX_ROOT/stage/terminals.json`, and core is not told.
 - Logs are one per binary: `$AOIDE_ROOT/log` (default `~/.aoide/log`) for core,
   `$STRILLIX_ROOT/log` for Strillix.
 - Roots: `$AOIDE_ROOT` (core), `$STRILLIX_ROOT` (the rice runtime root, default

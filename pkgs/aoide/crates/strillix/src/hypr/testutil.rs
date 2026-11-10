@@ -80,8 +80,9 @@ pub(crate) fn session(
 }
 
 /// The fake Hyprland request socket behind [`super::client::hyprctl_clients`]: a
-/// listener at `<root>/hypr/test/.socket.sock`, with `XDG_RUNTIME_DIR=<root>` and
-/// `HYPRLAND_INSTANCE_SIGNATURE=test` set. It answers `j/clients` with the one
+/// listener at `<root>/hypr/test/.socket.sock`, with `XDG_RUNTIME_DIR=<root>`,
+/// `HYPRLAND_INSTANCE_SIGNATURE=test` and `STRILLIX_ROOT=<root>/strillix` set, so the
+/// terminal list a test writes lands in its own root. It answers `j/clients` with the one
 /// window [`fake_hyprctl`]'s shim would print, built from the same vars
 /// (`AOIDE_TEST_CLIENT_PID`, `AOIDE_TEST_CLIENT_CLASS`, `AOIDE_TEST_WS`) read per
 /// request, so a test that sets them mid-way sees the change. Any other request
@@ -155,9 +156,11 @@ pub(crate) fn fake_hypr_clients(
         "AOIDE_TEST_WS",
         "AOIDE_TEST_CLIENT_PID",
         "AOIDE_TEST_CLIENT_CLASS",
+        "STRILLIX_ROOT",
     ]);
     std::env::set_var("XDG_RUNTIME_DIR", &root);
     std::env::set_var("HYPRLAND_INSTANCE_SIGNATURE", "test");
+    std::env::set_var("STRILLIX_ROOT", root.join("strillix"));
     let stop = Arc::new(AtomicBool::new(false));
     let server = {
         let stop = Arc::clone(&stop);

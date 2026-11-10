@@ -98,7 +98,7 @@ impl Window {
     }
 }
 
-/// A client of `hyprctl clients -j` as a window, by the rules the roster's terminal reads keep
+/// A client of `hyprctl clients -j` as a window, by the rules of the terminal list's client read
 /// (`hypr::terminals`): no class filter, a client with no address is dropped, a pid must fit i32
 /// and be positive, and a client with no `mapped` key is shown.
 fn window_from_client(client: &Value) -> Option<Window> {

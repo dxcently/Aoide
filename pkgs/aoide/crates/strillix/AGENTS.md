@@ -470,12 +470,18 @@
   Core (`aoide-conduct`) reads no window, runs no `hyprctl`, and stamps no owner
   pid. The desktop reports what it sees through the core door, one verb per
   call (`hypr/door.rs`): `session window attach` (the sweep), `session window
-  closed`, `session window roster` and `session codex sync`. Outside its tests, no module under
+  closed` and `session codex sync`. Outside its tests, no module under
   `src/hypr/` calls a conduct graph writer in-process or writes
   `sessions.json`. Compositor reads live in `hypr/`; a new window fact core stores comes in as a gated core verb, called through `door::call`.
   `door::call` sends nothing while aoided's socket does not answer, so a down aoided
   costs no exec and no audit line. A retitle or a move owes core nothing but the
-  sweep and the roster; an appearance (`openwindow`) owes the codex sync.
+  sweep; an appearance (`openwindow`) owes the codex sync.
+- **The terminal list is the desktop's own, and core is not told.** `hypr/terminals.rs`
+  writes every shown window of a terminal class (its `TERMINAL_CLASSES`) to
+  `$STRILLIX_ROOT/stage/terminals.json` (CONTRACTS.md §4) when the list changes and on
+  each reconnect, whether or not aoided runs. The list names no session and reads
+  nothing of core's. It is the one file `src/hypr/` writes. A row
+  field added or changed is a CONTRACTS.md change in the same commit.
 - **`window list` keeps every client in hyprctl's order, with no class filter, and no compositor is a refusal, never `[]`.** `window_from_client` drops only a client with no address. A missing compositor (no signature, or a request socket that does not answer) is a `no-compositor` refusal. The reads go through `hypr/`: `window list` through `hyprctl_clients`, and `window watch` through `hypr/watch.rs`'s `follow_window_events`, which connects with `aoide_protocol::local_socket::connect_bounded`. `window.rs` holds `list` with its `Window` struct, field rules and cwd read, and `watch`'s line writer and outcome mapping; none of it uses an `aoide_conduct` type.
 - **`window list`'s message names no window title.** dispatch writes `outcome.message` to the audit log on every call and never the data, so the text lines carry address, class and workspace only. A title stays in the `--json` data.
 - **`window watch`'s stdout carries only event lines.** An event line is `connected`, `appeared`, `changed` or `closed` (the last three with a `0x`-prefixed `address`), or `lost`. The outcome never reaches stdout: the door sends it to stderr, as for any verb. `lost` is written once for each connection that ends, and never for a connect that failed. With `--json` every stdout line is one object with a `type` and no `status`. Each line is flushed as it is written.

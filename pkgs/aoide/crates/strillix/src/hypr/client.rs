@@ -15,7 +15,7 @@ use std::path::PathBuf;
 /// budget, or a reply that is not a JSON array. The connect, the request and the whole
 /// reply share that one budget, so a listener that never accepts, or a reply that
 /// trickles, cannot hold the caller past it. This is the single clients-reading seam
-/// every desktop consumer shares (the window sweep, the terminal roster and the tests),
+/// every desktop consumer shares (the window sweep, the terminal list and the tests),
 /// so they all degrade identically (never a panic, never a false result).
 pub fn hyprctl_clients() -> Option<Vec<Value>> {
     use std::io::{Read, Write};

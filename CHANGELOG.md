@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Strillix keeps the terminal list
+
+- The desktop's window listener writes every terminal window the compositor shows to `$STRILLIX_ROOT/stage/terminals.json` when the list changes and on each reconnect to the compositor, whether or not aoided runs. A terminal is a shown window of a terminal class: kitty, foot, alacritty, wezterm, ghostty and the rest. The file names no session: a reader finds the sessions in a terminal in `sessions.json`, by `windowAddress`.
+- The listener no longer sends the list to core with `aoide session window roster`, so core makes no `win:*` record for a new terminal. The `win:*` records already there go as their windows close.
+
 ### The RICE menu marks the staged rice only while it is on screen
 
 - barcarolle's, cadenza's and sonata's RICE menus mark a rice as staged now only while the stage shows it, not just while `stage/mode.json` names it. When the reload that brings a staged rice back after a login or a switch failed, the declared rice was on screen but the menu still marked the staged rice, and a click on a marked row only closes the menu, so the staged rice's own row could not even try the stage again. Now no rice is marked then, and a click on the staged rice's row tries the stage again; a stage that fails still fails. Nothing on screen says the reload failed.
