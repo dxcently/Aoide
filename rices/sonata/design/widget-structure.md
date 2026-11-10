@@ -414,7 +414,8 @@ is not.
 
 ## 10½. Live state sources beyond the stage files: the trace seam
 
-A widget's data comes from the bridge — stage files it watches (`sessions.json`),
+A widget's data comes from the bridge — stage files it watches (`sessions.json`,
+and for the terminals widget Strillix's terminal list `terminals.json`),
 and, for the one READ the bridge answers, `ShellBridge.traceSession`. The
 conductor card's voice/tool lanes are the worked example, and the discipline is
 the contract:

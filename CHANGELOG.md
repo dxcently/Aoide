@@ -6,6 +6,8 @@
 
 - The desktop's window listener writes every terminal window the compositor shows to `$STRILLIX_ROOT/stage/terminals.json` when the list changes and on each reconnect to the compositor, whether or not aoided runs. A terminal is a shown window of a terminal class: kitty, foot, alacritty, wezterm, ghostty and the rest. The file names no session: a reader finds the sessions in a terminal in `sessions.json`, by `windowAddress`.
 - The listener no longer sends the list to core with `aoide session window roster`, so core makes no `win:*` record for a new terminal. The `win:*` records already there go as their windows close.
+- sonata's TERMINALS, cadenza's board and barcarolle's agents dock read the list, so a terminal no session runs in keeps its row, and a click on that row focuses its window. The row has no petname, session ID or session menu. sonata and cadenza head it `shell` and barcarolle `shell · <window title>`; cadenza files it under the project its cwd falls in. A terminal a session runs in shows that session, as before.
+- barcarolle's dock footer counts sessions only, so a terminal no session runs in no longer counts there.
 
 ### The RICE menu marks the staged rice only while it is on screen
 

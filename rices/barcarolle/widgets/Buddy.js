@@ -13,6 +13,8 @@ function nickColor(agent) { return NICK[agent] || NICK.agent }
 function isShell(s) { return s.kind === "shell" || s.agent === "shell" }
 function nickOf(s) { return isShell(s) ? str(s.petname) : (str(s.title) || str(s.petname) || str(s.sessionId).slice(0, 8)) }
 function dots(list) { return list.filter(function (x) { return x !== "" }).join(" · ") }
+// a window address as the stage files compare it: no case, no `0x` prefix
+function normAddr(a) { return str(a).trim().replace(/^0x/i, "").toLowerCase() }
 
 function parentIn(s, byId) {
     var p = str(s.parentSessionId)
@@ -107,12 +109,25 @@ function build(sessions, o) {
         var k = (kids[id] || []).slice().sort(byRank)
         for (var j = 0; j < k.length; j++) flatten(k[j], true, out, seen)
     }
-    var groups = {}
-    for (i = 0; i < roots.length; i++) {
-        var key = groupOf(roots[i], byId)
-        if (!groups[key]) groups[key] = { key: key, ws: key === "else" ? null : roots[i].workspace, roots: [] }
-        groups[key].roots.push(roots[i])
+    // a listed terminal whose window no session holds: a bare shell row of its
+    // window's own facts, with no session id and no state
+    var held = {}, bare = [], ts = o.terminals || []
+    for (i = 0; i < list.length; i++) if (str(list[i].windowAddress) !== "") held[normAddr(list[i].windowAddress)] = true
+    for (i = 0; i < ts.length; i++) {
+        var ta = normAddr(ts[i] && ts[i].address)
+        if (ta === "" || held[ta]) continue
+        held[ta] = true
+        bare.push({ sessionId: "", agent: "shell", kind: "shell", state: "", windowAddress: str(ts[i].address),
+                    workspace: ts[i].workspace, title: str(ts[i].title), cwd: str(ts[i].cwd) })
     }
+    var groups = {}
+    function place(s, into) {
+        var key = groupOf(s, byId)
+        if (!groups[key]) groups[key] = { key: key, ws: key === "else" ? null : s.workspace, roots: [], bare: [] }
+        groups[key][into].push(s)
+    }
+    for (i = 0; i < roots.length; i++) place(roots[i], "roots")
+    for (i = 0; i < bare.length; i++) place(bare[i], "bare")
     var keys = Object.keys(groups).sort(function (a, b) {
         if (groups[a].ws === null) return 1
         if (groups[b].ws === null) return -1
@@ -123,6 +138,7 @@ function build(sessions, o) {
         var G = groups[keys[g]], flat = [], seen = {}
         G.roots.sort(byRank)
         for (q = 0; q < G.roots.length; q++) flatten(G.roots[q], false, flat, seen)
+        for (q = 0; q < G.bare.length; q++) flat.push({ s: G.bare[q], sub: false })
         var live = 0, wash = "", minis = []
         for (q = 0; q < flat.length; q++) {
             var fst = str(flat[q].s.state)
@@ -147,13 +163,14 @@ function build(sessions, o) {
                 else knock = { mode: "terminal", cmd: toolArg(s.tool) }
             }
             var pc = pct(s), h = knock ? KNOCK_H : ROW_H, l2 = line2(s, tail(s.cwd, o.home))
-            var label = (isShell(s) ? "shell" : ag) + " · " + nickOf(s)
+            var label = sid === "" ? dots(["shell", str(s.title)]) : (isShell(s) ? "shell" : ag) + " · " + nickOf(s)
             outR.push({ sid: sid, y: y, h: h, sub: flat[q].sub, group: G.key, state: state,
                         icon: iconName(ag), label: label, word: state === "idle" ? "" : state,
                         pre: l2.pre, mono: l2.mono, post: l2.post, say: l2.say,
                         pct: pc, tone: pc < 0 ? "" : tone(pc),
                         activeMs: (o.activeAt && o.activeAt[sid]) || (o.hookAt && o.hookAt[sid]) || ms(s.startedAt),
                         clickId: G.ws === null ? "" : str(rootIn(s, byId).sessionId),
+                        addr: sid === "" ? str(s.windowAddress) : "",
                         knock: knock, tip: G.ws === null ? { title: label, say: str(s.say) } : null })
             y += h
         }

@@ -62,7 +62,9 @@ pub enum BridgeCommand {
     /// The daemon resolves id → `windowAddress` (focus the exact window), or
     /// falls back to id → `workspace` (switch to it) when the address isn't
     /// resolved yet. This is the source-of-truth jump: QML sends only the
-    /// sessionId a roster row already holds, never a stale/empty address.
+    /// sessionId a session row holds, never a stale/empty address. A row with
+    /// no session (a window no session runs in) sends `focuswindow` with its
+    /// address instead.
     FocusSession { session_id: String },
     /// `{ "cmd": "power", "action": "lock|logout|suspend|hibernate|reboot|shutdown" }`
     /// — a system action from the Exodos powermenu (AoideExodos.qml). QML never

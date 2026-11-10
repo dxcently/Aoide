@@ -44,6 +44,7 @@ PanelWindow {
     readonly property color edgeGold: Qt.rgba(176 / 255, 140 / 255, 20 / 255, 0.55)
 
     property var sessions: []
+    property var terminals: []      // Strillix's terminal list (terminals.json)
     property var hooks: []
     property var notes: []
     property var ledger: []
@@ -157,7 +158,7 @@ PanelWindow {
         if (dropped) root.answered = kept
         var m = Buddy.build(root.sessions, { home: root.home, collapsed: root.collapsed,
             summons: root.canVerdict ? summons : {}, answered: root.answered,
-            activeAt: root.activeAt, hookAt: root.hookAt })
+            activeAt: root.activeAt, hookAt: root.hookAt, terminals: root.terminals })
         var sig = JSON.stringify([m.groups, m.rows, m.counts, m.total])
         if (sig === root.sig) return
         root.sig = sig
@@ -225,9 +226,12 @@ PanelWindow {
         root.bridge.sendCommand({ cmd: "notificationsverdict", id: row.sid, verdict: word })
         root.rebuild()
     }
-    function focusRow(id) {
-        if (id === "") return
-        root.bridge.focusSession(id)
+    // a session row focuses through its id; a window no session runs in,
+    // through its own address
+    function focusRow(r) {
+        if (r.clickId !== "") root.bridge.focusSession(r.clickId)
+        else if (r.addr !== "") root.bridge.focusWindow(r.addr)
+        else return
         root.hide()
     }
     function jump(ws) {
@@ -263,6 +267,14 @@ PanelWindow {
         onFileChanged: reload()
         onLoaded: { root.sessions = root.listOf(sessionsFile, "sessions"); root.spinning = false; root.mark(1) }
         onLoadFailed: { root.sessions = []; root.mark(1) }
+    }
+    FileView {
+        id: terminalsFile
+        path: root.strillixRoot + "/stage/terminals.json"
+        watchChanges: true; blockLoading: false; printErrors: false
+        onFileChanged: reload()
+        onLoaded: { root.terminals = root.listOf(terminalsFile, "terminals"); root.rebuild() }
+        onLoadFailed: { root.terminals = []; root.rebuild() }
     }
     FileView {
         id: hooksFile
@@ -604,8 +616,8 @@ PanelWindow {
                     readonly property var r: modelData
                     readonly property int bx: r.sub ? 25 : 3
                     readonly property int bw: r.sub ? 327 : 349
-                    readonly property bool clickable: r.clickId !== ""
-                    readonly property bool dim: r.state === "idle" || r.state === "done"
+                    readonly property bool clickable: r.clickId !== "" || r.addr !== ""
+                    readonly property bool dim: r.state === "idle" || r.state === "done" || r.addr !== ""
                     readonly property bool sel: hov.hovered && clickable
                     y: r.y; width: 355; height: r.h
 
@@ -710,7 +722,7 @@ PanelWindow {
                             }
                         }
                         Timer { id: tipTimer; interval: 500; onTriggered: { root.tipTop = 29 + row.y + 1 - list.contentY; root.tip = row.r.tip } }
-                        MouseArea { anchors.fill: parent; enabled: row.clickable; cursorShape: Qt.PointingHandCursor; onClicked: root.focusRow(row.r.clickId) }
+                        MouseArea { anchors.fill: parent; enabled: row.clickable; cursorShape: Qt.PointingHandCursor; onClicked: root.focusRow(row.r) }
                     }
 
                     Rectangle {
@@ -752,7 +764,7 @@ PanelWindow {
                                 visible: !!row.r.knock && row.r.knock.mode === "terminal"
                                 label: "Answer in terminal ↗"; color: "#ffffff"
                                 live: row.clickable
-                                onClicked: root.focusRow(row.r.clickId)
+                                onClicked: root.focusRow(row.r)
                             }
                         }
                     }
@@ -761,7 +773,7 @@ PanelWindow {
         }
 
         Text {
-            visible: root.model.total === 0
+            visible: root.model.groups.length === 0
             x: 1; y: 1; width: 355; height: 486
             horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
             text: "Nobody's in the room."; font.family: root.fUi; font.pixelSize: 11; color: Kit.dark(0.55)

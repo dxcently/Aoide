@@ -132,7 +132,8 @@ pub fn focus_window(addr: &str) -> Result<(), FocusError> {
 
 /// Resolve a `sessionId` to a live jump and dispatch it. The `strillix focus session`
 /// verb and the bridge's focussession arm both run this. shellbridge drives this on a
-/// roster row-click: QML sends only the sessionId (which every row already holds), and
+/// session row's click: QML sends only the row's sessionId (a row with no session, a
+/// window no session runs in, sends `focuswindow` with its address instead), and
 /// this function owns the id→window resolution, so a widget never carries a stale or
 /// empty address (the bug this fixes: the old socket command took a window address, but
 /// the widgets passed a sessionId, so every tracked-row jump silently no-op'd as

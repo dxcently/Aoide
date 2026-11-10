@@ -90,7 +90,11 @@ Glass is a frame, content is a plate, light comes from above.
   then sessions grouped by workspace behind disclosure triangles (mini
   workspace button + label; click jumps; Elsewhere holds sessions with no
   window), rows with the agent's icon (28px) wearing its state orb, agent ·
-  title, tool and cwd tail, and a context meter. Subagents indent. An
+  title, tool and cwd tail, and a context meter. A window no session runs
+  in comes from Strillix's terminal list (`terminals.json`): a dim row
+  labelled `shell · <window title>`, with its cwd tail and no state; a
+  click focuses its window. The footer counts sessions only. Subagents
+  indent. An
   awaiting row knocks: its ask with Approve / Deny, or "Answer in terminal"
   when the notifications holds no summons. Under the list, a small room log
   (joins, leaves, state changes, notifications toasts, asks), then `New terminal`.

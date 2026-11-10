@@ -42,7 +42,8 @@
 //
 // ── Actions (the bridge only) ─────────────────────────────────────────────
 //   click a card        bridge.focusSession — a subagent focuses its parent's
-//                       window (sonata's courier rule)
+//                       window (sonata's courier rule); a bare terminal card,
+//                       bridge.focusWindow with its address
 //   [approve] / [deny]  {cmd:"notificationsverdict", id:<sessionId>, verdict} — the
 //                       NOTIF tab's and the notifications' own wire line; click only
 //   right-click / j k   select; the selected card's action line carries
@@ -127,15 +128,16 @@ Item {
         return (h && h.phase) ? h.phase : ((s && s.state) ? ("" + s.state).toLowerCase() : "")
     }
     function lampColor(s) {
-        if (s && s.sessionId === board.hotId) return kit.hot
+        if (s && s.sessionId && s.sessionId === board.hotId) return kit.hot
         if (s && s.needsSudo) return kit.urgent
         return kit.lampColor(root.liveState(s))
     }
     function summonsOf(s) { return (s && s.sessionId) ? (root.cards.summonsBy[s.sessionId] || null) : null }
     function focusCard(s, child) {
-        if (!s || !board.bridge || !board.bridge.focusSession) return
+        if (!s || !board.bridge) return
         var id = (child && s.parentSessionId) ? s.parentSessionId : s.sessionId
-        if (id) board.bridge.focusSession(id)
+        if (id) { if (board.bridge.focusSession) board.bridge.focusSession(id) }
+        else if (s.windowAddress && board.bridge.focusWindow) board.bridge.focusWindow(s.windowAddress)
     }
     // the HAND lane (sonata's toolText without the trace poll): the rich
     // reaper label when it names the same call, else the live hook name
@@ -297,7 +299,7 @@ Item {
     Text {
         visible: root.entries.length === 0
         text: root.what === "terms"
-              ? (root.project ? "no terminals in " + root.project : "no conducted terminals")
+              ? (root.project ? "no terminals in " + root.project : "no terminals")
               : (root.project ? "no live agents in " + root.project : "no live agents")
         color: root.kit.dim; font: root.kit.font; textFormat: Text.PlainText
     }

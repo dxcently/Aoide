@@ -38,8 +38,9 @@ import "../.."
 //     pool (terminals have no subagent concept, so the `packages` courier
 //     pool never appears here), hashed from the row's stable key so its set
 //     stays pinned across a delegate rebuild; ASCII / box-drawing throughout.
-//   · the FUNCTION: agent · state · cwd · elapsed, click → focusSession,
-//     an empty state, and hot-reload of the stage file.
+//   · the FUNCTION: agent · state · cwd · elapsed, click → focusSession (a
+//     window no session runs in: focusWindow), an empty state, and hot-reload
+//     of the two stage files.
 //
 // ORDER and FRAME (the same plaques, another god's house):
 //   · ORDER   — Ionic, not Doric: a volute (scroll) capital + dentil course
@@ -82,11 +83,14 @@ Item {
     id: gadget
 
     required property var theme            // palette roles
-    required property var bridge           // socket sender (bridge.focusSession)
+    required property var bridge           // socket sender (bridge.focusSession, bridge.focusWindow)
     property var shared: null              // cross-widget state (shared.tracedSessionId)
     // sessions.json is a CONDUCTING file (CONTRACTS.md §4) — state/stage/,
     // not rice/stage/.
     property string stagePath: (Quickshell.env("AOIDE_ROOT") || (Quickshell.env("HOME") + "/.aoide")) + "/state/stage/sessions.json"
+    // terminals.json is Strillix's terminal list (CONTRACTS.md §4): every
+    // terminal window the compositor shows, under the rice runtime root.
+    property string terminalsPath: (Quickshell.env("STRILLIX_ROOT") || (Quickshell.env("HOME") + "/.strillix")) + "/stage/terminals.json"
 
     Loader {
         id: sessionMenu
@@ -95,16 +99,26 @@ Item {
         source: Qt.resolvedUrl("SessionMenu.qml")
         onLoaded: { item.theme = gadget.theme; item.bridge = gadget.bridge }
     }
+    // a row with no session (a window no session runs in) has no sheet and
+    // nothing to copy
     function openSessionMenu(record, sourceItem, x, y, page) {
-        if (!sessionMenu.item) return
+        if (!sessionMenu.item || !record.sessionId) return
         var point = sourceItem.mapToItem(gadget, x, y)
         sessionMenu.item.open(record, point.x, point.y, null, page)
     }
     // the reveal chips' copy: the menu's own recovery text, menu kept closed
     function copySession(record) {
+        if (!record.sessionId) return
         if (sessionMenu.item) sessionMenu.item.copyRecovery(record)
         copiedKey = rowKey(record)
         copiedBeat.restart()
+    }
+    // Return and a left click: a session's window through its id, a window no
+    // session runs in through its own address
+    function focusRow(record) {
+        if (!gadget.bridge) return
+        if (record.sessionId) { if (gadget.bridge.focusSession) gadget.bridge.focusSession(record.sessionId) }
+        else if (record.windowAddress && gadget.bridge.focusWindow) gadget.bridge.focusWindow(record.windowAddress)
     }
     // row state that must outlive the rows: the roster is reassigned when it
     // changes and every delegate is rebuilt, so focus and the copy chip's
@@ -173,14 +187,15 @@ Item {
     readonly property color sig: theme.holoBlue
 
     // live state ────────────────────────────────────────────────────────────────
-    // This roster is the tty roster: EVERY live terminal window, whether or not it
-    // is a tracked Aoide session. It is a PURE VIEW of ONE source — the bridge's
-    // `sessions.json` (Widget–Bridge Contract). The daemon now publishes a
-    // synthetic `shell` record (keyed `win:<address>`) for every untracked bare
-    // terminal, so `sessions.json` alone is a complete terminal roster: the widget
-    // never enumerates Hyprland itself. We just filter to the windowed records and
-    // de-dupe by window address → one row per real terminal.
-    property var sessions: []              // the complete stage roster (sessions.json)
+    // This roster is the tty roster: EVERY terminal window the compositor shows,
+    // whether or not a session runs in it. It is a PURE VIEW of two stage files:
+    // the bridge's `sessions.json` (Widget–Bridge Contract) and Strillix's
+    // terminal list `terminals.json`. The windowed records are de-duped by window
+    // address → one row per window; a listed terminal whose window no record
+    // holds is a bare row with no session (no id, petname or project). The widget
+    // never enumerates Hyprland itself.
+    property var sessions: []              // the stage roster (sessions.json)
+    property var terminals: []             // the terminal list (terminals.json)
     property var rows: []                   // the windowed roster actually drawn
     property real nowMs: Date.now()
     property string emphId: ""
@@ -326,6 +341,8 @@ Item {
         if (!isAgentRec(rec)) return 0;                        // the hosting shell
         return normState(rec.state) === "done" ? 1 : 2;        // tombstone < live agent
     }
+    // a window address as the stage files compare it: no case, no `0x` prefix
+    function normAddr(a) { return ("" + (a || "")).trim().replace(/^0x/i, "").toLowerCase(); }
     function terminalRows() {
         // group the windowed records by address; the agent record wins a shared window.
         var byAddr = ({});
@@ -337,6 +354,19 @@ Item {
             var cur = byAddr[addr];
             if (cur === undefined) { byAddr[addr] = s; order.push(addr); }
             else if (recRank(s) > recRank(cur)) { byAddr[addr] = s; }  // live agent > tombstone > shell
+        }
+        // a listed terminal whose window no record holds: a bare shell row,
+        // carrying only its window's own facts
+        var held = ({});
+        for (var h = 0; h < order.length; h++) held[normAddr(order[h])] = true;
+        for (var j = 0; j < terminals.length; j++) {
+            var t = terminals[j];
+            var ta = normAddr(t && t.address);
+            if (!ta || held[ta]) continue;
+            held[ta] = true;
+            byAddr[t.address] = { agent: "shell", windowAddress: "" + t.address, workspace: t.workspace,
+                                  title: t.title || "", cwd: t.cwd || "", pid: t.pid || 0 };
+            order.push(t.address);
         }
         var out = [];
         for (var k = 0; k < order.length; k++) {
@@ -357,7 +387,7 @@ Item {
                 startedAt:     rec.startedAt || "",
                 workspace:     wsId,
                 windowAddress: rec.windowAddress || "",
-                title:         rec.title || "",       // session name (tracked) / window title (synthetic)
+                title:         rec.title || "",       // session name (a session) / window title (a bare row)
                 activity:      rec.activity || "",    // the current command/tool
                 tool:          rec.tool || "",         // the reaper's transcript-read tool
                                                         // label — richer than activity but
@@ -451,10 +481,22 @@ Item {
         rebuild();
     }
 
-    // the stage file — the ONLY source; hot-reloads on change ─────────────────────
-    // `sessions.json` is now the complete terminal roster (the daemon publishes a
-    // synthetic `shell` record per untracked tty), so this FileView is all the
-    // widget needs — no `hyprctl` enumeration, per the Widget–Bridge Contract.
+    // the terminal list: an absent file is no terminals; garbage keeps the last
+    // good list (hazards.md, Files)
+    function parseTerminals() {
+        try {
+            var o = JSON.parse(terminalList.text());
+            terminals = (o && o.terminals) ? o.terminals : [];
+        } catch (e) {
+            return;
+        }
+        rebuild();
+    }
+
+    // the two stage files — the only sources; each hot-reloads on change ─────────
+    // `sessions.json` holds the sessions and the windows they run in;
+    // `terminals.json` holds every terminal window the compositor shows. No
+    // `hyprctl` enumeration, per the Widget–Bridge Contract.
     FileView {
         id: stage
         path: gadget.stagePath
@@ -462,6 +504,16 @@ Item {
         blockLoading: false
         printErrors: false
         onLoaded: gadget.parseStage()
+        onFileChanged: reload()
+    }
+    FileView {
+        id: terminalList
+        path: gadget.terminalsPath
+        watchChanges: true
+        blockLoading: false
+        printErrors: false
+        onLoaded: gadget.parseTerminals()
+        onLoadFailed: { gadget.terminals = []; gadget.rebuild(); }
         onFileChanged: reload()
     }
 
@@ -816,8 +868,10 @@ Item {
                                 // Tab reaches every row; hover OR keyboard focus reveals the
                                 // chips (the Conductor's plaque law). Return focuses the
                                 // window, c copies, d opens Details, Menu / Shift+F10 the sheet.
+                                // A row with no session reveals nothing and opens no sheet.
                                 activeFocusOnTab: true
-                                readonly property bool revealed: hover.containsMouse || row.activeFocus
+                                readonly property bool revealed: (hover.containsMouse || row.activeFocus)
+                                                                 && (modelData.sessionId || "") !== ""
                                 // focus lives in gadget.focusedKey (the roster model is
                                 // reassigned and every row rebuilt when it changes); a
                                 // rebuilt row takes focus back by its key
@@ -830,8 +884,7 @@ Item {
                                 Keys.onPressed: function(event) {
                                     var chord = event.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier)
                                     if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
-                                        if (modelData.sessionId && gadget.bridge && gadget.bridge.focusSession)
-                                            gadget.bridge.focusSession(modelData.sessionId)
+                                        gadget.focusRow(modelData)
                                     } else if (event.key === Qt.Key_C && !chord) {
                                         gadget.copySession(modelData)
                                     } else if (event.key === Qt.Key_D && !chord) {
@@ -1410,12 +1463,7 @@ Item {
                             onClicked: function(mouse) {
                                 if (mouse.button === Qt.RightButton) { gadget.openSessionMenu(modelData, hover, mouse.x, mouse.y); return }
                                 row.forceActiveFocus()   // a clicked row joins the Tab chain
-                                // Every row now carries a sessionId — a tracked
-                                // agent/shell, or the daemon's synthetic `win:<addr>`
-                                // for a bare tty. The bridge resolves it to a window
-                                // (the one narrow outbound socket command).
-                                if (modelData.sessionId && gadget.bridge && gadget.bridge.focusSession)
-                                    gadget.bridge.focusSession(modelData.sessionId);
+                                gadget.focusRow(modelData);
                             }
                         }
 

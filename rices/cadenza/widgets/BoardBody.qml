@@ -15,6 +15,9 @@
 //
 // ── What it reads (every path is a documented contract) ──────────────────
 //   state/stage/sessions.json · hooks.json · projects.json · notifications.json
+//   $STRILLIX_ROOT/stage/terminals.json
+//                                 Strillix's terminal list: a window no
+//                                 record holds is a bare terminal card
 //   state/stage/graph.json        `workspaces[].project` — the S1 binding;
 //                                 `edges[]` kind `spawned` — a subagent's
 //                                 parent when its record names none
@@ -43,6 +46,7 @@
 //
 // ── Actions (house rule 7: QML paints, the bridge acts) ──────────────────
 //   bridge.focusSession(id)                 a row / rail click
+//   bridge.focusWindow(address)             a bare terminal's click
 //   bridge.sessionAction(id, a, fields, cb) project · undying · kill, as
 //                                           sonata's SessionMenu sends them
 //   bridge.sendCommand({cmd:"notificationsverdict", id, verdict})   a summons
@@ -106,9 +110,11 @@ Item {
         var p = Quickshell.env("AOIDE_STAGE_DIR") || ""
         return p.charAt(0) === "/" ? p : board.stateDir + "/stage"
     }
+    readonly property string terminalsPath: (Quickshell.env("STRILLIX_ROOT") || (Quickshell.env("HOME") + "/.strillix")) + "/stage/terminals.json"
 
     // ══ RAW STATE (plain values; each FileView owns one) ══════════════════
     property var sessions: []
+    property var listedTerminals: []    // Strillix's terminal list (terminals.json)
     property var hooks: []
     property var projects: []
     property var notificationsRecs: []
@@ -132,6 +138,14 @@ Item {
         onFileChanged: reload()
         onLoaded: { var o = board._json(sessionsFile); board.sessions = (o && o.sessions) ? o.sessions : [] }
         onLoadFailed: board.sessions = []
+    }
+    FileView {
+        id: terminalsFile
+        path: board.terminalsPath
+        watchChanges: true; blockLoading: false; printErrors: false
+        onFileChanged: reload()
+        onLoaded: { var o = board._json(terminalsFile); board.listedTerminals = (o && o.terminals) ? o.terminals : [] }
+        onLoadFailed: board.listedTerminals = []
     }
     FileView {
         id: hooksFile
@@ -291,6 +305,24 @@ Item {
         var x = (a.s && a.s.startedAt) || "", y = (b.s && b.s.startedAt) || ""
         return x < y ? -1 : (x > y ? 1 : 0)
     }
+    // a window address as the stage files compare it: no case, no `0x` prefix
+    function normAddr(a) { return ("" + (a || "")).trim().replace(/^0x/i, "").toLowerCase() }
+    // the listed terminals whose window no record holds (any record, any
+    // state): each a bare, idle shell record of its window's own facts
+    function bareTerminals(all) {
+        var held = {}, out = [], ts = board.listedTerminals || [], i
+        for (i = 0; i < all.length; i++)
+            if (all[i] && all[i].windowAddress) held[board.normAddr(all[i].windowAddress)] = true
+        for (i = 0; i < ts.length; i++) {
+            var t = ts[i], a = board.normAddr(t && t.address)
+            if (!a || held[a]) continue
+            held[a] = true
+            out.push({ sessionId: "", agent: "shell", kind: "shell", state: "idle",
+                       windowAddress: "" + t.address, workspace: t.workspace,
+                       title: t.title || "", cwd: t.cwd || "", pid: t.pid })
+        }
+        return out
+    }
 
     readonly property var model: {
         var all = board.sessions || [], ps = board.projects || []
@@ -318,6 +350,9 @@ Item {
                 kids[par.sessionId].push(row)
             } else tops.push(row)
         }
+        var bare = board.bareTerminals(all)
+        for (i = 0; i < bare.length; i++)
+            terms.push({ s: bare[i], depth: 0, project: board.projectOfCwd(bare[i].cwd, ps), since: "" })
         tops.sort(board.byStart); terms.sort(board.byStart)
         var agents = []
         for (i = 0; i < tops.length; i++) {
@@ -362,7 +397,8 @@ Item {
     //            projects.json order, then UNANCHORED ("" when no project is
     //            registered: no group chrome at all)
     //   ttys    [{ s, project }] — one per window (windowAddress), the live
-    //            agent in it winning over a done one, over the hosting shell
+    //            agent in it winning over a done one, over the hosting shell;
+    //            a listed terminal no record holds is a bare shell
     //   hookBy  sessionId → { phase, updatedAt }   (the hook phase wins)
     //   summonsBy sessionId → the standing notifications summons record
     // A subagent hangs under its nearest NON-subagent live ancestor: the
@@ -464,7 +500,8 @@ Item {
         if (buckets[ps.length].length)
             groups.push(tally(groups.length ? "unanchored" : "", false, buckets[ps.length]))
 
-        // terminals: one per window; the agent in it wins (terminals.qml)
+        // terminals: one per window; the agent in it wins (terminals.qml), and
+        // a listed terminal no record holds joins bare
         function rank(s) {
             if (board.kindOf(s) === "shell") return 0
             return s.state === "done" ? 1 : 2
@@ -482,6 +519,9 @@ Item {
             var rec = byAddr[order[i]]
             ttys.push({ s: rec, project: rec.project ? "" + rec.project : board.projectOfCwd(rec.cwd, ps) })
         }
+        var bare = board.bareTerminals(all)
+        for (i = 0; i < bare.length; i++)
+            ttys.push({ s: bare[i], project: board.projectOfCwd(bare[i].cwd, ps) })
         ttys.sort(function (a, b) { return start(a.s, b.s) })
         return { groups: groups, ttys: ttys, hookBy: hookBy, summonsBy: summonsBy }
     }
@@ -562,6 +602,7 @@ Item {
         var s = row.s
         var id = (board.kindOf(s) === "subagent" && s.parentSessionId) ? s.parentSessionId : s.sessionId
         if (id) board.bridge.focusSession(id)
+        else if (s.windowAddress && board.bridge.focusWindow) board.bridge.focusWindow(s.windowAddress)
     }
     function notificationsVerdict(sessionId, word) {
         if (board.bridge) board.bridge.sendCommand({ cmd: "notificationsverdict", id: "" + sessionId, verdict: word })

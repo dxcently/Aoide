@@ -439,9 +439,12 @@ own board; it mounts none of sonata's gadget slots.
   - A **terminal card** is one window, two lines: what runs in it (the
     agent's title, else the harness; a bare shell's live command, else
     `shell`), its state, jack and time up, then the cwd. The live agent in
-    a window wins over the shell hosting it.
-  - A click on a card focuses its window (a subagent's, its parent's). A
-    right-click, or `j`/`k`, selects a card and opens its action line:
+    a window wins over the shell hosting it. A window no session runs in
+    comes from Strillix's terminal list (`terminals.json`): an idle `shell`
+    card with no petname, its project the one its cwd falls under.
+  - A click on a card focuses its window (a subagent's, its parent's; a
+    terminal no session runs in, by its address). A right-click, or
+    `j`/`k`, selects an agent card and opens its action line:
     focus, project, undying, kill (kill asks `y/N`; subagents cannot be
     killed).
   - Only lamps move: a working or awaiting card's lamp breathes (2s), off
@@ -496,10 +499,10 @@ source exists; turning the part back on is that one line, and the fixture
 harness (`BoardPreview.qml`) flips them to show the full board.
 | part | real today | hidden until (switch) |
 |---|---|---|
-| OVERVIEW agent + terminal cards | `sessions.json`, `hooks.json`, `notifications.json` summonses, `graph.json` `spawned` edges | — |
+| OVERVIEW agent + terminal cards | `sessions.json`, `hooks.json`, `notifications.json` summonses, `graph.json` `spawned` edges, Strillix's `terminals.json` | — |
 | OVERVIEW projects | `projects.json` (bindings column `—`) | S1 fills the bindings |
 | OVERVIEW mail | — | S9/S10 (`hasMailRead`) |
-| project tabs: agent + terminal cards | `projects.json`, `sessions.json`, `hooks.json`, `notifications.json`, `graph.json` | — |
+| project tabs: agent + terminal cards | `projects.json`, `sessions.json`, `hooks.json`, `notifications.json`, `graph.json`, Strillix's `terminals.json` | — |
 | project feed | — | S8/S10 (`hasBoardFeed`) |
 | composer | — | S11 agents, S12 project (`hasBoardPost`); drawn disabled until `boardpost` exists |
 | SYS machine CPU/mem | `/proc/stat`, `/proc/meminfo` | — |
@@ -704,3 +707,8 @@ reads a fixture path.
   `background_opacity`, staged) and the compositor's hyprglass block now takes
   its two enable keys from `geometry.blurEnabled`, so a booted desktop and a
   staged one wear the same glassless CRT (§5).
+- 2026-11-10 — the terminal cards read Strillix's terminal list
+  (`terminals.json`): core no longer publishes a `win:` record for a
+  window no session runs in, so such a window is a bare, idle `shell` card
+  with no petname, its project the one its cwd falls under, and a click
+  focuses it by address.

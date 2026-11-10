@@ -217,6 +217,14 @@ remain unchanged for focus, tracing, permissions, and row matching. Prompt
 content is displayed only from the explicit prompt field, never inferred
 from the title.
 
+A Terminals row for a window no session runs in comes from Strillix's
+terminal list (`$STRILLIX_ROOT/stage/terminals.json`), not from a session
+record: it is headed `shell`, as an idle shell session is, and its ground
+line is the window's working directory, or its window title when it has
+none. It has no petname, session ID, project or prompt, so it reveals no
+chips and opens no sheet; Return or a left click focuses its window by
+address. A window a session runs in is that session's row.
+
 Right-clicking a card opens the shared square `SessionMenu.qml` sheet; ordinary
 left-click keeps focusing the session. The menu carries recovery copy/details,
 the undying mark, project assignment, project creation and directory editing,
@@ -429,3 +437,11 @@ not yet ended) names that terminal, "Kill terminal <name>"; anything else reads
   to 105px for a 96px strip; the owner rejected it as taking too much space and
   the compact badge replaced it outright. Verified visually in the isolated
   `strx preview` canvas at 360 and 260 against the codex, pi and claude rows.
+
+- 2026-11-10: **Terminals reads Strillix's terminal list.** Core no longer
+  publishes a `win:` record for a terminal no session runs in, so such a
+  window now comes from `$STRILLIX_ROOT/stage/terminals.json`: a bare
+  `shell` row over the window's cwd (its title when it has no cwd), with no
+  petname, ID, chips or sheet, and a click or Return that focuses the
+  window by address. The petname and workspace project core gave such a
+  window went with its record; the widget mints neither.
