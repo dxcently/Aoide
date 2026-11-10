@@ -4,11 +4,11 @@ The mechanical motions of a working session in this repo, in order. The
 rules themselves live in the root `AGENTS.md` (house rules, cited by number)
 and the layered `AGENTS.md` files; this list only sequences them.
 
-1. **Be a tracked session.** Every terminal here already runs conducted —
-   registered in the session graph, conductable. Work launched outside a
-   terminal wraps itself the same way: `aoide conduct -- <command>` (or
-   `aoide spawn` for a detached launch). Never work as an untracked
-   process.
+1. **Be a tracked session.** An agent registers in the session graph
+   through its hooks wherever it starts. Work with no hooks, or work that
+   must be conductable, launches through Aoide:
+   `aoide conduct -- <command>` (or `aoide spawn` for a detached launch).
+   Never work as an untracked process.
 2. **Write inside the domain.** Rice and theming work commits to
    `rices/<rice>/` and nothing else (house rule 1). Code work stays
    inside the directory whose `AGENTS.md` you have read — each layer's file

@@ -19,20 +19,12 @@
 #     has the windows already open reload their config, this file included.
 #     `rice mode declarative` rewrites the file from the declared twin, so
 #     leaving staging restores the declared look the same live way. The path is the
-#     runtime root's contract path, read off `aoide.root` like `aoide.user`.
+#     runtime root's contract path, read off `strillix.root`.
 #
 # Adapted vs dxflake: dxflake gated this on `dx.aggregations.desktop`; Aoide has
 # no aggregation flags, so selection is its only switch (§2). The
 # `lib.mkForce` dxflake used to win over its stylix module's kitty defaults is
 # kept so the terminal is a clean single definition.
-#
-# Conduct-by-default (Aoide core behaviour — concepts/Conductor-Channel): kitty's
-# `shell` is pointed at the `aoide-shell` wrapper below, so EVERY kitty window
-# runs its login shell under `aoide conduct` — each terminal becomes its own
-# tracked, conductable session (a control socket a central agent can type into,
-# nested into the graph when spawned from another session). The wrapper is written
-# to be UNBREAKABLE: any failure to conduct falls back to the plain login shell,
-# and `AOIDE_NO_CONDUCT=1` is the explicit escape hatch.
 
 { config, lib, ... }:
 {
@@ -48,51 +40,6 @@
 
     habit.home =
       { pkgs, lib, ... }:
-      let
-        # aoide-shell — kitty's login shell: conduct-by-default with a hard
-        # safe-fallback. Order matters and every branch ends in an `exec` so a
-        # broken conduct can NEVER strand the user without a shell:
-        #   1. AOIDE_NO_CONDUCT set        → the plain login shell (escape hatch).
-        #   2. `aoide` not on PATH         → the plain login shell (never shell-less).
-        #   3. otherwise                   → `aoide conduct` the login shell, always
-        #      parented to $AOIDE_SESSION_ID when already in the env (nested
-        #      terminals build the graph tree). We ALWAYS wrap — a kitty spawned from
-        #      a conducted shell is still its own conducted session, just parented.
-        #   4. belt-and-suspenders         → if the conduct exec ever returns, fall
-        #      through to the plain login shell anyway.
-        # The login shell is resolved from $SHELL, then passwd, then /bin/sh.
-        aoide-shell = pkgs.writeShellScriptBin "aoide-shell" ''
-          # Resolve the user's login shell robustly.
-          login_shell="''${SHELL:-}"
-          if [ -z "$login_shell" ] || [ ! -x "$login_shell" ]; then
-            login_shell="$(getent passwd "$(id -u)" 2>/dev/null | cut -d: -f7)"
-          fi
-          if [ -z "$login_shell" ] || [ ! -x "$login_shell" ]; then
-            login_shell=/bin/sh
-          fi
-
-          # (1) Escape hatch: never conduct when explicitly opted out.
-          if [ -n "''${AOIDE_NO_CONDUCT:-}" ]; then
-            exec "$login_shell" -l
-          fi
-
-          # (2) Never leave the user shell-less: only conduct if aoide is present.
-          if ! command -v aoide >/dev/null 2>&1; then
-            exec "$login_shell" -l
-          fi
-
-          # (3) Conduct this terminal as its own tracked, conductable session.
-          #     Parent it to the spawning session when one is already in the env.
-          if [ -n "''${AOIDE_SESSION_ID:-}" ]; then
-            exec aoide conduct --agent shell --parent "$AOIDE_SESSION_ID" -- "$login_shell" -l
-          else
-            exec aoide conduct --agent shell -- "$login_shell" -l
-          fi
-
-          # (4) Belt-and-suspenders: conduct failed to exec — fall back cleanly.
-          exec "$login_shell" -l
-        '';
-      in
       {
         programs.kitty = lib.mkMerge [
           (lib.mkForce {
@@ -100,8 +47,6 @@
             package = pkgs.kitty;
             # font.name / font.size and colours are set by the stylix lane.
             settings = {
-              # Conduct-by-default: every window's shell is the wrapper above.
-              shell = "${aoide-shell}/bin/aoide-shell";
               scrollback_lines = 2000;
               wheel_scroll_min_lines = 1;
               confirm_os_window_close = 0;

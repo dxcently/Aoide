@@ -34,22 +34,19 @@ full node id or the bare id.
   aware, so a session in a nested project anchors to the inner one, not the
   outer.
 - **`spawned`** (session → session): recorded as an optional
-  `parentSessionId` on the child's `sessions.json` record. A kitty-wrapped
-  nested terminal gets it stamped directly at spawn (`--parent
-  "$AOIDE_SESSION_ID"`); a hook-registered session with no explicit parent
-  instead resolves one automatically: its self-first `/proc` ancestry
-  (`hookAncestry`, the chain from the harness up, landed at registration: a
-  SessionStart, or the first hook event of an unknown id, and healed by the next
-  per-turn hook when stale) is
-  intersected against every live agent-kind session's own `hookAncestry`, and
-  the closest
-  matching ancestor wins as parent (CONTRACTS.md §4). A harness that reports
-  itself through the hook door is launched by a wrap, so its parent is usually
-  that wrap directly, and the door resolves it the same way whichever door
-  serves the hook: the claim in the hook process's own `AOIDE_SESSION_ID`
-  (checked — a claim whose record carries a pid the hook process is not
-  running under is dropped and reported, never linked) with the attested
-  conducted ancestor as the kernel-verified path ahead of it.
+  `parentSessionId` on the child's `sessions.json` record. A conducted
+  session gets it at registration: an explicit `--parent`, else the closest
+  live agent-kind session whose `hookAncestry` (the `/proc` chain from its
+  harness up, CONTRACTS.md §4) meets the registering process's own ancestry,
+  else an ambient `AOIDE_SESSION_ID` naming a live session
+  ([[Conductor-Channel]]). So a `conduct`
+  or `spawn` launched from inside an agent's shell tool lands as that agent's
+  child. A harness that reports itself through the hook door takes its parent
+  from the conducted wrap it runs under, kernel-attested, else from the claim
+  in the hook process's own `AOIDE_SESSION_ID` (checked — a claim whose record
+  carries a pid the hook process is not running under is dropped and
+  reported, never linked), and the door resolves it the same way whichever
+  door serves the hook. With neither, it registers parentless.
 - **`leads`** (session → session): a project that names a **lead**
   (`aoide project lead <name> <session>`, CONTRACTS.md §4's
   `projects.json`) hangs its other parentless sessions off that one
@@ -555,7 +552,7 @@ asking session and a program with no profile has none to type.
 ## Liveness reaping — the SIGKILL problem
 
 `session prune` only drops sessions whose raw state is already `done` — an
-*orderly* exit. Conduct-by-default makes a *disorderly* exit common: a
+*orderly* exit. A conducted session often exits *disorderly*: a
 terminal closed with `SUPER+Q` or killed outright tears down the `conduct`
 process uncatchably, so it can never run its own `session end`.
 Left alone, the record strands `running` in the roster forever (observed:
@@ -858,10 +855,11 @@ not built.
 as a unit, and otherwise fall back to two different default directories
 ("Stage-dir resolution", `CONTRACTS.md §4` — see [[shellbridge]]). The
 `focuswindow` exit-0 ambiguity is resolved by the liveness check above.
-Spawn-time parenting is now two-layered: the kitty wrapper stamps
-`parentSessionId` directly for the common nested-terminal case
-([[Conductor-Channel]]), and a hook-registered session with no explicit
-`--parent` resolves one automatically via the `hookAncestry` walk — so `graph
+Spawn-time parenting is two-layered: a conducted session takes its
+`parentSessionId` at registration (an explicit `--parent`, the
+`hookAncestry` walk or `AOIDE_SESSION_ID`, [[Conductor-Channel]]), and a
+hook-registered session takes the conducted wrap it runs under or its
+`AOIDE_SESSION_ID` claim — so `graph
 link` is the manual override path for edges outside both, not the only
 source (`graph link` is the one other command the `graph` prefix still owns
 after the Lane R cutover, alongside the bare render).

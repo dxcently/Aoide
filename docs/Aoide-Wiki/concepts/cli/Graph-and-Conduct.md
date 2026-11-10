@@ -1117,10 +1117,7 @@ aoide conduct [--agent <name>] [--parent <sessionId>] [--id <id>] [--headless] -
   driving — agents' states come from hooks). A bind failure leaves the session
   running but `conductable: false` (never injectable). Only conduct's own
   uncatchable death (SUPER+Q SIGKILL) strands the record — that is the reaper's
-  case. `AOIDE_NO_CONDUCT=1` is the terminal-integration escape hatch (honored
-  by the kitty launch wrapper in `modules/dendrites/kitty.nix`, not by this
-  command): the terminal starts a plain shell instead of `aoide conduct`. A
-  door that cannot approve (MCP, A2A) is refused: it runs an arbitrary
+  case. A door that cannot approve (MCP, A2A) is refused: it runs an arbitrary
   command and upserts a record by `--id`, so such a caller launches through
   `spawn`, whose own gate holds or attests it.
 

@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### kitty runs a plain shell
+
+- kitty runs the user's shell itself, no longer under `aoide conduct`: the `aoide-shell` wrapper and its `AOIDE_NO_CONDUCT` escape hatch are gone. A terminal kitty opens is in Strillix's terminal list, and core keeps no session for it. An agent started there is tracked by its hooks and answers approvals, but `aoide send` refuses it: it has no control socket to type into. A session Aoide opens (`aoide spawn`, `aoide conduct`) is conductable as before.
+- A kitty window no agent runs in is a bare terminal row in sonata's, cadenza's and barcarolle's terminal views, with kitty's own working directory and no live command: the wrap was what reported the shell's working directory and running command. A window an agent runs in shows that agent's session, as before.
+
 ### cadenza's project-tab rails focus on a click
 
 - A click on an agent or a terminal in the rails of cadenza's project tabs focuses its window. The board's click handler was named `focus`, the name of Qt's final `Item.focus` property, so Qt 6.11 dropped the handler and the click did nothing.

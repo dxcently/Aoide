@@ -3934,9 +3934,11 @@ A session with no parent, or whose chain anchors in a windowed conducted
 session directly (an interactive `conduct` with a real `windowAddress`),
 keeps the ordinary backfill. The backfill is core's decision over the windows the desktop hands it (`window_bindings`): the roster verb applies each binding itself, and the desktop's sweep asks for the same bindings and records each through `aoide session window attach <id> <address> [--workspace <n>]`, a daemon verb that fills an empty window, moves the workspace when the same window reports again, and refuses a second window while the first is held. Core reads no compositor, and the owning app's pid is never stamped as the session's pid. The
 desktop's other window facts come through the same door: `aoide session window closed <address>`
-judges the sessions that ran in a closed window and releases their claims, `aoide session window
-roster` (a JSON array of terminal windows on stdin) places the sessions those windows host and then publishes the untracked-terminal records, all in one stage write, and
-`aoide session codex sync` reconciles the desktop's codex threads. The same-window eviction
+judges the sessions that ran in a closed window and releases their claims, and
+`aoide session codex sync` reconciles the desktop's codex threads. `aoide session window roster`
+(a JSON array of terminal windows on stdin) places the sessions those windows host and then
+publishes the untracked-terminal records, all in one stage write; the desktop does not send it,
+since the terminal list is Strillix's own (`terminals.json`). The same-window eviction
 (immediately above `graph.json`'s render, below) never retires a sharing
 window by itself. A same-window record is retired only as a superseded twin
 (`superseded_by`): it has no live process of its own outside the new

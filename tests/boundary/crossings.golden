@@ -68,7 +68,7 @@ name strillix modules/dendrites/compositor/hyprland/default.nix 11
 name strillix modules/dendrites/dunst.nix 2
 name strillix modules/dendrites/git.nix 1
 name strillix modules/dendrites/greeter.nix 12
-name strillix modules/dendrites/kitty.nix 8
+name strillix modules/dendrites/kitty.nix 1
 name strillix modules/dendrites/neovim.nix 3
 name strillix modules/dendrites/networkmanager.nix 2
 name strillix modules/dendrites/nh.nix 1

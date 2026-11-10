@@ -9,8 +9,8 @@
 //!
 //! Named `quickshell`, not `shell` (the User, 2026-08-15): a top-level command
 //! whose first path segment is `shell` collides with `--agent shell`, the
-//! value `graph conduct`/`aoide-shell`'s kitty wrapper have used for a long
-//! time — `is_command_token` (now `protocol/src/door.rs`, position-blind at
+//! value kitty's login-shell wrapper then passed to `graph conduct` —
+//! `is_command_token` (now `protocol/src/door.rs`, position-blind at
 //! the time) treated any bare token matching a REGISTERED command's first
 //! segment as the start of a new subcommand
 //! rather than a flag's value, so `--agent shell` silently stopped being

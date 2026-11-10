@@ -8,7 +8,7 @@ source: "[[references/AOIDE-HANDOFF]]"
 
 # Conductor Channel — commanding wrapped agents
 
-**Status:** core channel, discovery, and conduct-by-default are live. The
+**Status:** the core channel and discovery are live. The
 interactive conductor console (Phase ③, an `InputKind::Send` key arm in the
 TUI) is the remaining phase — see "Phases" below.
 
@@ -21,8 +21,10 @@ node whose label is its chat title. The central agent, or a human in the
 conductor, can then speak into it. Sending a command writes the title onto
 the node, so the DAG reads as a live map of who is doing what.
 
-Every terminal runs conducted by default, so it is a tracked, conductable
-session out of the box — no opt-in. The parent-autogate rule lets an
+A session Aoide opens (`aoide spawn`, `aoide conduct`) runs conducted, so it
+is a tracked, conductable session out of the box; an agent started in a
+plain terminal is tracked by its hooks but takes no typed input (see "What
+runs conducted" below). The parent-autogate rule lets an
 orchestrator freely command the children it spawned; sibling sessions
 (sharing a live parent) autogate each other too; and the reciprocal holds as
 well — a parent automatically hears the children it spawned, as the daemon's
@@ -171,44 +173,33 @@ hooks in the same way, but its provider requests time out (3 retries, 3
 failures) — a gap in pi's provider-network path, not in the launch or
 hook-registration mechanism.
 
-## Conduct-by-default — every terminal is a conducted session
+## What runs conducted
 
-Aoide is the orchestration core, and "every terminal conductable + tracked
-by default" is the default state of the box. It is delivered entirely in the
-terminal dendrite — no daemon, no background process.
+A session runs conducted when Aoide opens it. `aoide conduct -- <cmd>` runs
+the program in a PTY of its own and binds a control socket for it, so the
+session is tracked and conductable; `aoide spawn` launches through the same
+wrap, detached or, with `--windowed`, in a window of `$AOIDE_TERMINAL`. Any
+other terminal runs a plain shell: Strillix lists it in its terminal list
+(`$STRILLIX_ROOT/stage/terminals.json`), and core keeps no
+session for it. An agent started there registers through its own hooks, is
+tracked, and answers approvals, but `send` refuses it: it has no control
+socket to type into.
 
-- **The kitty wrapper.** `modules/dendrites/kitty.nix` defines an
-  `aoide-shell` wrapper (`pkgs.writeShellScriptBin`) and points kitty's
-  `shell` setting at it, so kitty launches every window's login shell
-  THROUGH the wrapper. The wrapper's logic, in order (each branch ends in
-  `exec`, so it can never strand the user):
-  1. `AOIDE_NO_CONDUCT` set → `exec` the plain login shell (the escape hatch).
-  2. `aoide` not on PATH (`command -v aoide` fails) → `exec` the plain login
-     shell (never leave the user shell-less if the CLI is broken/absent).
-  3. otherwise → `exec aoide conduct --agent shell [--parent
-     $AOIDE_SESSION_ID] -- "$login_shell" -l`. It always wraps — each
-     terminal is its own session.
-  4. belt-and-suspenders → if the conduct exec somehow returns, fall through
-     to `exec` the plain login shell anyway.
-
-  The login shell is resolved from `$SHELL`, then passwd (`getent`), then
-  `/bin/sh`. Every failure mode degrades to the plain login shell — a broken
-  conduct must never make terminals unusable.
 - **Parent-nesting builds the DAG tree.** `aoide conduct` exports
-  `AOIDE_SESSION_ID` into the shell it runs. When a nested terminal is
-  spawned from inside a conducted shell (a child process inheriting that
-  env), the wrapper passes `--parent "$AOIDE_SESSION_ID"`, so the new
-  session hangs under its spawner in the graph. Sibling kitty windows (which
-  inherit kitty's own env, not a shell's) simply become their own root
-  sessions — correct either way. A hook-registered session with no explicit
-  parent resolves one automatically via `hookAncestry` (see
-  [[Session-Graph]]).
-- **Double-PTY layering.** kitty allocates a PTY for the window; `conduct`
-  allocates a SECOND PTY for the login shell and shuttles bytes between them
-  (kitty-pty ↔ conduct's stdin/stdout ↔ conduct-pty master ↔ the shell).
-  Raw-mode, SIGWINCH→TIOCSWINSZ resize passthrough, and Ctrl-C-as-a-byte all
-  flow through the inner pty. This nesting is the one thing to smoke-test
-  live before a rebuild.
+  `AOIDE_SESSION_ID` into the program it runs. A conduct or spawn
+  registration takes its parent from an explicit `--parent` first, then from
+  its own process ancestry matched against a live agent's `hookAncestry`,
+  then from an ambient `AOIDE_SESSION_ID` that names a live session — so a
+  session launched from inside another hangs under it in the graph. A
+  hook-registered session takes the conducted wrap it runs under as its
+  parent, else its `AOIDE_SESSION_ID` claim; with neither it registers
+  parentless (see [[Session-Graph]]).
+- **Double-PTY layering.** A conducted session in a terminal window stacks
+  two PTYs: the terminal allocates one for the window, and `conduct`
+  allocates a SECOND for the program and shuttles bytes between them
+  (terminal-pty ↔ conduct's stdin/stdout ↔ conduct-pty master ↔ the
+  program). Raw-mode, SIGWINCH→TIOCSWINSZ resize passthrough, and
+  Ctrl-C-as-a-byte all flow through the inner pty.
 
 ## The gate (house rule: one gate, one audit log)
 
@@ -257,7 +248,7 @@ through.
     an orchestrator freely commanding a child it spawned. Cross-tree or
     unrelated sends stay pending. A bare `session start --parent` or a `graph
     link` carries no spawn-time stamp, and moving an edge drops its stamp, so
-    either earns no autogate: the send is held pending. This is what makes conduct-by-default a
+    either earns no autogate: the send is held pending. This is what makes conducted sessions a
     real orchestration mesh: the parent of a subtree can drive it,
     strangers cannot. The sender's session is kernel-attested, never read
     off a forgeable env var: `aoide send` (over MCP, the `aoide mcp serve

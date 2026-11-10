@@ -48,7 +48,7 @@ rices manifest).
 | `evals` (vitest-eval harness) | **`evals`** (unbuilt) | see Status below |
 | `tui` (terminal UI library) | **`conductor`** | the session DAG view + roster CLI/TUI |
 | `coding-agent` (the concrete app) | **`cli`** / **`strillix`** | the two app crates that assemble every domain crate into the shipped binaries |
-| *(none)* | **`conduct`** | aoide-unique: the PTY multiplexer + session DAG + hook plumbing that makes every terminal a tracked, conductable session |
+| *(none)* | **`conduct`** | aoide-unique: the PTY multiplexer + session DAG + hook plumbing that tracks every agent session and makes each session Aoide opens conductable |
 | *(none)* | **`strillix-rice`** | Strillix: the ricing/design engine (notes → theme, rices, stage) |
 | *(none)* | **`screen`** | aoide-unique: read-only desktop view + pointer synthesis for agents |
 | *(none)* | **`secrets`** | aoide-unique: the socket-only credential broker |

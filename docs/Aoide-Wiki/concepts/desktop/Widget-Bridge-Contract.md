@@ -24,9 +24,9 @@ IPC. This page is the contract both sides are built to.
   agent hook event ([[Agent-Hooking]]) that maps the event to a canonical
   session state through the harness's agent profile (`--agent`, default
   claude). This is the agent↔desktop bridge.
-- **`conduct`** ([[Conductor-Channel]]) — owns every terminal's PTY, so it is the
-  producer of a shell's live `cwd`, current command, and idle/working state, and
-  the injection channel for `send`.
+- **`conduct`** ([[Conductor-Channel]]) — owns each conducted session's PTY, so
+  it is the producer of a conducted shell's live `cwd`, current command, and
+  idle/working state, and the injection channel for `send`.
 - **`ShellBridge.qml`** — QML's ONLY outbound channel: newline-JSON socket
   commands. No MCP, no HTTP, no shell-exec from QML.
 

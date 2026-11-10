@@ -536,9 +536,9 @@ session id, `ByLog` by the journal its ledger line's `logPath` names); a
 candidate
 the harness arm finds nothing for falls to the TERMINAL arm — a `restore`
 snapshot present (P-C5) marks it a conducted shell, not a harness, so it
-resolves `[<login shell>, "-l"]` (the same `$SHELL` → passwd → `/bin/sh`
-order `modules/dendrites/kitty.nix`'s own wrapper uses to pick a shell for a
-brand-new terminal) rather than a `--resume <id>` no shell could ever honor.
+resolves `[<login shell>, "-l"]` (the login shell found in the `$SHELL` →
+passwd → `/bin/sh` order) rather than a `--resume <id>` no shell could ever
+honor.
 A candidate neither arm resolves is skipped with a taught message naming it,
 never a guessed invocation. A `ByLog` line whose `logPath` is absent, not
 absolute or unsafe, under `state/sessions/`, or not a regular file is skipped

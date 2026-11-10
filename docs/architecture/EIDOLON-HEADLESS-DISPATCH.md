@@ -170,8 +170,8 @@ eidolon run --report-to <target> …
         ├─ swarm:<session-id|channel>   → eidolon send --from eidolon <id> '<event json>'
         │                                  (crates/swarm: maildir + doorbell, no daemon)
         ├─ aoide:<session-id>           → aoide send --id <id> -- '<event json>'
-        │                                  (conductor channel; every terminal is a conducted
-        │                                   session; this Claude Code session is one)
+        │                                  (conductor channel; reaches a session Aoide
+        │                                   opened, which holds a control socket)
         └─ file:<path>                  → append JSONL (a Monitor/until-loop reads it)
 ```
 

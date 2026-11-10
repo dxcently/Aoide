@@ -22,18 +22,20 @@ integration. The TUI sibling is the conductor (`aoide conductor`).
 
 ## What it watches
 
-**Every terminal, by default — plus** any agent from any source. The spawn
-wrapper is mandatory, not opt-in ([[Conductor-Channel]]): **kitty points its
-shell at the `aoide-shell` wrapper, so EVERY window runs its login shell under
-`aoide conduct` and self-registers as a tracked, conductable session.** The
-roster is therefore the whole desktop's terminals, not just the ones someone
-remembered to wrap. On top of that baseline:
+**Every agent session, from any source.** A session Aoide opens
+(`aoide spawn`, `aoide conduct`) is tracked and conductable
+([[Conductor-Channel]]); an agent started in a plain terminal registers
+through its own hooks and is tracked too, but takes no typed input. A
+terminal no session runs in is not a session: Strillix lists it in its
+terminal list (`$STRILLIX_ROOT/stage/terminals.json`), and a rice can show
+it beside the sessions. The roster draws on:
 
 - **[[Melete]]-spawned** sessions — the sandboxed agent a `code` run drops into a
   repo checkout, when it surfaces as a local terminal.
-- **claude-CLI / other agents** started inside a conducted shell — they inherit
-  `AOIDE_SESSION_ID` and nest under it in the DAG (or run `aoide conduct -- <cmd>`
-  explicitly for their own conductable node).
+- **claude-CLI / other agents** started in any terminal — their hooks register
+  them, and one started inside a conducted session inherits `AOIDE_SESSION_ID`
+  and nests under it in the DAG (or runs `aoide conduct -- <cmd>` explicitly
+  for its own conductable node).
 - **Discovery fallback** for anything unwrapped (a terminal whose foreground
   process is a known agent CLI).
 
@@ -104,8 +106,8 @@ A conducted shell blocked at a `sudo` **password** prompt carries the distinct
 `needsSudo` signal — surfaced as the dock's [[Gadget-Dock|sudo lock badge]],
 and the same signal the [[A2A-Door]] reports as the `auth-required` task state.
 
-Conduct-by-default means every closed or killed terminal is also a roster row
-to clean up — a `SUPER+Q` or SIGKILL tears the wrap process down uncatchably,
+A conducted session whose terminal is closed or killed is a roster row to
+clean up — a `SUPER+Q` or SIGKILL tears the wrap process down uncatchably,
 so it can never mark itself `done`. The [[Session-Graph]]'s **liveness
 reaper** (`aoide session reap`, a ~12s systemd timer) sweeps these out-of-band
 by window-gone-or-pid-gone, so the roster never accumulates dead rows.
@@ -116,17 +118,12 @@ session spawned which), viewed through bare `aoide graph` and managed
 through the `project`/`session` command families. The roster is the rows;
 the graph is the tree they hang from.
 
-The roster also has its **desktop gadget**: `TerminalsGadget` in the
-[[Gadget-Dock]] renders the PROCESS view live — a pure view of `sessions.json`
-alone: the daemon's Hyprland window-event listener publishes a synthetic
-`shell` record (keyed by window address) for every live, untracked terminal
-window, so the widget just filters and de-dupes that single source rather
-than merging it with Hyprland's own client list. A row's headline is its
-`activity` (the foreground command / edited file, or the bare shell/agent
-process when idle), `cwd` as subtext; click a row to jump. The gadget has no
-prune affordance: the shellbridge socket has no prune command yet (open thread)
-— the dock never invents IPC. See [[Widget-Bridge-Contract]] for the full
-field contract.
+The roster also has its **desktop views**: sonata's TERMINALS, cadenza's board
+and barcarolle's agents dock read `sessions.json` beside Strillix's terminal
+list, each in its own rice's look. A listed terminal whose window no session
+holds shows as a bare row, with no session ID, petname or session menu; a
+click on any row jumps to its window. See [[Widget-Bridge-Contract]] for the
+full field contract.
 
 ### Hover-preview → the bar's workspace glyph
 
