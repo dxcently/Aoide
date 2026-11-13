@@ -61,7 +61,7 @@ qmldir anywhere in the rice or in the root; `find … -name qmldir` is empty):
   (BarChart, Block, BrailleChart, Gauge, GlowText, Pane, Sparkline,
   Specimen, StateLamp).
 - The canvas loads `Specimen.qml`, which instantiates every helper by URL:
-  `[aoide/widgetpreview] loaded qs:@/qs/rices/cadenza/Specimen.qml`, and the
+  `[strillix/widgetpreview] loaded qs:@/qs/rices/cadenza/Specimen.qml`, and the
   shot is in `design/shots/`.
 - Live bindings survive the Loader: a `Qt.binding` passed in `setSource`'s
   initial properties keeps tracking (a pane stat bound to a counter went

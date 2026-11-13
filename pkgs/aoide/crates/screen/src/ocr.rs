@@ -342,7 +342,7 @@ pub fn run_tesseract_tsv(image: &Path, psm: u8) -> Result<String, OcrError> {
 pub fn ocr(inv: &Invocation) -> Outcome {
     let cmd = "screen.ocr";
     let Some(image_arg) = inv.args.first() else {
-        return Outcome::usage(cmd, format!("usage: aoide {} <capture> [--json]", inv.path.join(" ")));
+        return Outcome::usage(cmd, format!("usage: strillix {} <capture> [--json]", inv.path.join(" ")));
     };
     let image_path = PathBuf::from(image_arg);
     if !image_path.is_file() {

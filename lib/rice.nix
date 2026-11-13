@@ -91,7 +91,7 @@ let
       let
         c = builtins.head checks;
       in
-      lib.throwIf c.cond "aoide widget ${owner}/${slot}: ${c.msg}" (
+      lib.throwIf c.cond "strillix widget ${owner}/${slot}: ${c.msg}" (
         guard owner slot (builtins.tail checks) val
       );
 
@@ -245,7 +245,7 @@ in
     in
     lib.throwIf (!(builtins.isAttrs produced))
       (
-        "aoide widget ${owner}/${slot}: its function returned"
+        "strillix widget ${owner}/${slot}: its function returned"
         + " ${builtins.typeOf produced}, not an attrset"
       )
       (
@@ -315,7 +315,7 @@ in
     in
     lib.throwIf (unmet != { })
       (
-        "aoide composition: slot dependency not satisfied — ${unmetMsg}."
+        "strillix composition: slot dependency not satisfied — ${unmetMsg}."
         + " Add the slot to the composition, or drop the dependency from the widget's record."
       )
       {

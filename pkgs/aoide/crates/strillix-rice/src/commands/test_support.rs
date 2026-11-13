@@ -34,7 +34,7 @@ pub(crate) fn ensure_default_rices_fixture() {
     if std::env::var(crate::widgets::RICES_EVAL_FIXTURE_VAR).is_ok() {
         return;
     }
-    let path = std::env::temp_dir().join("aoide-rices-eval-fixture-default.json");
+    let path = std::env::temp_dir().join("strillix-rices-eval-fixture-default.json");
     if !path.is_file() {
         std::fs::write(&path, r#"{"manifest":{},"registry":{}}"#).unwrap();
     }
@@ -68,7 +68,7 @@ impl Drop for RealRicesPath {
 }
 
 fn real_path_marker() -> std::path::PathBuf {
-    std::env::temp_dir().join("aoide-rices-gate-real-path.marker")
+    std::env::temp_dir().join("strillix-rices-gate-real-path.marker")
 }
 
 /// Writes an executable `nix-instantiate` into `<root>/fake-bin` that appends

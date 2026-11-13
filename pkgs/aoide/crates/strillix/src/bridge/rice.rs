@@ -120,7 +120,7 @@ pub(crate) fn dispatch_rice_mode(action: &RiceModeAction) -> Result<String, Stri
     }
 }
 
-/// Fire a detached `notify-send -- "Aoide" <message>` — the same reaper-thread
+/// Fire a detached `notify-send -- "Strillix" <message>` — the same reaper-thread
 /// idiom as [`dispatch_power`]'s spawned child, so a slow or hung
 /// `notify-send` can never block a connection. The message can echo a rice
 /// folder name: `--` keeps a leading `-` from reading as an option and
@@ -130,7 +130,7 @@ pub(crate) fn dispatch_rice_mode(action: &RiceModeAction) -> Result<String, Stri
 pub(crate) fn notify(message: &str) {
     match std::process::Command::new("notify-send")
         .arg("--")
-        .arg("Aoide")
+        .arg("Strillix")
         .arg(aoide_protocol::dialog::escape_markup(message))
         .spawn()
     {
@@ -139,7 +139,7 @@ pub(crate) fn notify(message: &str) {
                 let _ = child.wait();
             });
         }
-        Err(e) => eprintln!("[aoide/shellbridge] notify-send failed (the action's own outcome stands): {e}"),
+        Err(e) => eprintln!("[strillix/shellbridge] notify-send failed (the action's own outcome stands): {e}"),
     }
 }
 
@@ -846,7 +846,7 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(25));
         }
         let argv: Vec<String> = std::fs::read_to_string(&log).unwrap().lines().map(str::to_string).collect();
-        assert_eq!(argv, ["--", "Aoide", "-x &lt;b&gt;a&amp;b&lt;/b&gt;"]);
+        assert_eq!(argv, ["--", "Strillix", "-x &lt;b&gt;a&amp;b&lt;/b&gt;"]);
         let _ = std::fs::remove_dir_all(&root);
     }
 

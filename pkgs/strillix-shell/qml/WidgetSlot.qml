@@ -114,7 +114,7 @@ Item {
             try {
                 item[keys[i]] = root.extraProps[keys[i]]
             } catch (e) {
-                console.warn("[aoide/widgetslot] extra", keys[i], "not assignable on slot", root.slot, "-", e)
+                console.warn("[strillix/widgetslot] extra", keys[i], "not assignable on slot", root.slot, "-", e)
             }
         }
     }
@@ -149,13 +149,13 @@ Item {
     function _finish(comp, props, source) {
         if (source !== root._builtSource || root._item) return
         if (comp.status === Component.Error) {
-            console.warn("[aoide/widgetslot] failed to load slot", root.slot, "-", comp.errorString())
+            console.warn("[strillix/widgetslot] failed to load slot", root.slot, "-", comp.errorString())
             return
         }
         if (comp.status !== Component.Ready) return
         var item = comp.createObject(root, props)
         if (!item) {
-            console.warn("[aoide/widgetslot] createObject failed for slot", root.slot)
+            console.warn("[strillix/widgetslot] createObject failed for slot", root.slot)
             return
         }
         root._item = item

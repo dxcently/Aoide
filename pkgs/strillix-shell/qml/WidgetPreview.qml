@@ -178,7 +178,7 @@ ShellRoot {
         // canvas's own chrome — so the console line is what a headless run (and
         // a capture's log) can read back. Same posture the reload note below
         // already holds.
-        console.log("[aoide/widgetpreview] " + line)
+        console.log("[strillix/widgetpreview] " + line)
     }
     function tail(s, n) {
         var t = ("" + s).replace(/\s+$/, "")
@@ -634,7 +634,7 @@ ShellRoot {
             // The in-memory log does not survive the rebuild it is announcing,
             // so the same line also goes to the Quickshell log, where it does.
             canvas.log("auto-reload ← " + canvas.lastReloadPath)
-            console.log("[aoide/widgetpreview] auto-reload ←", canvas.lastReloadPath)
+            console.log("[strillix/widgetpreview] auto-reload ←", canvas.lastReloadPath)
             canvas.requestReload()
         }
     }
@@ -666,7 +666,7 @@ ShellRoot {
         var n = canvas.refreshCopies()
         // The in-memory log dies with the reload; the console line survives.
         canvas.log("reload: " + n + " copies refreshed")
-        console.log("[aoide/widgetpreview] reload:", n, "copies refreshed of", canvas.watchPaths.length, "watched")
+        console.log("[strillix/widgetpreview] reload:", n, "copies refreshed of", canvas.watchPaths.length, "watched")
         reloadSettle.restart()
     }
     function noteEdit(path) {
@@ -1540,7 +1540,7 @@ ShellRoot {
 
     // ── The agent seam: `quickshell -p <root>/run/qml/WidgetPreview.qml ipc
     //    call preview <fn> …` ───────────────────────────────────────────────
-    // AoideIpc.qml's precedent, one target per surface. `strillix preview shot`
+    // StrillixIpc.qml's precedent, one target per surface. `strillix preview shot`
     // and `strillix preview tree` drive exactly these three functions; the Rust
     // side owns the paths, the polling and the sidecar, so this end only picks
     // an item, grabs it and writes what it saw.
@@ -1673,7 +1673,7 @@ ShellRoot {
     // ── The window ─────────────────────────────────────────────────────────
     FloatingWindow {
         id: win
-        title: "aoide-widget-preview"
+        title: "strillix-widget-preview"
         implicitWidth: 1400
         implicitHeight: 900
         color: canvas.chromeBg

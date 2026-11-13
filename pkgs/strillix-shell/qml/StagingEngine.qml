@@ -71,7 +71,7 @@ QtObject {
             try {
                 root.manifest = JSON.parse(manifestFile.text())
             } catch (e) {
-                console.warn("[aoide/stagingengine] Failed to parse rices/manifest.json:", e)
+                console.warn("[strillix/stagingengine] Failed to parse rices/manifest.json:", e)
             }
         }
         Component.onCompleted: manifestFile.reload()
@@ -96,7 +96,7 @@ QtObject {
             try {
                 root.registry = JSON.parse(registryFile.text())
             } catch (e) {
-                console.warn("[aoide/stagingengine] Failed to parse rices/registry.json:", e)
+                console.warn("[strillix/stagingengine] Failed to parse rices/registry.json:", e)
             }
         }
         Component.onCompleted: registryFile.reload()

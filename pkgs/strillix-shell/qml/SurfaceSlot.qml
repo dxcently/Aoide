@@ -57,7 +57,7 @@ QtObject {
     // the active rice if it authored `slot`, else sonata, else the lane-side
     // `fallback` Component when the host gives one, else nothing. Most
     // window-owning slots give none (sonata IS their floor); `switcher` gives
-    // the plain AoideSwitcher, because no rice ships one.
+    // the plain StrillixSwitcher, because no rice ships one.
     readonly property string resolvedRice: stagingEngine.resolveRice(theme.riceName, slot)
     readonly property bool riceProvides: resolvedRice !== ""
     readonly property string resolvedSource:
@@ -103,7 +103,7 @@ QtObject {
     // anchor left without its bridge would hand the body `undefined` in
     // silence, so it says so.
     Component.onCompleted: {
-        if (root.bridge === undefined) console.warn("[aoide/surfaceslot] slot", root.slot, "was given no bridge")
+        if (root.bridge === undefined) console.warn("[strillix/surfaceslot] slot", root.slot, "was given no bridge")
         _rebuild()
     }
 
@@ -143,7 +143,7 @@ QtObject {
         } else if (root.fallback) {
             root._create(root.fallback)
         } else {
-            console.warn("[aoide/surfaceslot] no rice (active or baseline) provides slot", root.slot)
+            console.warn("[strillix/surfaceslot] no rice (active or baseline) provides slot", root.slot)
         }
     }
 
@@ -182,7 +182,7 @@ QtObject {
 
     function _finish(comp) {
         if (comp.status === Component.Error) {
-            console.warn("[aoide/surfaceslot] failed to load slot", root.slot, "-", comp.errorString())
+            console.warn("[strillix/surfaceslot] failed to load slot", root.slot, "-", comp.errorString())
             return
         }
         if (comp.status !== Component.Ready) return
@@ -193,7 +193,7 @@ QtObject {
         // declared today: direct ShellRoot children, no Item ancestor.
         var item = comp.createObject(null, root._props())
         if (!item) {
-            console.warn("[aoide/surfaceslot] createObject failed for slot", root.slot)
+            console.warn("[strillix/surfaceslot] createObject failed for slot", root.slot)
             return
         }
         root.item = item

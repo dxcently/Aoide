@@ -29,7 +29,7 @@ The QML skeleton is shipped in `pkgs/strillix-shell/qml/`. `shell.qml`
 colours in one pass on an atomic replace, the hot-reload), **`ShellBridge`**
 (the unix-socket client, the sole outbound channel from QML —
 `focusSession(address)` → shellbridge → hyprctl, no MCP/HTTP/shell-exec from
-QML), **`AoideIpc`** (the external-reload IPC target, below), and
+QML), **`StrillixIpc`** (the external-reload IPC target, below), and
 **`StagingEngine`** (resolves which rice dresses a slot and where its QML
 lives) — plus a plain `QtObject` holding cross-widget session state (the
 floating-gadget model, the hover-trace link).
@@ -46,7 +46,7 @@ internally. Four more surfaces are **`SurfaceSlot`**-rooted overlays —
 (the window switcher) — each resolving a rice widget through the same
 baseline-fallback chain `WidgetSlot` uses (rice override → sonata, the
 shipped baseline every rice falls back to → the anchor's lane-side
-`fallback`, which only `switcher` gives: the plain `AoideSwitcher`), but as a
+`fallback`, which only `switcher` gives: the plain `StrillixSwitcher`), but as a
 non-visual `QtObject` sibling instead of
 a sized `Item`, since each slot's root IS its own `PanelWindow` rather than
 content parented into an existing layout. `RiceSurfaces` hosts one more
@@ -90,7 +90,7 @@ meant editing an existing widget body (or any of those lane files) never
 rendered until a full `systemctl --user restart strillix-quickshell.service` —
 found via live debugging.
 
-`AoideIpc.qml` closes it: a `Quickshell.Io.IpcHandler` singleton
+`StrillixIpc.qml` closes it: a `Quickshell.Io.IpcHandler` singleton
 (`target: "shell"`, one exposed `function reload(): void { Quickshell.reload(false) }`),
 instantiated in `shell.qml` alongside `theme`/`bridge`/`stagingEngine`/`shared`
 — no properties of its own, wired purely for the side effect. `quickshell ipc
@@ -105,7 +105,7 @@ entire scene fresh from `shell.qml`, re-executing every dynamic load along the
 way, closer to an in-process restart than a targeted patch. `hard` only
 decides whether `PersistentProperties`-marked state survives the rebuild;
 this codebase declares none, so `hard:true` and `hard:false` are currently
-observably identical — `AoideIpc.qml` passes `false` to match Quickshell's own
+observably identical — `StrillixIpc.qml` passes `false` to match Quickshell's own
 built-in auto-reload-on-static-file-change path (`onWatchedFilesChanged()`
 also calls `reload(false)`), not because soft matters yet. One consequence
 worth carrying forward: a reload resets *all* non-persistent QML state (tray
@@ -322,7 +322,7 @@ the ladder reaches its floor, reporting the output connection as suspect.
 The journal carries the authoritative record of what happened: dunst is
 configured `skip_display` and only forwards to the notifications ledger, which the
 stuck shell itself draws, so the notification cannot render while the
-failure it describes is still live. `AoideIpc.qml` logs every
+failure it describes is still live. `StrillixIpc.qml` logs every
 `Quickshell.screens` change (`onScreensChanged`) to the journal as a further
 breadcrumb — the screen list collapsing at the moment of the lockup, not a
 fix; no QML-side fix is possible for the reason above.

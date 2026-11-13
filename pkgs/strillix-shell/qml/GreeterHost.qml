@@ -146,7 +146,7 @@ ShellRoot {
         }
         function onReadyToLaunch() {
             if (!root._answered) {
-                console.warn("[aoide/greeter] greetd reported an unanswered conversation ready; starting over")
+                console.warn("[strillix/greeter] greetd reported an unanswered conversation ready; starting over")
                 Greetd.cancelSession()
                 settle.restart()
                 return
@@ -164,7 +164,7 @@ ShellRoot {
             // password with an error of its own; the refusal stays the word.
             if (root._cancelReply) {
                 root._cancelReply = false
-                console.info("[aoide/greeter] greetd's reply to the cancel after a refusal:", error)
+                console.info("[strillix/greeter] greetd's reply to the cancel after a refusal:", error)
                 return
             }
             auth.busy = false
@@ -203,7 +203,7 @@ ShellRoot {
                 root.sessionCommand = s.command || []
                 root.sessionDesktop = s.desktop || ""
             }
-            catch (e) { console.warn("[aoide/greeter] session.json:", e) }
+            catch (e) { console.warn("[strillix/greeter] session.json:", e) }
         }
     }
 
@@ -232,13 +232,13 @@ ShellRoot {
         function _finish(comp) {
             if (comp.status !== Component.Ready) {
                 if (comp.status === Component.Error)
-                    console.warn("[aoide/greeter] the face failed to load:", comp.errorString())
+                    console.warn("[strillix/greeter] the face failed to load:", comp.errorString())
                 return
             }
             auth.ready = false
             var item = comp.createObject(faceHolder, { "theme": theme, "bridge": null, "auth": auth })
             if (!item) {
-                console.warn("[aoide/greeter] the face could not be created; the floor stays")
+                console.warn("[strillix/greeter] the face could not be created; the floor stays")
                 return
             }
             item.anchors.fill = faceHolder
@@ -251,7 +251,7 @@ ShellRoot {
             interval: root.faceReadyMs
             onTriggered: {
                 if (win.face === null || auth.ready) return
-                console.warn("[aoide/greeter] the face did not report ready within", interval, "ms; the floor takes over")
+                console.warn("[strillix/greeter] the face did not report ready within", interval, "ms; the floor takes over")
                 win.face.destroy()
                 win.face = null
             }

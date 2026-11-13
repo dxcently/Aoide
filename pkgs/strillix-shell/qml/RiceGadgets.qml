@@ -44,8 +44,8 @@
 // renders nothing — WidgetSlot itself stays silent in that case (it only
 // warns on a load/create failure, never on "no rice provides this slot").
 // So both declared kinds fail loudly the same way, this warns explicitly at
-// the `[aoide/ricegadgets]` prefix, mirroring `SurfaceSlot.qml`'s
-// `[aoide/surfaceslot]` "no rice (active or baseline) provides slot" warning,
+// the `[strillix/ricegadgets]` prefix, mirroring `SurfaceSlot.qml`'s
+// `[strillix/surfaceslot]` "no rice (active or baseline) provides slot" warning,
 // keyed off the same signal WidgetSlot itself computes: `resolvedRice === ""`.
 
 import QtQuick
@@ -99,7 +99,7 @@ Repeater {
 
         function _warnIfUnresolved() {
             if (dockSlot.resolvedRice === "") {
-                console.warn("[aoide/ricegadgets] no rice (active or baseline) provides dock slot", dockSlot.slot)
+                console.warn("[strillix/ricegadgets] no rice (active or baseline) provides dock slot", dockSlot.slot)
             }
         }
     }

@@ -274,7 +274,7 @@ pub fn diff(inv: &Invocation) -> Outcome {
         return Outcome::usage(
             cmd,
             format!(
-                "usage: aoide {} <before-capture> [--settle-ms N] [--threshold N] [--out PATH] [--json]",
+                "usage: strillix {} <before-capture> [--settle-ms N] [--threshold N] [--out PATH] [--json]",
                 inv.path.join(" ")
             ),
         );

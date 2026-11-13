@@ -10,7 +10,7 @@
   own list, not a subset check against `cli`'s own — the two evolve
   separately.
 - **`commands::preview`'s root is a SIBLING of the live socket dir, never a
-  descendant.** Its default (`$XDG_RUNTIME_DIR/aoide-preview`) and every
+  descendant.** Its default (`$XDG_RUNTIME_DIR/strillix-preview`) and every
   `--root` a caller supplies must never resolve under
   `$XDG_RUNTIME_DIR/aoide/` — that is the live daemon's own socket dir
   (`aoided.sock`, `session-*.sock`), and the live reaper's socket globs
@@ -108,7 +108,7 @@
   OWN scratch root out of plain files under a temp dir and drops a fake
   `qs` shell script on `PATH` (guarded by `aoide_test_support::
   env_lock()`) — never any of `p2-root`/`smoke-root`/`review-root` or the
-  real `$XDG_RUNTIME_DIR/aoide-preview`.
+  real `$XDG_RUNTIME_DIR/strillix-preview`.
 - **`resolve_root` is the one `--root` gate** for all six preview
   commands: a `..` component and anything at or under the live daemon's
   dir are usage errors (`check_root`); no command takes a root any other

@@ -126,10 +126,10 @@ pub fn register(r: &mut Registry) {
 /// This ceremony's own marker prefix, shared by both commands — never run
 /// concurrently in one process's own stdout stream (each invocation is a
 /// wholly separate `quickshell` child), so one marker suffices; distinct
-/// from `strillix secrets ask`'s `AOIDE_SECRETS_ASK_RESULT:` so a stray line
+/// from `strillix secrets ask`'s `STRILLIX_SECRETS_ASK_RESULT:` so a stray line
 /// from that OTHER ceremony's dialog can never be misread as a result here
 /// ([`super::dialog_qml`]'s own doc).
-const RESULT_MARKER: &str = "AOIDE_PAIR_ASK_RESULT:";
+const RESULT_MARKER: &str = "STRILLIX_PAIR_ASK_RESULT:";
 
 /// `aoide_client::pair_watch::REJECT_LABEL`, restated here as a literal —
 /// this crate cannot depend on `aoide-client` for one string constant, the
@@ -159,7 +159,7 @@ fn handle_pair_ask(inv: &Invocation) -> Outcome {
     let title = format!("aoide \u{b7} pairing with {name}");
     let header = vec![HeaderLine::bold(context.clone())];
 
-    match dialog_qml::run_code_entry_dialog(QUICKSHELL_CMD, "aoide-pair-ask", &title, &header, DISMISS_TEXT, RESULT_MARKER) {
+    match dialog_qml::run_code_entry_dialog(QUICKSHELL_CMD, "strillix-pair-ask", &title, &header, DISMISS_TEXT, RESULT_MARKER) {
         Ok(dialog_qml::AskResult::Approved(typed)) => {
             Outcome::ok(cmd, "code entered").with_data(json!({ "result": "approved", "code": typed, "id": id }))
         }
@@ -188,7 +188,7 @@ fn handle_pair_show(inv: &Invocation) -> Outcome {
     let title = format!("aoide \u{b7} pairing with {name}");
     let header = vec![HeaderLine::bold(context.clone())];
 
-    match dialog_qml::run_code_show_dialog(QUICKSHELL_CMD, "aoide-pair-show", &title, &header, code, RESULT_MARKER) {
+    match dialog_qml::run_code_show_dialog(QUICKSHELL_CMD, "strillix-pair-show", &title, &header, code, RESULT_MARKER) {
         // Done, Esc, and the native window close all reach here alike (the
         // show template emits the identical `DONE` marker for all three,
         // `dialog_qml::render_code_show_qml`'s own doc) — there is nothing

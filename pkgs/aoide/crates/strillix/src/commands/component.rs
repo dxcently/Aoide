@@ -239,12 +239,12 @@ mod tests {
         let bin = dir.join("bin");
         std::fs::create_dir_all(&bin).unwrap();
         let ran = dir.join("stub.args");
-        let shim = bin.join("aoide-component-stub");
+        let shim = bin.join("strillix-component-stub");
         std::fs::write(&shim, format!("#!/bin/sh\nprintf '%s ' \"$@\" > '{}'\n", ran.display())).unwrap();
         std::fs::set_permissions(&shim, std::fs::Permissions::from_mode(0o755)).unwrap();
         std::env::set_var("PATH", &bin);
 
-        let argv = vec!["aoide-component-stub".to_string(), "--open".to_string()];
+        let argv = vec!["strillix-component-stub".to_string(), "--open".to_string()];
         let out = spawn_argv("component", &argv, Some("DP-1"));
         assert_eq!(out.status.exit_code(), 0, "{}", out.message);
 
@@ -258,9 +258,9 @@ mod tests {
 
     #[test]
     fn a_missing_provider_binary_is_a_failure_that_names_it() {
-        let argv = vec!["aoide-no-such-provider-binary".to_string()];
+        let argv = vec!["strillix-no-such-provider-binary".to_string()];
         let out = spawn_argv("component", &argv, None);
         assert_eq!(out.status.exit_code(), 1);
-        assert!(out.message.contains("could not start aoide-no-such-provider-binary"), "{}", out.message);
+        assert!(out.message.contains("could not start strillix-no-such-provider-binary"), "{}", out.message);
     }
 }

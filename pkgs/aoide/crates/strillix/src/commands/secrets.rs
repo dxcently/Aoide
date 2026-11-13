@@ -13,7 +13,7 @@
 //! contract. This module keeps only what is genuinely secrets-shaped: the
 //! `--secret`/`--consumer`/`--seconds`/`--reason`/`--from` flags, this
 //! command's own header wording ("release `X` -> Y", the reason/origin/
-//! countdown lines), and its own `AOIDE_SECRETS_ASK_RESULT:` marker.
+//! countdown lines), and its own `STRILLIX_SECRETS_ASK_RESULT:` marker.
 //!
 //! **Output contract — byte-identical to zenity's** (`super::dialog_qml`'s
 //! own doc has the full shape): the typed code on stdout with exit 0; the
@@ -60,7 +60,7 @@ pub fn register(r: &mut Registry) {
 /// carry for THIS command — [`super::pair`]'s own `strillix pair ask` carries a
 /// distinct marker of its own, so a stray line from one dialog can never be
 /// misread as a result from the other.
-const RESULT_MARKER: &str = "AOIDE_SECRETS_ASK_RESULT:";
+const RESULT_MARKER: &str = "STRILLIX_SECRETS_ASK_RESULT:";
 
 /// The on-screen dismiss control's label AND the literal stdout value
 /// `aoide_secrets::watch::run_entry_dialog` compares against for the
@@ -95,7 +95,7 @@ fn handle_secrets_ask(inv: &Invocation) -> Outcome {
     let title = format!("aoide \u{b7} {secret}");
     let header = build_header(secret, consumer, seconds, reason, from_line);
 
-    match dialog_qml::run_code_entry_dialog(QUICKSHELL_CMD, "aoide-secrets-ask", &title, &header, DISMISS_TEXT, RESULT_MARKER) {
+    match dialog_qml::run_code_entry_dialog(QUICKSHELL_CMD, "strillix-secrets-ask", &title, &header, DISMISS_TEXT, RESULT_MARKER) {
         Ok(dialog_qml::AskResult::Approved(code)) => {
             Outcome::ok(cmd, "code entered").with_data(json!({ "result": "approved", "code": code }))
         }

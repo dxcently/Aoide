@@ -334,7 +334,7 @@ fn path_is_clean(root: &Path, path: &Path) -> bool {
 fn write_beside(target: &Path, bytes: &[u8]) -> std::io::Result<()> {
     use std::io::Write;
     let name = target.file_name().expect("file target").to_string_lossy();
-    let tmp = target.with_file_name(format!(".{name}.aoide-refresh.{}", std::process::id()));
+    let tmp = target.with_file_name(format!(".{name}.strillix-refresh.{}", std::process::id()));
     let result = (|| {
         let mut f = std::fs::File::create(&tmp)?;
         f.write_all(bytes)?;
@@ -984,7 +984,7 @@ mod tests {
         assert_eq!(fx.read("widgets/foo.tmp.999999").unwrap(), "mine");
         let left: Vec<_> = std::fs::read_dir(crate::paths::rice_dir("sonata").join("widgets"))
             .unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
-        assert!(!left.iter().any(|n| n.contains("aoide-refresh")), "{left:?}");
+        assert!(!left.iter().any(|n| n.contains("strillix-refresh")), "{left:?}");
     }
 
     #[test]

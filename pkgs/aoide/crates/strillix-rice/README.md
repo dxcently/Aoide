@@ -56,7 +56,7 @@ a config file). Paint-side — ships in `strillix`, not core.
   like `live::apply_live`). `strx wallpaper sync` runs it, and every write that
   changes what should show calls it; `step_aside` tries the engine's `clear`
   verb first and falls back to the transparent step-aside image
-  (`AOIDE_SKWD_WALL_STANDIN`), so swapping the two is one function.
+  (`STRILLIX_SKWD_WALL_STANDIN`), so swapping the two is one function.
 - `elements` — the element descriptor + render pipeline
   (docs/architecture/ELEMENTS.md): parses/validates a rice's
   `elements/<name>/element.json` (v0 — name shape, directory-name match,

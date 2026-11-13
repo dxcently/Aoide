@@ -30,18 +30,7 @@ const ALLOWED: &[(&str, usize)] = &[
     ("strillix/src/commands/pair.rs", 7),
     ("strillix/src/commands/preview_tools.rs", 3),
     ("strillix/src/commands/secrets.rs", 3),
-    ("strillix/src/commands/stubs.rs", 1),
     ("screen/src/commands.rs", 1),
-    ("screen/src/diff.rs", 1),
-    ("screen/src/ocr.rs", 1),
-    ("screen/src/point.rs", 2),
-    ("screen/src/send.rs", 1),
-    ("screen/src/text.rs", 1),
-    ("strillix-rice/src/commands/wallpaper.rs", 3),
-    ("strillix-rice/src/commands/theme.rs", 2),
-    ("strillix-rice/src/commands/mode.rs", 1),
-    ("strillix-rice/src/commands/rice.rs", 3),
-    ("strillix-rice/src/commands/history.rs", 2),
     ("storage/src/commands.rs", 1),
 ];
 

@@ -453,7 +453,7 @@ mod tests {
     fn strillix_root_defaults_under_the_same_home_as_root() {
         let _guard = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _env = MigrationEnvGuard::capture_and_clear();
-        let home = std::env::temp_dir().join(format!("aoide-strillix-default-home-{}", std::process::id()));
+        let home = std::env::temp_dir().join(format!("strillix-default-home-{}", std::process::id()));
         std::env::set_var("HOME", &home);
 
         assert_eq!(aoide_storage::fs::root(), home.join(".aoide"));
@@ -465,8 +465,8 @@ mod tests {
     fn rice_conf_seams_name_home_for_the_link_and_the_root_for_the_twin() {
         let _guard = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _env = aoide_test_support::EnvSaver::capture(&["HOME", "AOIDE_ROOT", "STRILLIX_ROOT", "STRILLIX_ROOT", "AOIDE_STAGE_DIR"]);
-        let home = scratch("aoide-test-rice-home");
-        let root = scratch("aoide-test-rice-root");
+        let home = scratch("strillix-test-rice-home");
+        let root = scratch("strillix-test-rice-root");
         std::env::set_var("HOME", &home);
         std::env::set_var("AOIDE_ROOT", &root);
         std::env::set_var("STRILLIX_ROOT", &root);

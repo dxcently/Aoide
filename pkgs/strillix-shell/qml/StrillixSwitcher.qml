@@ -1,4 +1,4 @@
-// AoideSwitcher.qml — the plain window switcher, the `switcher` slot's floor.
+// StrillixSwitcher.qml — the plain window switcher, the `switcher` slot's floor.
 //
 // shell.qml hosts it as the lane-side `fallback` of `SurfaceSlot { slot:
 // "switcher" }`: a rice that ships `widgets/switcher.qml` dresses the slot and

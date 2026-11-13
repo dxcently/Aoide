@@ -671,7 +671,7 @@ in
         (`surfaces`). Dress and structure are different questions, so they
         are different option trees; the paint read-whitelist stays an
         enumerated, closed set — theme, layout, and the `strillix.surfaces`
-        ownership registry (AGENTS.md house rule 5) — never an open `aoide.*`.
+        ownership registry (AGENTS.md house rule 5) — never an open `strillix.*`.
       '';
       default = { };
       type = types.submodule {

@@ -19,7 +19,7 @@ pub(crate) fn resolve_windows(latch: &mut Latch) -> bool {
             file
         }
         Err(e) => {
-            latch.problem("sessions-read", &format!("[aoide/shellbridge] the window sweep binds nothing: {e}"));
+            latch.problem("sessions-read", &format!("[strillix/shellbridge] the window sweep binds nothing: {e}"));
             return false;
         }
     };

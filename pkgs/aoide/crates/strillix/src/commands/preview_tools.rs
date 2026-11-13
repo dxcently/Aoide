@@ -116,7 +116,7 @@ pub fn register(r: &mut Registry) {
         summary: "Capture the full screen, the canvas window, the previewed widget, or one element inside it -- a <out>.json sidecar records widget/element identity, and (for --what element) the source file:line.",
         args: [],
         flags: [
-            flag!("root", "string", "Preview root directory (default $XDG_RUNTIME_DIR/aoide-preview)."),
+            flag!("root", "string", "Preview root directory (default $XDG_RUNTIME_DIR/strillix-preview)."),
             flag!("what", "string", "What to capture: the whole screen, the canvas window, the previewed widget, or one element inside it.", value: "what", values: &["screen", "canvas", "widget", "element"], default: "widget"),
             flag!("element", "string", "Element path (Type[i]/Type[i]#objectName), required for --what element."),
             flag!("annotated", "bool", "Ask the canvas to draw its own note/shape overlay into the capture."),
@@ -132,7 +132,7 @@ pub fn register(r: &mut Registry) {
         summary: "Dump the previewed widget's live item tree, joined against a static parse of its own QML source -- id, source file:line, and how each node was matched.",
         args: [],
         flags: [
-            flag!("root", "string", "Preview root directory (default $XDG_RUNTIME_DIR/aoide-preview)."),
+            flag!("root", "string", "Preview root directory (default $XDG_RUNTIME_DIR/strillix-preview)."),
             flag!("at", "string", "x,y widget-local coordinates -- return only the deepest visible node containing this point, with its ancestor path.")
         ],
         gated: false,
@@ -144,7 +144,7 @@ pub fn register(r: &mut Registry) {
         summary: "List, add, complete, or clear scaffolding notes on the preview canvas -- a work list of what to change and where, resolved to a source line when the canvas is up.",
         args: [],
         flags: [
-            flag!("root", "string", "Preview root directory (default $XDG_RUNTIME_DIR/aoide-preview)."),
+            flag!("root", "string", "Preview root directory (default $XDG_RUNTIME_DIR/strillix-preview)."),
             flag!("add", "bool", "Add a note -- requires --text."),
             flag!("text", "string", "Note text (with --add)."),
             flag!("rect", "string", "x,y,w,h in widget-local coordinates (with --add; mutually exclusive with --element)."),

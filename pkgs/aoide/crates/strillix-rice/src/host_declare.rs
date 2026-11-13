@@ -390,7 +390,7 @@ fn write_keeping_mode(path: &Path, bytes: &[u8], seen: &Stamp, before_rename: &d
     use std::io::Write;
     let mode = std::fs::metadata(path)?.permissions();
     let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-    let tmp = path.with_file_name(format!(".{name}.aoide-declare.{}", std::process::id()));
+    let tmp = path.with_file_name(format!(".{name}.strillix-declare.{}", std::process::id()));
     let written = (|| {
         let mut f = create_temp(&tmp, &mode)?;
         f.set_permissions(mode)?;

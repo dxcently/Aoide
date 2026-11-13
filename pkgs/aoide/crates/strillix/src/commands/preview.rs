@@ -3,7 +3,7 @@
 //! `strillix preview [<widget>]` assembles a standalone ROOT (its own rice
 //! stage, its own fixture state, its own `run/qml/` COPIES of the checkout's
 //! QML — never symlinks into it, so a write through the root stays in it) under
-//! `$XDG_RUNTIME_DIR/aoide-preview` (never under `$XDG_RUNTIME_DIR/aoide/`
+//! `$XDG_RUNTIME_DIR/strillix-preview` (never under `$XDG_RUNTIME_DIR/aoide/`
 //! — that is the LIVE daemon's socket dir, `aoided.sock`/`session-*.sock`,
 //! and the live reaper's own socket globs look there) and spawns a
 //! genuinely separate `quickshell -p <root>/run/qml/WidgetPreview.qml`
@@ -53,7 +53,7 @@ pub fn register(r: &mut Registry) {
                 "string",
                 "Palette source, resolved through the theme engine: `live` (the resolved live stage twin, read-only), a rice name (that rice's own rices theme.json), a path to a theme file, or a path to a base16 scheme (JSON or flat key:value lines). Default: the preview's own --rice."
             ),
-            flag!("root", "string", "Preview root directory (default $XDG_RUNTIME_DIR/aoide-preview)."),
+            flag!("root", "string", "Preview root directory (default $XDG_RUNTIME_DIR/strillix-preview)."),
             flag!("no-launch", "bool", "Build the root and print it; never spawn quickshell.")
         ],
         gated: false,
@@ -65,7 +65,7 @@ pub fn register(r: &mut Registry) {
         summary: "Read, validate, and merge flags into an existing preview root's preview.json control file -- no canvas needs to be running. Existing keys survive; only the given flags/args are overwritten.",
         args: [],
         flags: [
-            flag!("root", "string", "Preview root directory (default $XDG_RUNTIME_DIR/aoide-preview)."),
+            flag!("root", "string", "Preview root directory (default $XDG_RUNTIME_DIR/strillix-preview)."),
             flag!("widget", "string", "Widget to preview -- same mapping as `strillix preview`'s positional."),
             flag!("rice", "string", "Rice context a bare <slot> widget maps under."),
             flag!("width", "string", "Widget width in px, or `auto`."),
@@ -93,7 +93,7 @@ pub fn register(r: &mut Registry) {
         summary: "Copy the previewed widget body and/or palette from a preview root into the checkout's rices/<rice> -- the canvas's counterpart of `rice declare`. Byte-identical -> no-op; git commit and rebuild stay the user's own.",
         args: [],
         flags: [
-            flag!("root", "string", "Preview root directory (default $XDG_RUNTIME_DIR/aoide-preview)."),
+            flag!("root", "string", "Preview root directory (default $XDG_RUNTIME_DIR/strillix-preview)."),
             flag!("slot", "string", "Widget slot name under rices/<rice>/widgets/ (default: the previewed widget file's own basename).")
         ],
         gated: true,
@@ -108,7 +108,7 @@ pub fn register(r: &mut Registry) {
 /// here in the same commit, or the auto-float silently stops finding
 /// anything (harmless — see that function's own doc — but confusing).
 const WINDOW_CLASS: &str = "org.quickshell";
-const WINDOW_TITLE: &str = "aoide-widget-preview";
+const WINDOW_TITLE: &str = "strillix-widget-preview";
 
 const SCHEMA_VERSION: &str = "0";
 
@@ -882,19 +882,20 @@ fn handle_preview_declare(inv: &Invocation) -> Outcome {
 
 // ─────────────────────────── root resolution ───────────────────────────
 
-/// `$XDG_RUNTIME_DIR/aoide-preview` when set, else `temp_dir()/aoide-
-/// preview-<uid>` — deliberately NEVER `$XDG_RUNTIME_DIR/aoide/…`, the live
-/// daemon's own socket dir (`aoided.sock`, `session-*.sock`); the live
-/// reaper and socket globs look there, so a preview root under it would be
-/// swept or mistaken for a real session.
+/// `$XDG_RUNTIME_DIR/strillix-preview` when set, else
+/// `temp_dir()/strillix-preview-<uid>` — deliberately NEVER
+/// `$XDG_RUNTIME_DIR/aoide/…`, the live daemon's own socket dir
+/// (`aoided.sock`, `session-*.sock`); the live reaper and socket globs look
+/// there, so a preview root under it would be swept or mistaken for a real
+/// session.
 fn default_root() -> PathBuf {
     if let Ok(dir) = std::env::var("XDG_RUNTIME_DIR") {
         if !dir.is_empty() {
-            return PathBuf::from(dir).join("aoide-preview");
+            return PathBuf::from(dir).join("strillix-preview");
         }
     }
     let uid = unsafe { libc::getuid() };
-    std::env::temp_dir().join(format!("aoide-preview-{uid}"))
+    std::env::temp_dir().join(format!("strillix-preview-{uid}"))
 }
 
 /// The daemon's stable runtime dir, `$XDG_RUNTIME_DIR/aoide` -- the SAME
@@ -941,8 +942,8 @@ pub(crate) fn resolve_root(root_flag: Option<&str>) -> Result<PathBuf, String> {
 /// appended -- the same shape as `preview declare`'s containment check)
 /// are compared against the live dir as spelled and as resolved, so a
 /// `--root` that is itself a symlink into the live dir cannot pass on
-/// spelling alone. `starts_with` is component-wise, so `.../aoide-preview`
-/// is NOT under `.../aoide`.
+/// spelling alone. `starts_with` is component-wise, so a sibling such as
+/// `.../aoide-preview` is NOT under `.../aoide`.
 fn check_root(candidate: &Path, live_dir: Option<&Path>) -> Result<PathBuf, String> {
     if candidate
         .components()
@@ -961,7 +962,7 @@ fn check_root(candidate: &Path, live_dir: Option<&Path>) -> Result<PathBuf, Stri
             .any(|p| p.starts_with(live) || p.starts_with(&live_resolved));
         if under {
             return Err(format!(
-                "--root `{}` is under {} -- the live daemon's own dir, swept by its reaper; use the default $XDG_RUNTIME_DIR/aoide-preview or any directory outside it",
+                "--root `{}` is under {} -- the live daemon's own dir, swept by its reaper; use the default $XDG_RUNTIME_DIR/strillix-preview or any directory outside it",
                 candidate.display(),
                 live.display()
             ));
@@ -2617,7 +2618,7 @@ mod tests {
         fake_checkout(&checkout);
         let xdg = base.join("xdg");
         std::fs::create_dir_all(&xdg).unwrap();
-        let root = base.join("aoide-preview-w2");
+        let root = base.join("strillix-preview-w2");
         write_seed_control(&root, json!({"themeSource": "sonata"}));
         std::fs::create_dir_all(root.join("stage")).unwrap();
 
@@ -2734,7 +2735,7 @@ mod tests {
         // The realistic default root -- a SIBLING of the live daemon's own
         // `$XDG_RUNTIME_DIR/aoide/` socket dir, not a descendant of it.
         let live_socket_dir = "/run/user/1000/aoide/";
-        let root = PathBuf::from("/run/user/1000/aoide-preview");
+        let root = PathBuf::from("/run/user/1000/strillix-preview");
         let (envs, removed) = child_env(&root);
         for (k, v) in &envs {
             assert!(
@@ -2776,7 +2777,7 @@ mod tests {
         let saved = std::env::var_os("XDG_RUNTIME_DIR");
         std::env::set_var("XDG_RUNTIME_DIR", "/run/user/1000");
         let root = default_root();
-        assert_eq!(root, PathBuf::from("/run/user/1000/aoide-preview"));
+        assert_eq!(root, PathBuf::from("/run/user/1000/strillix-preview"));
         assert!(!root.to_string_lossy().contains("/aoide/"));
         match saved {
             Some(v) => std::env::set_var("XDG_RUNTIME_DIR", v),
@@ -3368,7 +3369,7 @@ mod tests {
         let tmp = scratch("canvas_shaped_env_accept");
         let xdg = tmp.join("xdg");
         std::fs::create_dir_all(&xdg).unwrap();
-        let root = tmp.join("aoide-preview-w2");
+        let root = tmp.join("strillix-preview-w2");
         std::fs::create_dir_all(&root).unwrap();
         let saved_xdg = std::env::var_os("XDG_RUNTIME_DIR");
         let saved_sock = std::env::var_os("AOIDE_DAEMON_SOCKET");
@@ -3399,7 +3400,7 @@ mod tests {
         let xdg = tmp.join("xdg");
         let live = xdg.join("aoide");
         std::fs::create_dir_all(&live).unwrap();
-        let root = tmp.join("aoide-preview-w2");
+        let root = tmp.join("strillix-preview-w2");
         std::fs::create_dir_all(&root).unwrap();
         let saved_xdg = std::env::var_os("XDG_RUNTIME_DIR");
         let saved_sock = std::env::var_os("AOIDE_DAEMON_SOCKET");

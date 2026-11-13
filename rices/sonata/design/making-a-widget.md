@@ -541,6 +541,6 @@ temporarily; `hyprctl dispatch global aoide:powermenu` and
 `aoide:launcher` summon those two directly.
 
 A parse error means the slot silently renders NOTHING — `WidgetSlot` logs
-`[aoide/widgetslot] failed to load slot <name> - <error>` and moves on. An
+`[strillix/widgetslot] failed to load slot <name> - <error>` and moves on. An
 empty-looking surface is a journalctl question first, a design question
 second.

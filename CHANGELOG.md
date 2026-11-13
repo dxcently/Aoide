@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Strillix's log prefixes, internal names and messages are named strillix
+
+- Strillix's log lines begin `[strillix/<part>]`: the shell's `greeter`, `lockhost`, `ricegadgets`, `ricesurfaces`, `shell`, `stagingengine`, `surfaceslot`, `theme`, `widgetpreview` and `widgetslot`, the healthcheck's `quickshell-health`, and `strillix shellbridge --run`'s `shellbridge`. The shell's IPC handler logs `[strillix-ipc]`. A journal search for `[aoide/…]` finds core's lines alone, core's own bridge among them as `[aoide/shellbridge]`.
+- The icon data override is `STRILLIX_ICON_DATA`; a host that set `AOIDE_ICON_DATA` sets the new name. skwd-wall's step-aside image is `STRILLIX_SKWD_WALL_STANDIN`. Until the next login, a `strx wallpaper` command run from a session older than the switch finds no image, so against a provider without a `clear` verb it cannot step aside, and says so.
+- Strillix's notices and messages name it: the healthcheck's desktop notice comes from the app `strillix`, the rice bridge's toasts are titled `Strillix`, the screen and theme commands' usage lines read `usage: strillix …`, and a rice composition's eval errors begin `strillix widget` and `strillix composition`. The paint-facts assertion names the facts it guards: `strillix.enable`, `strillix.quickshell.enable` and `strillix.stylix.enable`.
+- Internal names follow: the shell's `StrillixSwitcher` and `StrillixIpc` types, the pairing and secrets dialogs' result lines and temp files, the temp files of rice refresh and host declare, and test names. The widget preview's window is titled `strillix-widget-preview` and its default root is `$XDG_RUNTIME_DIR/strillix-preview`.
+
 ### Strillix's units, activation steps and store paths are named strillix
 
 - Strillix's user units are `strillix-quickshell`, with its `strillix-quickshell-healthcheck` service and timer, `strillix-rice-reload`, `strillix-clipboard`, `strillix-nm-applet` and `strillix-obsidian-register`. The switch stops the old shell units and starts the new ones; the clipboard watcher and the tray applet take their new names at the next login, and the Obsidian registration the next time shellbridge starts. A drop-in written for an `aoide-*` unit no longer applies.

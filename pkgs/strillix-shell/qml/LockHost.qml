@@ -132,7 +132,7 @@ Scope {
         root._pamAgain = false
         if (pam.active) pam.abort()
         if (!pam.start()) {
-            console.warn("[aoide/lockhost] the strillix-lock PAM conversation cannot start; not locking")
+            console.warn("[strillix/lockhost] the strillix-lock PAM conversation cannot start; not locking")
             return false
         }
         sessionLock.locked = true
@@ -161,7 +161,7 @@ Scope {
         root._handingOver = true
         root._pamAgain = false
         if (pam.active) pam.abort()
-        console.warn("[aoide/lockhost] PAM failed while locked (" + why + "); handing the lock to hyprlock")
+        console.warn("[strillix/lockhost] PAM failed while locked (" + why + "); handing the lock to hyprlock")
         root._sync("Authentication is unavailable here; hyprlock is taking over.", true)
         auth.responseRequired = false
         // Hyprland hands a lock over only once the one held is confirmed.
@@ -172,11 +172,11 @@ Scope {
     function _handedOver(said) {
         root._handingOver = false
         if (!said || !said.data || said.data.locker !== "hyprlock") {
-            console.warn("[aoide/lockhost] hyprlock did not take the lock; this host keeps it")
+            console.warn("[strillix/lockhost] hyprlock did not take the lock; this host keeps it")
             root._sync("Authentication is unavailable, and hyprlock did not start.", true)
             return
         }
-        console.info("[aoide/lockhost] hyprlock holds the lock; letting go of this one without unlocking")
+        console.info("[strillix/lockhost] hyprlock holds the lock; letting go of this one without unlocking")
         // `strillix lock` cleared the hint once hyprlock held the screen.
         root._hintHave = false
         root._hintWant = false
@@ -285,7 +285,7 @@ Scope {
                 var said = null
                 try { said = JSON.parse(text) } catch (e) { return }
                 if (said && said.data && said.data.lockedHint === true) {
-                    console.info("[aoide/lockhost] LockedHint is still yes; taking the lock back")
+                    console.info("[strillix/lockhost] LockedHint is still yes; taking the lock back")
                     root._hintHave = true
                     root._hintWant = true
                     if (!root.lock()) Quickshell.execDetached(["strillix", "lock"])
@@ -342,7 +342,7 @@ Scope {
                 function _finish(comp) {
                     if (comp.status !== Component.Ready) {
                         if (comp.status === Component.Error)
-                            console.warn("[aoide/lockhost] the face failed to load:", comp.errorString())
+                            console.warn("[strillix/lockhost] the face failed to load:", comp.errorString())
                         return
                     }
                     root.auth.ready = false
@@ -352,7 +352,7 @@ Scope {
                         "auth": root.auth
                     })
                     if (!item) {
-                        console.warn("[aoide/lockhost] the face could not be created; the floor stays")
+                        console.warn("[strillix/lockhost] the face could not be created; the floor stays")
                         return
                     }
                     item.anchors.fill = faceHolder
@@ -365,7 +365,7 @@ Scope {
                     interval: root.faceReadyMs
                     onTriggered: {
                         if (surface.face === null || root.auth.ready) return
-                        console.warn("[aoide/lockhost] the face did not report ready within", interval, "ms; the floor takes over")
+                        console.warn("[strillix/lockhost] the face did not report ready within", interval, "ms; the floor takes over")
                         surface.face.destroy()
                         surface.face = null
                     }

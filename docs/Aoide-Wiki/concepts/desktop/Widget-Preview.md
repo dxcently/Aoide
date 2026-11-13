@@ -46,7 +46,7 @@ its envelope when the window closes.
 ## What the canvas is
 
 ```
-$XDG_RUNTIME_DIR/aoide-preview/            the ISOLATED root (never under aoide/, the daemon's socket dir)
+$XDG_RUNTIME_DIR/strillix-preview/         the ISOLATED root (never under aoide/, the daemon's socket dir)
 ├─ $STRILLIX_ROOT/stage/theme.json                  the rice's committed theme + {"rice": …}, or --theme's file
 ├─ state/stage/{sessions,projects,hooks,notifications}.json    one fixture set, copied in
 ├─ run/qml/*.qml                           COPIES of checkout pkgs/strillix-shell/qml/*.qml
@@ -105,7 +105,7 @@ canvas's action log and nowhere else. No `ShellBridge` is ever
 instantiated, so no send, kill, focus, or recheck can reach a real session.
 
 The window is a `FloatingWindow` — a real compositor client, titled
-`aoide-widget-preview` — so `strx screen shot --window <address>` captures
+`strillix-widget-preview` — so `strx screen shot --window <address>` captures
 it — `strx preview shot --what canvas` finds the address by title AND the
 root's own quickshell pid (`qs list --all` names it), so two open roots
 never capture each other — and it is never a layer surface fighting the

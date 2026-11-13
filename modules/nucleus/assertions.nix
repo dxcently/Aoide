@@ -44,7 +44,7 @@
         config.strillix.enable
         config.strillix.stylix.enable
       ];
-      message = "aoide.{quickshell,strillix,stylix}.enable are read-only facts, set by their dendrite alone: remove the host's write";
+      message = "strillix.enable, strillix.quickshell.enable and strillix.stylix.enable are read-only facts, set by their dendrite alone: remove the host's write";
     }
   ];
 }

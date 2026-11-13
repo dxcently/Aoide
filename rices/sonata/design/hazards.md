@@ -120,7 +120,7 @@ Other glyph findings:
   `NumberAnimation` keeps writing the property on later frames and fights the
   assignment (`flipOut.stop(); flipIn.stop()` before `turn.angle = 0`).
 - **A parse error renders NOTHING and does not crash the shell.**
-  `WidgetSlot` logs `[aoide/widgetslot] failed to load slot <name> - <error>`
+  `WidgetSlot` logs `[strillix/widgetslot] failed to load slot <name> - <error>`
   and moves on. An empty surface is a journalctl question first.
 - **`destroy()`ing a loaded widget nulls its `root` id and re-fires every
   binding that captured it.** `launcher.qml` was dumping ~66-79

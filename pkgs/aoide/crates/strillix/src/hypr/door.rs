@@ -79,25 +79,25 @@ impl Latch {
             }
             Reply::Refused => {
                 if self.logged.insert(key) {
-                    eprintln!("[aoide/shellbridge] {what} was refused by core");
+                    eprintln!("[strillix/shellbridge] {what} was refused by core");
                 }
                 true
             }
             Reply::NotRun => {
                 if self.logged.insert(key) {
-                    eprintln!("[aoide/shellbridge] {what} did not run; retrying on a later tick");
+                    eprintln!("[strillix/shellbridge] {what} did not run; retrying on a later tick");
                 }
                 false
             }
             Reply::Absent => {
                 if self.logged.insert(key) {
-                    eprintln!("[aoide/shellbridge] aoided is not running; {what} waits for it");
+                    eprintln!("[strillix/shellbridge] aoided is not running; {what} waits for it");
                 }
                 false
             }
             Reply::Unavailable => {
                 if self.logged.insert(key) {
-                    eprintln!("[aoide/shellbridge] no aoide binary; skipped {what}");
+                    eprintln!("[strillix/shellbridge] no aoide binary; skipped {what}");
                 }
                 true
             }

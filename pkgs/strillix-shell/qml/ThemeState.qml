@@ -260,7 +260,7 @@ QtObject {
                 var parsed = JSON.parse(txt)
                 root.raw = parsed
             } catch (e) {
-                console.warn("[aoide/theme] Failed to parse theme.json:", e)
+                console.warn("[strillix/theme] Failed to parse theme.json:", e)
             }
         }
         Component.onCompleted: themeFile.reload()
@@ -292,7 +292,7 @@ QtObject {
             try {
                 root.modeRaw = JSON.parse(txt)
             } catch (e) {
-                console.warn("[aoide/theme] Failed to parse mode.json:", e)
+                console.warn("[strillix/theme] Failed to parse mode.json:", e)
             }
         }
         Component.onCompleted: modeFile.reload()

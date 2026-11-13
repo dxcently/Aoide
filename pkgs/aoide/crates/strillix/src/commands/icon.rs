@@ -3,7 +3,7 @@
 //! each collection's IconifyJSON (`pkgs/iconify-data`) — never a network
 //! fetch at render or resolve time (root `AGENTS.md` house rule 7: a
 //! capability enters at one conventional path and is removable without a
-//! trace; here that path is `--data <dir>`/`$AOIDE_ICON_DATA`, never a URL).
+//! trace; here that path is `--data <dir>`/`$STRILLIX_ICON_DATA`, never a URL).
 //!
 //! Three commands (`design/p-icon-brief.md` §C1):
 //! - `icon collections` — list the pinned collections (prefix, version,
@@ -97,7 +97,7 @@ pub fn register(r: &mut Registry) {
         flags: [flag!(
             "data",
             "string",
-            "Icon data directory holding <prefix>/{icons,info,metadata}.json per collection (default: $AOIDE_ICON_DATA, else the `nix build .#iconify-data` result's share/iconify)."
+            "Icon data directory holding <prefix>/{icons,info,metadata}.json per collection (default: $STRILLIX_ICON_DATA, else the `nix build .#iconify-data` result's share/iconify)."
         )],
         gated: false,
         implemented: true,
@@ -114,7 +114,7 @@ pub fn register(r: &mut Registry) {
             flag!(
                 "data",
                 "string",
-                "Icon data directory (default: $AOIDE_ICON_DATA, else the `nix build .#iconify-data` result's share/iconify)."
+                "Icon data directory (default: $STRILLIX_ICON_DATA, else the `nix build .#iconify-data` result's share/iconify)."
             )
         ],
         gated: false,
@@ -136,7 +136,7 @@ pub fn register(r: &mut Registry) {
             flag!(
                 "data",
                 "string",
-                "Icon data directory (default: $AOIDE_ICON_DATA, else the `nix build .#iconify-data` result's share/iconify)."
+                "Icon data directory (default: $STRILLIX_ICON_DATA, else the `nix build .#iconify-data` result's share/iconify)."
             )
         ],
         gated: true,
@@ -151,12 +151,12 @@ fn data_dir(inv: &Invocation) -> Result<PathBuf, String> {
     if let Some(d) = inv.flags.get("data") {
         return Ok(PathBuf::from(d));
     }
-    if let Ok(d) = std::env::var("AOIDE_ICON_DATA") {
+    if let Ok(d) = std::env::var("STRILLIX_ICON_DATA") {
         if !d.is_empty() {
             return Ok(PathBuf::from(d));
         }
     }
-    Err("no icon data directory: pass `--data <dir>`, set $AOIDE_ICON_DATA, or run `nix build .#iconify-data` and point at `<result>/share/iconify`".to_string())
+    Err("no icon data directory: pass `--data <dir>`, set $STRILLIX_ICON_DATA, or run `nix build .#iconify-data` and point at `<result>/share/iconify`".to_string())
 }
 
 fn load_json(path: &Path) -> Result<Value, String> {

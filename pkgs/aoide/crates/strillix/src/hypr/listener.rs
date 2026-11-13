@@ -207,7 +207,7 @@ pub fn run_hypr_window_listener() {
     use std::io::{BufRead, BufReader};
     let Some(sock) = hypr_event_socket_path() else {
         eprintln!(
-            "[aoide/shellbridge] no HYPRLAND_INSTANCE_SIGNATURE — window-event listener disabled"
+            "[strillix/shellbridge] no HYPRLAND_INSTANCE_SIGNATURE — window-event listener disabled"
         );
         return;
     };
@@ -241,7 +241,7 @@ pub fn run_hypr_window_listener() {
                 }
             }
             Err(e) => {
-                eprintln!("[aoide/shellbridge] hypr event socket connect failed ({e}); retrying");
+                eprintln!("[strillix/shellbridge] hypr event socket connect failed ({e}); retrying");
             }
         }
         std::thread::sleep(std::time::Duration::from_secs(2));

@@ -7,7 +7,7 @@
 //! `Qt.createComponent`, and lane-owned QML (`shell.qml`,
 //! `ShellBridge.qml`, `StagingEngine.qml`, `WidgetSlot.qml`,
 //! `SurfaceSlot.qml`) isn't watched at all. `Quickshell.reload(hard: bool)`
-//! (`AoideIpc.qml`, exposed via `Quickshell.Io.IpcHandler`) tears down and
+//! (`StrillixIpc.qml`, exposed via `Quickshell.Io.IpcHandler`) tears down and
 //! rebuilds the WHOLE scene fresh from `shell.qml` — closer to an
 //! in-process restart than a selective reload — which is exactly what
 //! picks those up without a `systemctl --user restart
@@ -34,12 +34,12 @@
 //!
 //! So the first cut of this module — `out.status.success() => Reloaded` —
 //! reported `"reloaded"` for a call that never ran, and would have kept
-//! reporting it if `AoideIpc.qml` were deleted outright. It also read
+//! reporting it if `StrillixIpc.qml` were deleted outright. It also read
 //! `out.stderr` for the failure detail, but quickshell writes ALL of this to
 //! stdout, so the `Failed` arm carried an empty reason.
 //!
 //! The discriminator is that `reload()` is declared `: void` in
-//! `AoideIpc.qml` — a void IPC call that reaches its handler prints NOTHING,
+//! `StrillixIpc.qml` — a void IPC call that reaches its handler prints NOTHING,
 //! and `ipc call` prints a returning function's value. So for THIS call, any
 //! output at all means it did not land. That invariant is why the check is
 //! narrow: it holds because the function is void, and a future non-void IPC

@@ -386,12 +386,12 @@ mod tests {
         // its env mid-flight.
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
-        aoide_test_support::pin_stage("/tmp/aoide-wallpaper-test/stage");
+        aoide_test_support::pin_stage("/tmp/strillix-wallpaper-test/stage");
 
         let resolved = resolve_wallpaper_arg("sonata.webp");
         assert_eq!(
             resolved,
-            PathBuf::from("/tmp/aoide-wallpaper-test/wallpapers/sonata.webp")
+            PathBuf::from("/tmp/strillix-wallpaper-test/wallpapers/sonata.webp")
         );
     }
 

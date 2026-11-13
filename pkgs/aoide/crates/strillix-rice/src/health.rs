@@ -720,7 +720,7 @@ fn restart_service() {
 /// only becomes visible once the shell recovers — the restart the caller
 /// already fired is what actually does the work.
 fn notify_still_flapping() {
-    match Command::new("notify-send").args(["--app-name=aoide", "quickshell watchdog"]).arg(
+    match Command::new("notify-send").args(["--app-name=strillix", "quickshell watchdog"]).arg(
         "quickshell keeps landing on a placeholder screen and is being restarted repeatedly — the output/monitor connection looks suspect",
     ).spawn() {
         Ok(mut child) => {
@@ -728,7 +728,7 @@ fn notify_still_flapping() {
                 let _ = child.wait();
             });
         }
-        Err(e) => eprintln!("[aoide/quickshell-health] notify-send failed: {e}"),
+        Err(e) => eprintln!("[strillix/quickshell-health] notify-send failed: {e}"),
     }
 }
 

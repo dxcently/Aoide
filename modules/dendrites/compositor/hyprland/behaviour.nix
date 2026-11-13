@@ -217,7 +217,7 @@ in
         bind = SUPER, W, global, aoide:wallpaper
 
         # `aoide:switcher` (the window switcher: a rice's widgets/switcher.qml,
-        # else the plain AoideSwitcher) is registered by shell.qml but not bound
+        # else the plain StrillixSwitcher) is registered by shell.qml but not bound
         # here: the venue binds its combo.
 
         # Lock screen: `strillix lock`, the one lock entry (the staged rice's face

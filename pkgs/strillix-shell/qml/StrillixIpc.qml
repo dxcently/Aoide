@@ -1,4 +1,4 @@
-// AoideIpc.qml — external IPC endpoint for the Aoide CLI.
+// StrillixIpc.qml — external IPC endpoint for the Aoide CLI.
 //
 // Exposes `quickshell ipc call shell reload` (Quickshell.Io.IpcHandler): the
 // only way an outside process can trigger a QML-visible change without a
@@ -38,7 +38,7 @@ IpcHandler {
     property Connections _screensWatch: Connections {
         target: Quickshell
         function onScreensChanged() {
-            console.warn("[aoide-ipc] Quickshell.screens changed: " + Quickshell.screens.length + " screen(s)")
+            console.warn("[strillix-ipc] Quickshell.screens changed: " + Quickshell.screens.length + " screen(s)")
         }
     }
 }

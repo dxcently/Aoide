@@ -694,7 +694,7 @@ mod tests {
         // markers — a line carrying one marker must never match a search
         // for the other, or a stray log line from one dialog could be
         // misread as a result from the other.
-        assert_eq!(parse_marker_line("AOIDE_SECRETS_ASK_RESULT:CODE:111111", "AOIDE_PAIR_ASK_RESULT:"), None);
+        assert_eq!(parse_marker_line("STRILLIX_SECRETS_ASK_RESULT:CODE:111111", "STRILLIX_PAIR_ASK_RESULT:"), None);
     }
 
     // ── render_code_entry_qml (pure) ─────────────────────────────────────
@@ -771,10 +771,10 @@ mod tests {
 
     #[test]
     fn render_uses_the_callers_own_result_marker_and_dismiss_text() {
-        let qml = render_code_entry_qml("t", &[HeaderLine::bold("x")], "Reject request", "AOIDE_PAIR_ASK_RESULT:");
-        assert!(qml.contains("AOIDE_PAIR_ASK_RESULT:CODE:"));
-        assert!(qml.contains("AOIDE_PAIR_ASK_RESULT:DISMISS"));
-        assert!(qml.contains("AOIDE_PAIR_ASK_RESULT:CANCEL"));
+        let qml = render_code_entry_qml("t", &[HeaderLine::bold("x")], "Reject request", "STRILLIX_PAIR_ASK_RESULT:");
+        assert!(qml.contains("STRILLIX_PAIR_ASK_RESULT:CODE:"));
+        assert!(qml.contains("STRILLIX_PAIR_ASK_RESULT:DISMISS"));
+        assert!(qml.contains("STRILLIX_PAIR_ASK_RESULT:CANCEL"));
         assert!(qml.contains("\"Reject request\""));
         assert!(!qml.contains("Dismiss ask"));
     }
@@ -816,16 +816,16 @@ mod tests {
 
     #[test]
     fn render_show_uses_the_callers_own_result_marker_for_done_esc_and_close_alike() {
-        let qml = render_code_show_qml("t", &[HeaderLine::bold("x")], "111-222", "AOIDE_PAIR_ASK_RESULT:");
+        let qml = render_code_show_qml("t", &[HeaderLine::bold("x")], "111-222", "STRILLIX_PAIR_ASK_RESULT:");
         // Two literal emission sites (`doneAsk()`'s own body, and
         // `onClosing`) cover all three closing paths — the Done button and
         // Esc both CALL `doneAsk()` rather than each printing their own
         // line, so the native window close is the only one that needs a
         // second, separate `console.log`.
-        assert_eq!(qml.matches("AOIDE_PAIR_ASK_RESULT:DONE").count(), 2, "doneAsk() and onClosing must both emit the marker: {qml}");
+        assert_eq!(qml.matches("STRILLIX_PAIR_ASK_RESULT:DONE").count(), 2, "doneAsk() and onClosing must both emit the marker: {qml}");
         assert!(qml.contains("doneAsk()"), "Esc and the Done button must both route through the one doneAsk() function: {qml}");
-        assert!(!qml.contains("AOIDE_PAIR_ASK_RESULT:APPROVE"), "the old confirm marker must be gone: {qml}");
-        assert!(!qml.contains("AOIDE_PAIR_ASK_RESULT:CANCEL"), "show has no distinct cancel outcome: {qml}");
+        assert!(!qml.contains("STRILLIX_PAIR_ASK_RESULT:APPROVE"), "the old confirm marker must be gone: {qml}");
+        assert!(!qml.contains("STRILLIX_PAIR_ASK_RESULT:CANCEL"), "show has no distinct cancel outcome: {qml}");
     }
 
     #[test]
@@ -921,7 +921,7 @@ mod tests {
     fn run_code_entry_dialog_returns_approved_when_the_shim_prints_a_code() {
         let _guard = shim_lock();
         let shim = write_shim("approve", "#!/bin/sh\necho MARK:CODE:246810\nexit 0\n");
-        let result = run_code_entry_dialog(shim.to_str().unwrap(), "aoide-dialog-qml-test", "t", &[HeaderLine::bold("x")], "Dismiss ask", "MARK:").unwrap();
+        let result = run_code_entry_dialog(shim.to_str().unwrap(), "strillix-dialog-qml-test", "t", &[HeaderLine::bold("x")], "Dismiss ask", "MARK:").unwrap();
         assert_eq!(result, AskResult::Approved("246810".to_string()));
         remove_shim(&shim);
     }
@@ -930,7 +930,7 @@ mod tests {
     fn run_code_entry_dialog_returns_dismissed_when_the_shim_prints_dismiss() {
         let _guard = shim_lock();
         let shim = write_shim("dismiss", "#!/bin/sh\necho MARK:DISMISS\nexit 0\n");
-        let result = run_code_entry_dialog(shim.to_str().unwrap(), "aoide-dialog-qml-test", "t", &[HeaderLine::bold("x")], "Dismiss ask", "MARK:").unwrap();
+        let result = run_code_entry_dialog(shim.to_str().unwrap(), "strillix-dialog-qml-test", "t", &[HeaderLine::bold("x")], "Dismiss ask", "MARK:").unwrap();
         assert_eq!(result, AskResult::Dismissed);
         remove_shim(&shim);
     }
@@ -939,7 +939,7 @@ mod tests {
     fn run_code_entry_dialog_returns_failed_when_the_shim_never_prints_a_marker() {
         let _guard = shim_lock();
         let shim = write_shim("silent", "#!/bin/sh\nexit 0\n");
-        let result = run_code_entry_dialog(shim.to_str().unwrap(), "aoide-dialog-qml-test", "t", &[HeaderLine::bold("x")], "Dismiss ask", "MARK:").unwrap();
+        let result = run_code_entry_dialog(shim.to_str().unwrap(), "strillix-dialog-qml-test", "t", &[HeaderLine::bold("x")], "Dismiss ask", "MARK:").unwrap();
         assert!(matches!(result, AskResult::Failed(_)), "expected Failed, got {result:?}");
         remove_shim(&shim);
     }
@@ -948,7 +948,7 @@ mod tests {
     fn run_code_entry_dialog_genuine_cancel_via_the_cancel_marker_is_still_cancelled_not_failed() {
         let _guard = shim_lock();
         let shim = write_shim("real-cancel", "#!/bin/sh\necho MARK:CANCEL\nexit 0\n");
-        let result = run_code_entry_dialog(shim.to_str().unwrap(), "aoide-dialog-qml-test", "t", &[HeaderLine::bold("x")], "Dismiss ask", "MARK:").unwrap();
+        let result = run_code_entry_dialog(shim.to_str().unwrap(), "strillix-dialog-qml-test", "t", &[HeaderLine::bold("x")], "Dismiss ask", "MARK:").unwrap();
         assert_eq!(result, AskResult::Cancelled);
         remove_shim(&shim);
     }
@@ -956,7 +956,7 @@ mod tests {
     #[test]
     fn run_code_entry_dialog_reports_a_spawn_error_for_a_nonexistent_binary() {
         let _guard = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let err = run_code_entry_dialog("/no/such/strillix-quickshell-shim", "aoide-dialog-qml-test", "t", &[], "Dismiss ask", "MARK:").unwrap_err();
+        let err = run_code_entry_dialog("/no/such/strillix-quickshell-shim", "strillix-dialog-qml-test", "t", &[], "Dismiss ask", "MARK:").unwrap_err();
         assert!(err.contains("spawning quickshell"), "{err}");
     }
 
@@ -971,7 +971,7 @@ mod tests {
     fn run_code_show_dialog_returns_approved_with_no_typed_value_when_the_shim_signals_done() {
         let _guard = shim_lock();
         let shim = write_shim("show-done", "#!/bin/sh\necho MARK:DONE\nexit 0\n");
-        let result = run_code_show_dialog(shim.to_str().unwrap(), "aoide-dialog-qml-show-test", "t", &[HeaderLine::bold("x")], "111-222", "MARK:").unwrap();
+        let result = run_code_show_dialog(shim.to_str().unwrap(), "strillix-dialog-qml-show-test", "t", &[HeaderLine::bold("x")], "111-222", "MARK:").unwrap();
         assert_eq!(result, AskResult::Approved(String::new()));
         remove_shim(&shim);
     }
@@ -980,7 +980,7 @@ mod tests {
     fn run_code_show_dialog_returns_failed_when_the_shim_never_prints_a_marker() {
         let _guard = shim_lock();
         let shim = write_shim("show-silent", "#!/bin/sh\nexit 0\n");
-        let result = run_code_show_dialog(shim.to_str().unwrap(), "aoide-dialog-qml-show-test", "t", &[HeaderLine::bold("x")], "111-222", "MARK:").unwrap();
+        let result = run_code_show_dialog(shim.to_str().unwrap(), "strillix-dialog-qml-show-test", "t", &[HeaderLine::bold("x")], "111-222", "MARK:").unwrap();
         assert!(matches!(result, AskResult::Failed(_)), "expected Failed, got {result:?}");
         remove_shim(&shim);
     }
@@ -988,14 +988,14 @@ mod tests {
     #[test]
     fn run_code_show_dialog_reports_a_spawn_error_for_a_nonexistent_binary() {
         let _guard = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let err = run_code_show_dialog("/no/such/strillix-quickshell-show-shim", "aoide-dialog-qml-show-test", "t", &[], "111-222", "MARK:").unwrap_err();
+        let err = run_code_show_dialog("/no/such/strillix-quickshell-show-shim", "strillix-dialog-qml-show-test", "t", &[], "111-222", "MARK:").unwrap_err();
         assert!(err.contains("spawning quickshell"), "{err}");
     }
 
     #[test]
     fn write_temp_qml_creates_a_real_file_and_two_calls_never_collide() {
-        let a = write_temp_qml("aoide-dialog-qml-test", "content-a").unwrap();
-        let b = write_temp_qml("aoide-dialog-qml-test", "content-b").unwrap();
+        let a = write_temp_qml("strillix-dialog-qml-test", "content-a").unwrap();
+        let b = write_temp_qml("strillix-dialog-qml-test", "content-b").unwrap();
         assert!(a.exists());
         assert!(b.exists());
         assert_ne!(a, b, "two calls must never collide on the same scratch path");
@@ -1006,7 +1006,7 @@ mod tests {
     #[test]
     fn write_temp_qml_is_owner_only_readable() {
         use std::os::unix::fs::PermissionsExt;
-        let path = write_temp_qml("aoide-dialog-qml-test", "content").unwrap();
+        let path = write_temp_qml("strillix-dialog-qml-test", "content").unwrap();
         let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode, 0o600, "the generated QML must be owner-only, got {mode:o}");
         std::fs::remove_file(&path).unwrap();
@@ -1016,7 +1016,7 @@ mod tests {
     fn spawn_and_wait_for_marker_never_deletes_the_file_it_was_handed() {
         let _guard = shim_lock();
         let shim = write_shim("no-delete", "#!/bin/sh\necho MARK:CANCEL\nexit 0\n");
-        let qml_path = write_temp_qml("aoide-dialog-qml-test", "content").unwrap();
+        let qml_path = write_temp_qml("strillix-dialog-qml-test", "content").unwrap();
         let result = spawn_and_wait_for_marker(shim.to_str().unwrap(), &qml_path, "MARK:").unwrap();
         assert_eq!(result, AskResult::Cancelled);
         assert!(qml_path.exists(), "spawn_and_wait_for_marker must not delete a path it did not create");

@@ -119,7 +119,7 @@ mod tests {
     fn a_saved_marker_is_stamped_with_its_format_version() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _pin = aoide_test_support::EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
-        let dir = std::env::temp_dir().join(format!("aoide-mode-stamp-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("strillix-mode-stamp-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         aoide_test_support::pin_stage(dir.join("stage"));
         let marker = ModeMarker { mode: RiceMode::Staging, rice: Some("sonata".into()), ..Default::default() };
@@ -136,7 +136,7 @@ mod tests {
     fn missing_marker_file_loads_as_the_declarative_default() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _pin = aoide_test_support::EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
-        let dir = std::env::temp_dir().join(format!("aoide-mode-missing-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("strillix-mode-missing-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         aoide_test_support::pin_stage(dir.join("stage"));
 
@@ -151,7 +151,7 @@ mod tests {
     fn save_load_round_trips_through_a_temp_stage_dir() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _pin = aoide_test_support::EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
-        let dir = std::env::temp_dir().join(format!("aoide-mode-rt-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("strillix-mode-rt-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         aoide_test_support::pin_stage(dir.join("stage"));
 
@@ -180,7 +180,7 @@ mod tests {
     fn draft_mode_round_trips_with_a_draft_name_and_serializes_lowercase() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _pin = aoide_test_support::EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
-        let dir = std::env::temp_dir().join(format!("aoide-mode-draft-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("strillix-mode-draft-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         aoide_test_support::pin_stage(dir.join("stage"));
 
@@ -208,7 +208,7 @@ mod tests {
     fn corrupt_marker_file_loads_as_the_declarative_default() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _pin = aoide_test_support::EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
-        let dir = std::env::temp_dir().join(format!("aoide-mode-corrupt-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("strillix-mode-corrupt-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join("stage")).unwrap();
         aoide_test_support::pin_stage(dir.join("stage"));

@@ -12,7 +12,7 @@
 // (powermenu/launcher, shell.qml). Reused directly, not duplicated: same
 // `resolveRice` → `Qt.createComponent` → `Component.createObject` mechanism,
 // same baseline-fallback chain (active rice, else sonata), same
-// `[aoide/surfaceslot]` console.warn when neither the active rice nor
+// `[strillix/surfaceslot]` console.warn when neither the active rice nor
 // sonata actually carries a committed `widgets/<slot>.qml` body for a
 // declared slot — a declared-but-bodyless slot therefore already warns and
 // renders nothing for free, no extra plumbing needed here.
@@ -55,7 +55,7 @@ QtObject {
     required property var stagingEngine
 
     // As SurfaceSlot: `required` is not enforced on a declared instance.
-    Component.onCompleted: if (root.bridge === undefined) console.warn("[aoide/ricesurfaces] was given no bridge")
+    Component.onCompleted: if (root.bridge === undefined) console.warn("[strillix/ricesurfaces] was given no bridge")
 
     // [{ slot, decl }, …] — every surface-kind entry the active rice
     // declares. Empty for a rice with no `.widgets` (sonata today, the only

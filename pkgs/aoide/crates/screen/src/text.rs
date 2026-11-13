@@ -270,7 +270,7 @@ pub fn point_text(inv: &Invocation) -> Outcome {
     let cmd = "screen.point.text";
     let usage = || {
         format!(
-            "usage: aoide {} <text> --from-shot <capture> [--nth N] [--button left|right|middle] [--dry-run] [--json]",
+            "usage: strillix {} <text> --from-shot <capture> [--nth N] [--button left|right|middle] [--dry-run] [--json]",
             inv.path.join(" ")
         )
     };

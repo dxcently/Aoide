@@ -423,7 +423,7 @@ strx wallpaper sync [--json]
 - **Reads:** `/stage/wallpaper-provider` (the host's provider — absent means
   the shell's own layer), `/stage/wallpaper.json` and
   `/stage/theme.json` (does a pick apply to the staged rice right now?),
-  `$AOIDE_SKWD_WALL_STANDIN` (the step-aside image's store path).
+  `$STRILLIX_SKWD_WALL_STANDIN` (the step-aside image's store path).
 - **Writes:** nothing. It runs `skwd-helm` — `apply <path|we:<id>> -o '*'` for
   an applicable pick, `clear` (falling back to the step-aside image) when none
   applies — and only when the host's provider is `skwd-wall`. Best-effort and

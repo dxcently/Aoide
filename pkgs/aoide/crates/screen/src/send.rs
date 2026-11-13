@@ -196,7 +196,7 @@ pub fn send(inv: &Invocation) -> Outcome {
         Outcome::usage(
             cmd,
             format!(
-                "{msg} — usage: aoide {} <capture> --session <id> [--comment \"text\"] [--yes] [--json]",
+                "{msg} — usage: strillix {} <capture> --session <id> [--comment \"text\"] [--yes] [--json]",
                 inv.path.join(" ")
             ),
         )

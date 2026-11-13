@@ -8,7 +8,7 @@
 # `strillix.wallpaper.provider = "skwd-wall"` (CONTRACTS.md §0), which this file SETS
 # `mkDefault` and guards on.
 #
-# `AOIDE_SKWD_WALL_STANDIN` is the step-aside image — `strillix wallpaper sync`'s
+# `STRILLIX_SKWD_WALL_STANDIN` is the step-aside image — `strillix wallpaper sync`'s
 # fallback when the installed release has no `clear` verb — exported to this unit
 # (its `ExecStartPost` and the hook it spawns) and to the session, so one
 # variable is the whole switch point.
@@ -123,7 +123,7 @@ in
 
       # The step-aside image, in the session environment too: a terminal
       # `strillix wallpaper sync` is the repair path when a pick is dropped by hand.
-      environment.sessionVariables.AOIDE_SKWD_WALL_STANDIN = "${standinPng}";
+      environment.sessionVariables.STRILLIX_SKWD_WALL_STANDIN = "${standinPng}";
 
       habit.home =
         { lib, ... }:
@@ -171,7 +171,7 @@ in
                 "SKWD_WALL_V2_CACHE=${cacheDir}"
                 "AOIDE_ROOT=${config.aoide.root}"
                 "STRILLIX_ROOT=${config.strillix.root}"
-                "AOIDE_SKWD_WALL_STANDIN=${standinPng}"
+                "STRILLIX_SKWD_WALL_STANDIN=${standinPng}"
                 # PATH replaces the manager's: every bare name the daemon execs
                 # (`sh`/`setsid`, `ffmpeg`, `file`, `strillix`, the renderer).
                 "PATH=${

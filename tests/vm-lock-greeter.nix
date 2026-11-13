@@ -424,7 +424,7 @@ pkgs.testers.runNixOSTest {
         # the conversation cannot get past, not a wrong password.
         face.succeed(
             "mv /etc/pam.d/strillix-lock /etc/pam.d/strillix-lock.orig; "
-            "printf 'auth required /nonexistent/pam_aoide_missing.so\naccount required pam_unix.so\n' > /etc/pam.d/strillix-lock"
+            "printf 'auth required /nonexistent/pam_strillix_missing.so\naccount required pam_unix.so\n' > /etc/pam.d/strillix-lock"
         )
         watch_locked(face)
         o = strillix_lock(face)

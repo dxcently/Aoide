@@ -243,7 +243,7 @@ strx reload [--json]
   <run_qml_dir>/shell.qml ipc call shell reload` — the `-p` is required
   because `ipc call` does not auto-discover an instance launched with a path
   config. This invokes the `Quickshell.reload(false)` IPC handler
-  (`AoideIpc.qml`), which tears down and rebuilds the whole scene from
+  (`StrillixIpc.qml`), which tears down and rebuilds the whole scene from
   `shell.qml`, no systemd restart (the probe is `systemctl --user show
   strillix-quickshell.service --property=MainPID --value`,
   `pkgs/aoide/crates/strillix-rice/src/ipc.rs`). Success is judged on OUTPUT, not the

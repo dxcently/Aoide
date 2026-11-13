@@ -81,7 +81,7 @@ fn resolve_notes(inv: &Invocation, cmd: &str, skip: usize) -> Result<PathBuf, Ou
                     cmd,
                     format!(
                         "no theme named and no staged theme at {}; \
-                         usage: aoide {cmd} [<name>|<path>] [--json]",
+                         usage: strillix {cmd} [<name>|<path>] [--json]",
                         staged.display()
                     ),
                 )

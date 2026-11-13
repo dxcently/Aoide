@@ -67,7 +67,7 @@ ShellRoot {
         path: Quickshell.shellPath("components.json")
         blockLoading: true
         printErrors: false
-        onLoadFailed: console.warn("[aoide/shell] components.json unreadable: no component is instantiated")
+        onLoadFailed: console.warn("[strillix/shell] components.json unreadable: no component is instantiated")
     }
     readonly property var components: {
         try {
@@ -112,7 +112,7 @@ ShellRoot {
     ShellBridge { id: bridge }
     // `strillix reload`'s IPC target (crates/strillix-rice/src/ipc.rs) — no
     // properties, wired for its side effect (Quickshell.reload) alone.
-    AoideIpc { id: ipc }
+    StrillixIpc { id: ipc }
     // The `component` IPC target: `strillix component <slot> <verb> [arg]` through
     // the bridge. It runs one closed verb on the slot's live item and answers
     // `true` when it ran, `false` when the item is not loaded or lacks the verb.
@@ -352,7 +352,7 @@ ShellRoot {
     //   - AoideWallpaperPicker   : aoide:wallpaper — the launcher's openPictures(),
     //                              else the plain wallpaper picker (global-shortcut)
     //   - switcher (SurfaceSlot) : aoide:switcher window switcher, the rice's
-    //                              widgets/switcher.qml or the plain AoideSwitcher
+    //                              widgets/switcher.qml or the plain StrillixSwitcher
     //   - notifications (SurfaceSlot)   : the notification popup,
     //                              rices/sonata/widgets/notifications.qml
     // (No AoideNotifications anymore — dunst owns org.freedesktop.Notifications
@@ -474,7 +474,7 @@ ShellRoot {
 
     // aoide:switcher: the one registration; it toggles whichever body the
     // `switcher` slot holds — the active rice's widgets/switcher.qml, else
-    // sonata's, else the plain AoideSwitcher below (the floor). Not bound
+    // sonata's, else the plain StrillixSwitcher below (the floor). Not bound
     // here: the venue binds a combo to it.
     LazyLoader {
         id: switcherGate
@@ -489,7 +489,7 @@ ShellRoot {
                 theme: shellRoot.themeRef
                 bridge: shellRoot.bridgeRef
                 stagingEngine: shellRoot.stagingRef
-                fallback: Component { AoideSwitcher {} }
+                fallback: Component { StrillixSwitcher {} }
             }
             GlobalShortcut {
                 appid: "aoide"

@@ -56,4 +56,4 @@ docs/architecture/.obsidian/workspace.json
 evidence/
 
 # Leaked temp QML from the strillix dialog tests (named with pid + nanos).
-pkgs/aoide/crates/strillix/aoide-dialog-qml-test-*.qml
+pkgs/aoide/crates/strillix/strillix-dialog-qml-test-*.qml

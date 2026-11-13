@@ -39,7 +39,7 @@ pub const PROVIDER_FILE: &str = "wallpaper-provider";
 
 /// The env var the provider's own lane exports: the store path of the 1x1 fully
 /// transparent PNG a pick-less external provider is applied with.
-pub const STANDIN_ENV: &str = "AOIDE_SKWD_WALL_STANDIN";
+pub const STANDIN_ENV: &str = "STRILLIX_SKWD_WALL_STANDIN";
 
 /// The client that drives the external provider.
 const HELM: &str = "skwd-helm";
@@ -202,7 +202,7 @@ fn step_aside(wait: bool) -> &'static str {
                 Helm::Unreachable => "best-effort: skwd-helm unreachable",
                 Helm::Missing => "best-effort: skwd-helm is not on PATH",
             },
-            None => "best-effort: no step-aside image (AOIDE_SKWD_WALL_STANDIN unset)",
+            None => "best-effort: no step-aside image (STRILLIX_SKWD_WALL_STANDIN unset)",
         },
     }
 }

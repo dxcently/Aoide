@@ -114,7 +114,7 @@ are core `aoide` identity, root `AGENTS.md`).
   all: it fires AFTER an approver's own commit already succeeded, so
   there is nothing left to approve or reject. Both share
   `commands::dialog_qml`'s underlying surfaces and a
-  `AOIDE_PAIR_ASK_RESULT:` marker; `pair ask` alone carries the
+  `STRILLIX_PAIR_ASK_RESULT:` marker; `pair ask` alone carries the
   `"Reject request"` dismiss label, since `pair show` has no dismiss path
   to label. `--context` is pre-formatted ONCE by the caller (untrusted,
   node-supplied display text: a requesting host + short id, or a reply
@@ -145,7 +145,7 @@ are core `aoide` identity, root `AGENTS.md`).
   when the folder is dirty.
 - `commands::preview` (P1, then a same-lane follow-up) — **`strx preview
   [<widget>]`** builds an ISOLATED preview root (default
-  `$XDG_RUNTIME_DIR/aoide-preview`, chosen deliberately as a SIBLING of the
+  `$XDG_RUNTIME_DIR/strillix-preview`, chosen deliberately as a SIBLING of the
   live daemon's own `$XDG_RUNTIME_DIR/aoide/` socket dir, never a
   descendant of it — the live reaper and socket globs look there) and
   spawns a standalone `quickshell -p <root>/run/qml/WidgetPreview.qml`
@@ -387,7 +387,7 @@ are core `aoide` identity, root `AGENTS.md`).
   `icon list`/`icon resolve`: pack-independent widget icons, Iconify
   `<collection>:<name>` identifiers resolved against a pinned, hashed local
   copy of each collection's IconifyJSON (`pkgs/iconify-data`, `--data <dir>`/
-  `$AOIDE_ICON_DATA`), never a network fetch at resolve time. `resolve` is
+  `$STRILLIX_ICON_DATA`), never a network fetch at resolve time. `resolve` is
   the only writer — `<out>/<collection>/<name>.svg` (or `<out>/custom/
   <slug>.<ext>` for a `file:<path>`/bare-path asset) plus one `<out>/
   catalog.json` — byte-diffed (`preview declare`'s no-op discipline) and

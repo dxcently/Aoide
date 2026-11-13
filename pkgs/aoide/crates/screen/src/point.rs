@@ -693,7 +693,7 @@ fn wait_idle(need_n: u32, timeout_s: u64) -> Result<IdleResult, hypr::HyprError>
 pub fn point_move(inv: &Invocation) -> Outcome {
     let cmd = "screen.point.move";
     if inv.args.len() < 2 {
-        return Outcome::usage(cmd, format!("usage: aoide {} <x> <y> [--json]", inv.path.join(" ")));
+        return Outcome::usage(cmd, format!("usage: strillix {} <x> <y> [--json]", inv.path.join(" ")));
     }
     let x: i64 = match inv.args[0].parse() {
         Ok(v) => v,
@@ -1066,7 +1066,7 @@ pub fn point_hover(inv: &Invocation) -> Outcome {
     if inv.args.len() < 2 {
         return Outcome::usage(
             cmd,
-            format!("usage: aoide {} <x> <y> [--settle-ms N] [--json]", inv.path.join(" ")),
+            format!("usage: strillix {} <x> <y> [--settle-ms N] [--json]", inv.path.join(" ")),
         );
     }
     let x: i64 = match inv.args[0].parse() {

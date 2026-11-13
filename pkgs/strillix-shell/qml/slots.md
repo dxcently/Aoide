@@ -71,7 +71,7 @@ baseline every rice falls back to, a fixed constant independent of
 `fallback` Component, else nothing. Most `SurfaceSlot` slots give no
 `fallback`: sonata's file IS their floor, since a window-owning slot moves as
 one whole unit. `switcher` is the one that gives one — the plain
-`AoideSwitcher.qml` — because no shipped rice authors a switcher, and the
+`StrillixSwitcher.qml` — because no shipped rice authors a switcher, and the
 shortcut must open something in every rice.
 
 **`wallpaper` is the one exception: it has NO baseline floor.** Its anchor
@@ -129,7 +129,7 @@ Every widget QML file, whatever slot it fills, must follow this shape:
   Under a `WidgetSlot` an extra can change after creation: the anchor
   assigns the new value onto the live widget instead of rebuilding it, so a
   widget reads an extra at use time, never once at creation. A value that
-  does not fit the extra's declared type logs `[aoide/widgetslot]` and
+  does not fit the extra's declared type logs `[strillix/widgetslot]` and
   skips that key alone. A `SurfaceSlot` rebuilds its surface on a changed
   extra. No component holds another component's item: a body asks the bridge
   (`bridge.component(slot, verb, arg)`), and the bridge runs whichever
@@ -166,7 +166,7 @@ is instantiated only when it holds:
 
 An absent or unreadable `components.json` is the empty set: nothing above is
 instantiated (fail closed). The infrastructure is never gated: `ThemeState`,
-`ShellBridge`, `StagingEngine`, `AoideIpc`, `AoideClipboard`,
+`ShellBridge`, `StagingEngine`, `StrillixIpc`, `AoideClipboard`,
 `GrimoireLedger` and `RiceSurfaces` exist in every session. The `component` IPC target
 (`ipc call component act <slot> <verb> <arg>`, run by `strx component` through
 the bridge) reaches a slot's live item by name, and only for the closed verbs
@@ -195,7 +195,7 @@ declared surface only when its component is selected.
 | `notifications-center` | `WidgetSlot` | `dock.qml` (sonata) — the dock's gadget column (`WidgetSlot { slot: "notifications-center" }`), the column's last shipped gadget | none | none — sonata's own `widgets/notifications-center.qml` IS the baseline floor; no lane-side Component fallback is wired |
 | `powermenu` | `SurfaceSlot` | `shell.qml` (lane) — `SurfaceSlot { slot: "powermenu" }`, behind the `powermenu` component; the bar's clef asks the bridge (`bridge.component("powermenu", "toggle")`) | none | none — sonata's `widgets/powermenu.qml` is the floor |
 | `launcher` | `SurfaceSlot` | `shell.qml` (lane) — `SurfaceSlot { slot: "launcher" }`, behind the `launcher` component; `AoideWallpaperPicker`'s `aoide:wallpaper` shortcut asks the bridge for `openPictures` when the launcher reports that verb (`launcherHasPictures`), else the plain wallpaper picker opens | `clipboard` (the `AoideClipboard` instance), `ledger` (`GrimoireLedger` — stays in the lane, a data seam not chrome) | none — sonata's `widgets/launcher.qml` is the floor |
-| `switcher` | `SurfaceSlot` | `shell.qml` (lane) — `SurfaceSlot { slot: "switcher" }`, behind the `switcher` component; the lane's one `aoide:switcher` `GlobalShortcut` calls `.item.toggle()` (the venue binds the combo; a body registers no shortcut of its own) | none | the lane-side `fallback` `AoideSwitcher.qml`: the plain window switcher (Hyprland clients, icon + title, the focused workspace first; ←/→/Tab/Shift+Tab move, Enter or the modifier's release focuses through `bridge.focusWindow`, Esc cancels). A rice dresses it by shipping `widgets/switcher.qml`, whose `PanelWindow` exposes `toggle()` |
+| `switcher` | `SurfaceSlot` | `shell.qml` (lane) — `SurfaceSlot { slot: "switcher" }`, behind the `switcher` component; the lane's one `aoide:switcher` `GlobalShortcut` calls `.item.toggle()` (the venue binds the combo; a body registers no shortcut of its own) | none | the lane-side `fallback` `StrillixSwitcher.qml`: the plain window switcher (Hyprland clients, icon + title, the focused workspace first; ←/→/Tab/Shift+Tab move, Enter or the modifier's release focuses through `bridge.focusWindow`, Esc cancels). A rice dresses it by shipping `widgets/switcher.qml`, whose `PanelWindow` exposes `toggle()` |
 | `bar` | `WidgetSlot` | `shell.qml` (lane) — the bar's `PanelWindow` content, `WidgetSlot { slot: "bar" }`, behind the `bar` component | `shared` (session-state QtObject: the calendar's anchor, the dock's state), `stagingEngine` (so the bar's embedded ricemode `WidgetSlot` can resolve) | none — sonata's `widgets/bar.qml` is the floor |
 | `ricemode` | `WidgetSlot` | every bar body — `WidgetSlot { slot: "ricemode" }` in the bar's right stave, enforced by `checks.bar-ricemode`; the shared rice-mode control (any click opens the one menu: the runtime rices's rices, back to declarative, then the draft rows, which a rice's body may leave to another surface of its own, as barcarolle's Start menu does; nothing switches until a row is chosen) | none | none — sonata's `widgets/ricemode.qml` IS the baseline floor; a rice may dress it with its own body (cadenza does) |
 | `lockscreen` | session-lock host | `LockHost.qml` (lane), anchored in `shell.qml` behind the `lock` component; `strx lock` locks through it (`ipc call lock lock`) when the staged rice's own manifest entry has this slot, else runs hyprlock | `theme`, `bridge` (null: no shellbridge, so no power or other bridge action, behind a locked screen), `auth`: `message`, `messageIsError`, `responseRequired`, `responseVisible`, `busy`, `failures` (wrong answers this lock), `userName` (the passwd name), `respond(text)`, signal `unlocked()`; the face sets `ready` to `true` once up, within 3 s | the host's floor password field (also for a face not ready in time): no baseline rice is ever borrowed, so a rice without a face is a hyprlock rice |
@@ -282,7 +282,7 @@ vs rice QML**, and only applies to a file that already passed §0.
 > `Item` and `SurfaceSlot` hosts a `PanelWindow`, and both are lane. It is not
 > "is it a `QtObject`" — `MoodFaces` and `MorphState` are `QtObject`s and both
 > are rice. It is not line count — `AudioColonnade` is 1940 lines of rice and
-> `AoideIpc` is 24 lines of lane. It is not "is it shared" — shared across
+> `StrillixIpc` is 24 lines of lane. It is not "is it shared" — shared across
 > *widgets* is not shared across *rices*, and only the second earns a lane home.
 >
 > **The corollary for a new API**: a new capability lands as a lane bridge that
@@ -341,9 +341,9 @@ contract grants.
 carries one. Both hosts detect this via the same `resolvedRice === ""`
 signal the anchored catalog's own resolution already computes:
 `RiceSurfaces.qml` reuses `SurfaceSlot`'s own existing
-`console.warn("[aoide/surfaceslot] no rice (active or baseline) provides
+`console.warn("[strillix/surfaceslot] no rice (active or baseline) provides
 slot", …)` path unchanged; `RiceGadgets.qml` warns at
-`console.warn("[aoide/ricegadgets] no rice (active or baseline) provides
+`console.warn("[strillix/ricegadgets] no rice (active or baseline) provides
 dock slot", …)`. Either way: a console warning, nothing rendered — a
 declaration with no body is inert, not an error.
 

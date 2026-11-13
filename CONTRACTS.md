@@ -165,7 +165,7 @@ an uppercase name, not `pkgs/strillix-shell/qml/`.
 > `Item` and `SurfaceSlot` hosts a `PanelWindow`, and both are lane. It is not
 > "is it a `QtObject`" — `MoodFaces` and `MorphState` are `QtObject`s and both
 > are rice. It is not line count — `AudioColonnade` is 1940 lines of rice and
-> `AoideIpc` is 24 lines of lane. It is not "is it shared" — shared across
+> `StrillixIpc` is 24 lines of lane. It is not "is it shared" — shared across
 > *widgets* is not shared across *rices*, and only the second earns a lane home.
 >
 > **The corollary for a new API**: a new capability lands as a lane bridge that
@@ -2056,7 +2056,7 @@ Writers, and the exact shape each leaves:
 | `strx rice stage <rice>` | the rice's derivable wallpaper — its own desktop picture `rices/<rice>/wallpaper/<rice>-desktop.{webp,png,jpg,jpeg}` (first match in that order), else the shared `/wallpapers/<rice>.{webp,png,jpg,jpeg}` — as `{"path": …, "rice": …}`; with no derivable wallpaper the file is REMOVED — so a wallpaper staged for another rice does not stand over this one. A pick already stamped for THIS rice is left untouched (reported as `wallpaperStage: "pick-kept"`); `rice-shape` refuses a declared `strillix.theme.wallpaper` not named `wallpaper/<rice>-desktop.<ext>` |
 | `strx wallpaper set <path\|name> [--position auto\|tile\|fill]` | `{"path": …, "kind": …, "pick": true, "rice": …}` for the rice staged at write time — the `rice` field omitted only when nothing is staged, which writes the legacy shape — plus, for a still, `"position"` when `--position tile` or `fill` forced it and `"tile": true` when it tiles. `--position` with a video or a `we:<id>` token is a usage refusal (`position-not-a-still`, exit 2) that writes nothing, and the registry refuses it beside `--clear` or `--from-skwd` |
 | `strx wallpaper set we:<id>` | `{"kind": "we", "weId": …, "pick": true, "rice": …}` — a scene, whose identity is the workshop id and which has no `path` at all. `we:` with an empty id is not a scene token (the argument is then resolved as a file, and fails like any other missing file) |
-| `strx wallpaper set --from-skwd --kind <static\|video\|we> <path\|id>` | the provider's own report, RECORDED: the shape above with `kind` as the provider named it, and no `position` or `tile` (the provider lays the picture out itself). Applies NOTHING back, and is a no-op with no write (exit 0, `recorded: false`) when the host's provider is not `skwd-wall` (the word in `/stage/wallpaper-provider` below), when the identity is this host's step-aside image (`AOIDE_SKWD_WALL_STANDIN`), or when the staged pick already names that same `(kind, identity)` for that rice. The ONLY writer exempt from the `declarative` lock: a provider's picker is not a stage writer, and refusing the record would leave this file describing something the screen is not showing |
+| `strx wallpaper set --from-skwd --kind <static\|video\|we> <path\|id>` | the provider's own report, RECORDED: the shape above with `kind` as the provider named it, and no `position` or `tile` (the provider lays the picture out itself). Applies NOTHING back, and is a no-op with no write (exit 0, `recorded: false`) when the host's provider is not `skwd-wall` (the word in `/stage/wallpaper-provider` below), when the identity is this host's step-aside image (`STRILLIX_SKWD_WALL_STANDIN`), or when the staged pick already names that same `(kind, identity)` for that rice. The ONLY writer exempt from the `declarative` lock: a provider's picker is not a stage writer, and refusing the record would leave this file describing something the screen is not showing |
 | `strx wallpaper set --clear` | the staged rice's own default, exactly as a re-stage of it writes it (its derivable wallpaper, or the file removed). Never keeps a pick; the envelope's `droppedPick` and `wallpaperStage` come from the marker read before the write |
 | `strx rice mode declarative` | NOTHING — a lock is not a rice switch. Its re-pin writes `theme.json` alone, and a pick stamped for another rice is hidden by the read-side rule rather than dropped |
 | `strx rice back <entry>` | the target entry's wallpaper value VERBATIM — an entry minted while a pick stood restores it as a pick, `rice`, `position` and `tile` and all; an entry with no wallpaper removes whatever stands |
@@ -7821,7 +7821,7 @@ props)` mechanism `WidgetSlot` uses, exposing the live instance as `.item`
 for the host to call directly (e.g. the bar's clef calling
 `.item.toggle()`). Its floor is the same chain's: sonata's body, else an
 optional lane-side `fallback` Component. Only `switcher` gives one, the plain
-`AoideSwitcher.qml`, so the lane's one `aoide:switcher` shortcut toggles a
+`StrillixSwitcher.qml`, so the lane's one `aoide:switcher` shortcut toggles a
 rice's `widgets/switcher.qml` when the rice ships it and the plain switcher in
 every other rice. A shortcut that toggles a slot is registered once, by the
 lane, never also by the body it toggles: two registrations of one name
@@ -7942,7 +7942,7 @@ mechanism, just a new way to name a slot that resolves through the existing
 two primitives. A declared slot with no actual `widgets/<slot>.qml` body
 (neither the active rice nor sonata) resolves through the same
 `resolvedRice === ""` signal the anchored catalog already computes and warns
-(`[aoide/surfaceslot]` / `[aoide/ricegadgets]`) instead of throwing —
+(`[strillix/surfaceslot]` / `[strillix/ricegadgets]`) instead of throwing —
 declaring a TYPE with no body is inert, not an error.
 
 `rices/nocturne/` is the worked, real example: its body declares one
