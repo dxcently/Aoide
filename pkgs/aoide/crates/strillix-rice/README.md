@@ -96,7 +96,7 @@ a config file). Paint-side — ships in `strillix`, not core.
   read-only, no restore counterpart (`rice back` still never touches widget
   bodies — they stay git's substrate).
 - `ipc`, `lint` — the rice IPC surface (the Quickshell reload trigger and the
-  `aoide-quickshell.service` MainPID probe the healthcheck shares) and
+  `strillix-quickshell.service` MainPID probe the healthcheck shares) and
   `rice lint`.
 - `health` — the `quickshell healthcheck` watchdog (`src/health.rs`, whose
   module header is the argument). It first reads the unit's state through

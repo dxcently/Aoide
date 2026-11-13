@@ -69,7 +69,7 @@ covers only what's specific to dendrites.
   RENAMES that file over the stage entry and never writes through it, so a
   drafted rice's own file is untouched, and it is declared truth on every
   activation: the stage twin stays that until the session's `strx reload`
-  (the lane's `aoide-rice-reload` unit) puts back the staged or drafted rice
+  (the lane's `strillix-rice-reload` unit) puts back the staged or drafted rice
   `stage/mode.json` names. Nix never reads the mode, so the seed stays one
   unconditional write. The one run
   writes the same bytes to `/declared/theme.json` too (CONTRACTS.md §4):

@@ -7,7 +7,7 @@
 // public functions (`has`/`source`/`resolveRice`) against whatever
 // rices/manifest.json sits under `$STRILLIX_ROOT/run/qml/` (default
 // `$HOME/.strillix/run/qml/`). Run it against a
-// SCRATCH `$HOME` pointed at a real BUILT `aoide-quickshell-config`
+// SCRATCH `$HOME` pointed at a real BUILT `strillix-quickshell-config`
 // derivation's manifest.json (never a hand-written fixture — the standing
 // lesson this harness exists to honour) with an offscreen QPA platform:
 //

@@ -1,5 +1,5 @@
 # modules/dendrites/quickshell/home.nix — the shell lane's home half: the
-# `aoide-quickshell` user service on the config directory `strillix.quickshell.config`
+# `strillix-quickshell` user service on the config directory `strillix.quickshell.config`
 # names, and the quickshell package where the system half is not (`quickshell.nixos`).
 # Imported through `habit.home` by the catalogue entry (default.nix) and by the
 # strillix runtime's home half (runtime-home.nix), so one file serves both.
@@ -37,9 +37,9 @@ in
         #   - Restart=always — a QML crash or a clean exit respawns the whole
         #     shell instead of leaving the desktop bare until the next login.
         #     `systemctl --user stop` is never fought, so a deliberate stop holds.
-        #   - journald — `journalctl --user -u aoide-quickshell` gives real logs
+        #   - journald — `journalctl --user -u strillix-quickshell` gives real logs
         #     (an exec-once child's stderr is lost), at quickshell's INFO level,
-        #     and ExecStopPost closes every run with an `aoide-quickshell ended:
+        #     and ExecStopPost closes every run with an `strillix-quickshell ended:
         #     result= code= status=` line, so a stop names its cause.
         #   - graphical-session.target ordering — it starts only once the
         #     compositor lane's env handoff (hyprland-session.target →
@@ -66,9 +66,9 @@ in
         # rice-gated half (deploy the tree, seed the stage, restart the rice)
         # is the `strillix` lane's, which is also the lane that sets this config.
         systemd.user.services = lib.mkIf (configDir != null) {
-          aoide-quickshell = {
+          strillix-quickshell = {
             Unit = {
-              Description = "Aoide Quickshell — shell surface (bar/dock/wallpaper/notifications)";
+              Description = "Strillix Quickshell — shell surface (bar/dock/wallpaper/notifications)";
               PartOf = [ "graphical-session.target" ];
               After = [ "graphical-session.target" ];
               ConditionEnvironment = "WAYLAND_DISPLAY";
@@ -83,7 +83,7 @@ in
               ExecStart = "${quickshellPkg}/bin/quickshell -v -p ${shellEntry}";
               # The shell, not systemd, expands these from ExecStopPost's
               # environment, so the words stay inside one quoted argument.
-              ExecStopPost = "${pkgs.bash}/bin/sh -c 'echo \"aoide-quickshell ended: result=$SERVICE_RESULT code=$EXIT_CODE status=$EXIT_STATUS\"'";
+              ExecStopPost = "${pkgs.bash}/bin/sh -c 'echo \"strillix-quickshell ended: result=$SERVICE_RESULT code=$EXIT_CODE status=$EXIT_STATUS\"'";
               # Qt6's qtbase ships only jpeg/png/gif/ico imageformats plugins (plus
               # qtsvg); webp/tiff/etc. live in a SEPARATE qtimageformats plugin the
               # quickshell wrapper does not carry. A rice wallpaper may be any of those

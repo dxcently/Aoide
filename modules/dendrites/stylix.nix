@@ -140,7 +140,7 @@ let
   # is the wallpaper this lane bakes when the rice carries no `notes.wallpaper` —
   # it keeps the baked path buildable without shipping a binary asset and with
   # NO rice/ read. ImageMagick is a pure build-time input.
-  solidWallpaper = pkgs.runCommand "aoide-wallpaper.png" { } ''
+  solidWallpaper = pkgs.runCommand "strillix-wallpaper.png" { } ''
     ${pkgs.imagemagick}/bin/magick -size 1920x1080 "xc:#${stripHash p.bg}" "$out"
   '';
 

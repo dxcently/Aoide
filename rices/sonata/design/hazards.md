@@ -243,7 +243,7 @@ more robust idiom, not a fix for a broken binding.)
   mode** — `ERROR: Cannot call QsMenuAnchor.open() as quickshell was not
   started in QApplication mode.` The fix is `//@ pragma UseQApplication` at
   the top of the ROOT file (`shell.qml`, in the shell's own QML) and a real
-  `aoide-quickshell.service` restart — a reload does not re-create the
+  `strillix-quickshell.service` restart — a reload does not re-create the
   application object. No other behavior difference observed after the switch.
 - **`onlyMenu`/ItemIsMenu is NOT a usable discriminator for "click should
   open the menu".** nm-applet publishes a `Menu` object path and NO
@@ -294,7 +294,7 @@ resetting to zero.
   reload** ("no widget bodies changed; nothing to reload"). If you need a
   reload regardless, run `strillix quickshell reload`.
 - **A brand-new slot file is not discovered by a reload** — `manifest.json` is
-  read once, at startup. Restart `aoide-quickshell.service`.
+  read once, at startup. Restart `strillix-quickshell.service`.
 - **The CLI command is `quickshell reload`, not `shell reload`** — renamed
   because `shell` collided with `--agent shell`.
 - **Quickshell's file watcher only scans the TOP LEVEL of `run/qml/`, never
@@ -309,7 +309,7 @@ resetting to zero.
   `reload()` is declared `: void` and a void call that lands prints nothing —
   but if you invoke `quickshell ipc call` by hand, **the exit code will lie to
   you**. Read its output.
-- **`journalctl --user -u aoide-quickshell.service` can fall far behind** —
+- **`journalctl --user -u strillix-quickshell.service` can fall far behind** —
   observed ~35 minutes stale mid-session before catching up. A clean journal
   is not proof of a clean reload. `quickshell log --pid <pid> -t N` is the
   reliable channel and survives restarts.

@@ -42,7 +42,7 @@
 //!
 //! `strillix reload` is also what brings a staged or drafted rice back after a
 //! login or a switch: the activation lays declared state over the runtime
-//! tree, and the strillix lane runs this command from its `aoide-rice-reload` unit
+//! tree, and the strillix lane runs this command from its `strillix-rice-reload` unit
 //! to put back whatever `stage/mode.json` names.
 //!
 //! **Sync runs BEFORE snapshot in both arms** — not the order the beats are
@@ -382,7 +382,7 @@ mod tests {
     /// resolved to (`not-running`/`failed`/`reloaded` are reported facts,
     /// same posture the old `quickshell reload` command had). Deliberately
     /// doesn't assert WHICH tag: that depends on whether
-    /// `aoide-quickshell.service` happens to be live on the machine running
+    /// `strillix-quickshell.service` happens to be live on the machine running
     /// this test.
     #[test]
     fn declarative_mode_is_shell_reload_only_and_always_ok() {
@@ -830,8 +830,8 @@ mod tests {
         assert_eq!(out.status, Status::Ok, "{:?}", out.data);
         let lock = std::fs::read_to_string(stage.join("hyprlock.conf")).unwrap();
         let picture = rices.join("lockscreen.png");
-        assert!(lock.lines().any(|l| l == "$aoide_lock_color = rgb(abcdef)"), "{lock}");
-        assert!(lock.lines().any(|l| l == format!("$aoide_lock_image = {}", picture.display())), "{lock}");
+        assert!(lock.lines().any(|l| l == "$strillix_lock_color = rgb(abcdef)"), "{lock}");
+        assert!(lock.lines().any(|l| l == format!("$strillix_lock_image = {}", picture.display())), "{lock}");
         assert_eq!(out.data.unwrap()["sync"]["lockScreen"]["status"], "written");
         let _ = std::fs::remove_dir_all(&root);
     }

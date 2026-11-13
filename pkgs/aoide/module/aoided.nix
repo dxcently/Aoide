@@ -85,7 +85,7 @@ lib.mkIf config.aoide.enable {
     # The anchor decides when the daemon STARTS. It never owns its
     # lifetime: this unit carries no `partOf`, and must not grow one. A
     # desktop is a replaceable surface, the policy surface is not — a
-    # crashed shell (`aoide-quickshell` OOM-killed) took
+    # crashed shell (the desktop's Quickshell, OOM-killed) took
     # graphical-session.target down with it, `partOf` stopped aoided
     # CLEANLY (so `Restart=on-failure` never fired), and `BindsTo` dragged
     # the a2a/mcp doors down behind it: audit log, gate and doors stayed

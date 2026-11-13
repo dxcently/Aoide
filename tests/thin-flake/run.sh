@@ -113,9 +113,9 @@ check "overlays: pkgs.thinFlakeMarker is hello" '"hello"' \
   "$(hostev thin 'h: h.pkgs.thinFlakeMarker.pname')"
 # the rices book: the thin host's own `rices/` is merged with Strillix's, and the home half reads
 # the same merged directory its system half reads.
-check "rices: the merged book is a store path ending in -aoide-rices-merged, and the home ricesRoot is that book" \
+check "rices: the merged book is a store path ending in -strillix-rices-merged, and the home ricesRoot is that book" \
   '{"merged":true,"same":true}' \
-  "$(hostev thin 'h: { merged = builtins.match ".*-aoide-rices-merged" (toString h._module.args.ricesRoot) != null; same = toString h.config.home-manager.extraSpecialArgs.ricesRoot == toString h._module.args.ricesRoot; }')"
+  "$(hostev thin 'h: { merged = builtins.match ".*-strillix-rices-merged" (toString h._module.args.ricesRoot) != null; same = toString h.config.home-manager.extraSpecialArgs.ricesRoot == toString h._module.args.ricesRoot; }')"
 
 # `strillix.hostConfig`: this host sets its own (`thin`), and the value it set reads back.
 check "thin sets strillix.hostConfig, and it reads back as set" \

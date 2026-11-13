@@ -55,7 +55,7 @@ each declares `strillix.surfaces.wallpaper` and writes its own
   its unit's `ExecStartPost`, and every pick write calls it; it is the door that
   waits for a provider still coming up (~5 s), where the pick writes each make a
   single attempt.
-- **Re-asserted after every activation.** `home.activation.aoideResyncSkwdWall`
+- **Re-asserted after every activation.** `home.activation.strillixResyncSkwdWall`
   runs after `reloadSystemd` and `try-restart`s `skwd-walld.service`, so the
   unit's own `ExecStartPost` syncs with the environment the unit was built for.
   A running daemon is therefore bounced once per switch — accepted: the engine

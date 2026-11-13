@@ -3,7 +3,7 @@
 //!
 //! - A staged rice that dresses the `lockscreen` slot (its own entry in
 //!   `run/qml/rices/manifest.json`, no baseline fallback) is locked by the
-//!   running shell, when the shell's PAM service (`/etc/pam.d/aoide-lock`)
+//!   running shell, when the shell's PAM service (`/etc/pam.d/strillix-lock`)
 //!   exists: `quickshell -p <run/qml/shell.qml> ipc call lock lock` reaches
 //!   `LockHost.qml`, which starts its PAM conversation, holds the Wayland
 //!   session lock and paints the rice's face, and answers `false` when the
@@ -53,7 +53,7 @@ const SHELL_ANSWER: Duration = Duration::from_secs(5);
 
 /// The PAM service LockHost's conversation runs; without it the shell
 /// cannot unlock, so it is never asked to lock.
-const SHELL_PAM: &str = "/etc/pam.d/aoide-lock";
+const SHELL_PAM: &str = "/etc/pam.d/strillix-lock";
 
 /// How long a spawned hyprlock must stay up to count as holding the lock.
 const HYPRLOCK_SETTLE: Duration = Duration::from_millis(500);
@@ -61,7 +61,7 @@ const HYPRLOCK_SETTLE: Duration = Duration::from_millis(500);
 pub fn register(r: &mut Registry) {
     r.insert(cmd!(
         path: ["lock"],
-        summary: "Lock the screen. A staged rice that dresses the `lockscreen` slot is locked by the running shell (its own face, confirmed by the compositor within 5 s) when the shell's PAM service /etc/pam.d/aoide-lock exists; every other rice, a missing PAM service, and a shell that does not answer, runs hyprlock dressed by rice/{declared,stage}/hyprlock.conf, and a LockedHint still `yes` from a shell lock is cleared once hyprlock holds the screen.",
+        summary: "Lock the screen. A staged rice that dresses the `lockscreen` slot is locked by the running shell (its own face, confirmed by the compositor within 5 s) when the shell's PAM service /etc/pam.d/strillix-lock exists; every other rice, a missing PAM service, and a shell that does not answer, runs hyprlock dressed by rice/{declared,stage}/hyprlock.conf, and a LockedHint still `yes` from a shell lock is cleared once hyprlock holds the screen.",
         args: [],
         flags: [flag!(
             "hyprlock",
@@ -452,7 +452,7 @@ esac
             std::fs::create_dir_all(&stage).unwrap();
             std::fs::create_dir_all(root.join("aoide/rice/run/qml/rices")).unwrap();
             std::fs::create_dir_all(root.join("pam")).unwrap();
-            std::fs::write(root.join("pam/aoide-lock"), b"").unwrap();
+            std::fs::write(root.join("pam/strillix-lock"), b"").unwrap();
             std::env::set_var("PATH", &bin);
             aoide_test_support::pin_stage(&stage);
             std::env::remove_var("XDG_SESSION_ID");
@@ -465,7 +465,7 @@ esac
         }
 
         fn lock(&self) -> Outcome {
-            lock_with(&self.root.join("pam/aoide-lock"), false)
+            lock_with(&self.root.join("pam/strillix-lock"), false)
         }
 
         fn touch(&self, name: &str) {
@@ -666,7 +666,7 @@ esac
         let rig = Rig::new("lock-nopamfile");
         rig.stage("barcarolle", FACE);
         rig.touch("qs-secure");
-        std::fs::remove_file(rig.root.join("pam/aoide-lock")).unwrap();
+        std::fs::remove_file(rig.root.join("pam/strillix-lock")).unwrap();
         let o = rig.lock();
         assert_eq!(o.status, Status::Ok, "{o:?}");
         assert_eq!(data(&o)["locker"], "hyprlock");
@@ -710,7 +710,7 @@ esac
         rig.stage("barcarolle", FACE);
         rig.touch("qs-secure");
         rig.touch("lh-yes");
-        let o = lock_with(&rig.root.join("pam/aoide-lock"), true);
+        let o = lock_with(&rig.root.join("pam/strillix-lock"), true);
         assert_eq!(o.status, Status::Ok, "{o:?}");
         assert_eq!(data(&o)["locker"], "hyprlock");
         assert!(data(&o)["shellRefused"].is_null(), "{o:?}");

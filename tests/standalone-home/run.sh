@@ -47,18 +47,18 @@ check "STRILLIX_HOST_CONFIG is the user's own path" '"/home/fixture/.config/stri
 check "the bridge unit carries the templates" "1" \
   "$(ev standalone 'c: builtins.length (builtins.filter (e: builtins.match "STRILLIX_TEMPLATES=.*" e != null) c.systemd.user.services.shellbridge.Service.Environment)')"
 check "the shell's unit is there" "true" \
-  "$(ev standalone 'c: builtins.elem "aoide-quickshell" (builtins.attrNames c.systemd.user.services)')"
+  "$(ev standalone 'c: builtins.elem "strillix-quickshell" (builtins.attrNames c.systemd.user.services)')"
 # (a) the shell unit and its QML config are forced: a missing overlay name fails here.
 check "the shell unit carries the templates" "1" \
-  "$(ev standalone 'c: builtins.length (builtins.filter (e: builtins.match "STRILLIX_TEMPLATES=.*" e != null) c.systemd.user.services.aoide-quickshell.Service.Environment)')"
+  "$(ev standalone 'c: builtins.length (builtins.filter (e: builtins.match "STRILLIX_TEMPLATES=.*" e != null) c.systemd.user.services.strillix-quickshell.Service.Environment)')"
 check "the shell's ExecStart forces its QML config" "true" \
-  "$(ev standalone 'c: builtins.stringLength (toString c.systemd.user.services.aoide-quickshell.Service.ExecStart) > 0')"
+  "$(ev standalone 'c: builtins.stringLength (toString c.systemd.user.services.strillix-quickshell.Service.ExecStart) > 0')"
 check "the QML config derivation is forced" "true" \
   "$(ev standalone 'c: builtins.stringLength (toString c.strillix.quickshell.config) > 0')"
 # (a2) the QML config is forced through its own deploy entry: the derivation's .drv is
 # in the entry's string context, so a broken callPackage (strillix-shell) fails here.
 check "the QML config derivation is in the deploy context" "true" \
-  "$(ev standalone 'c: builtins.any (p: builtins.match ".*-aoide-quickshell-config\\.drv" p != null) (builtins.attrNames (builtins.getContext c.home.activation.aoideDeployQml.data))')"
+  "$(ev standalone 'c: builtins.any (p: builtins.match ".*-strillix-quickshell-config\\.drv" p != null) (builtins.attrNames (builtins.getContext c.home.activation.strillixDeployQml.data))')"
 # (a3) a standalone home carries no aoided unit: core's daemon is NixOS-only, so nothing
 # on this path anchors aoide.sessionTarget (see modules/dendrites/quickshell/home.nix).
 check "a standalone home has no aoided unit" "false" \

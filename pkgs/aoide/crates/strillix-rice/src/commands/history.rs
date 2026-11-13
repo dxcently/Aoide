@@ -2523,8 +2523,8 @@ mod tests {
         let out = handle_rice_back(&inv_back(None, Some(1)));
         assert_eq!(out.status, Status::Ok, "{:?}", out.data);
         let lock = std::fs::read_to_string(stage.join("hyprlock.conf")).unwrap();
-        assert!(lock.lines().any(|l| l == "$aoide_lock_color = rgb(111111)"), "{lock}");
-        assert!(lock.lines().any(|l| l == format!("$aoide_lock_image = {}", picture.display())), "{lock}");
+        assert!(lock.lines().any(|l| l == "$strillix_lock_color = rgb(111111)"), "{lock}");
+        assert!(lock.lines().any(|l| l == format!("$strillix_lock_image = {}", picture.display())), "{lock}");
         assert!(out.changed.iter().any(|c| c.ends_with("stage/hyprlock.conf")));
         assert_eq!(out.data.unwrap()["lockScreen"]["status"], "written");
 

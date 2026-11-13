@@ -11,7 +11,7 @@
 //! rebuilds the WHOLE scene fresh from `shell.qml` — closer to an
 //! in-process restart than a selective reload — which is exactly what
 //! picks those up without a `systemctl --user restart
-//! aoide-quickshell.service`.
+//! strillix-quickshell.service`.
 //!
 //! `quickshell ipc call <target> <function>` does NOT auto-discover a
 //! running instance by itself (confirmed live: it looks for a "default"
@@ -56,7 +56,7 @@ pub enum ReloadStatus {
     /// The IPC call reached its handler: `quickshell` exited 0 AND printed
     /// nothing (see the module header — a void call that lands is silent).
     Reloaded,
-    /// `aoide-quickshell.service` isn't running — nothing to reload, and no
+    /// `strillix-quickshell.service` isn't running — nothing to reload, and no
     /// IPC call was even attempted.
     NotRunning,
     /// Quickshell is running, but the IPC call itself failed — nonzero exit,
@@ -96,7 +96,7 @@ impl ReloadStatus {
 /// (mirrors `live::apply_live`'s guarded, non-fatal posture).
 ///
 /// No-ops to [`ReloadStatus::NotRunning`] when
-/// `aoide-quickshell.service` isn't up ([`quickshell_service_main_pid`]
+/// `strillix-quickshell.service` isn't up ([`quickshell_service_main_pid`]
 /// returns `None`) — the common case in this sandboxed environment, and any
 /// time a rebuild/rice change lands with no live shell to show it in.
 ///
@@ -124,14 +124,14 @@ pub fn quickshell_ipc_reload() -> ReloadStatus {
     }
 }
 
-/// The pid `aoide-quickshell.service` is currently tracking, if active.
+/// The pid `strillix-quickshell.service` is currently tracking, if active.
 /// `None` off Hyprland/systemd, or when the unit isn't running — callers read
 /// that as "no live shell", never as a failure (the guarded-optional posture
 /// this codebase takes toward system services it doesn't own). Shared with
 /// [`crate::health::run_healthcheck`].
 pub(crate) fn quickshell_service_main_pid() -> Option<u32> {
     let out = std::process::Command::new("systemctl")
-        .args(["--user", "show", "aoide-quickshell.service", "--property=MainPID", "--value"])
+        .args(["--user", "show", "strillix-quickshell.service", "--property=MainPID", "--value"])
         .output()
         .ok()?;
     if !out.status.success() {
@@ -147,7 +147,7 @@ pub(crate) fn quickshell_service_main_pid() -> Option<u32> {
 /// Judge one finished `quickshell ipc call` from its exit status and output,
 /// per the matrix in the module header. Split out as a pure function so that
 /// matrix is actually unit-tested — [`quickshell_ipc_reload`] itself can't be,
-/// since it reads the real `aoide-quickshell.service`.
+/// since it reads the real `strillix-quickshell.service`.
 ///
 /// Reads stdout FIRST because that is where quickshell puts every one of
 /// these messages, with stderr as a fallback so a future version that moves

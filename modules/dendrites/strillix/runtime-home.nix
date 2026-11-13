@@ -144,7 +144,7 @@ let
   # `resolve`'s two passes against the file's own shape. Identity when the
   # host sets no override and no geometry beyond the rice's own, so a host
   # without a venue stages exactly the committed bytes it staged before.
-  stageTheme = pkgs.writeText "aoide-stage-theme.json" (
+  stageTheme = pkgs.writeText "strillix-stage-theme.json" (
     builtins.toJSON (theme.stagePatch config.strillix.theme committedTheme)
   );
 
@@ -154,7 +154,7 @@ let
   # twin as `$STRILLIX_ROOT/declared/venue.json`: the runtime stage reads the declared
   # rice from the runtime rices and overlays this, so the recolour law
   # stays in nix alone.
-  venueFile = pkgs.writeText "aoide-declared-venue.json" (
+  venueFile = pkgs.writeText "strillix-declared-venue.json" (
     builtins.toJSON (theme.venueDelta config.strillix.theme committedTheme)
   );
 
@@ -164,7 +164,7 @@ let
   # rice writes, with no second copy of the colour mapping to go stale. The
   # picture is the shipped rices's store copy; a rice with no
   # `lockscreen.<ext>` renders comments only.
-  declaredLockscreen = pkgs.runCommand "aoide-declared-hyprlock.conf" { } ''
+  declaredLockscreen = pkgs.runCommand "strillix-declared-hyprlock.conf" { } ''
     export HOME=$TMPDIR AOIDE_ROOT=$TMPDIR/root
     ${strillixPkg}/bin/strillix theme emit hyprlock ${stageTheme} \
       --rice-dir ${strillixRices}/share/strillix/rices/${config.strillix.rice} \
@@ -208,8 +208,12 @@ let
   manifestAttrs = onlyBuiltIn ricesLib.manifestAttrs;
   registryAttrs = onlyBuiltIn ricesLib.registryAttrs;
 
-  manifestJsonFile = pkgs.writeText "aoide-quickshell-manifest.json" (builtins.toJSON manifestAttrs);
-  registryJsonFile = pkgs.writeText "aoide-quickshell-registry.json" (builtins.toJSON registryAttrs);
+  manifestJsonFile = pkgs.writeText "strillix-quickshell-manifest.json" (
+    builtins.toJSON manifestAttrs
+  );
+  registryJsonFile = pkgs.writeText "strillix-quickshell-registry.json" (
+    builtins.toJSON registryAttrs
+  );
 
   # ── Expected paint, published (v1 `strillix.layout.surfaces`) ─────────
   # The ACTIVE rice's expected-paint declaration, published so a health
@@ -227,7 +231,7 @@ let
   # `surfaces` object — emitted rather than omitted, and read by the consumer
   # exactly as an absent file: no expectation, the old count decides
   # (CONTRACTS.md §5).
-  surfacesJsonFile = pkgs.writeText "aoide-quickshell-surfaces.json" (
+  surfacesJsonFile = pkgs.writeText "strillix-quickshell-surfaces.json" (
     builtins.toJSON {
       rice = config.strillix.rice;
       surfaces = lib.mapAttrs' (
@@ -242,11 +246,11 @@ let
   # §4). It sits at the TOP of the deployed tree, beside `shell.qml`, because
   # it is build data and not rice data: staging syncs only under `rices/`
   # (`rice/src/widgets.rs`), so no stage ever changes it.
-  componentsJsonFile = pkgs.writeText "aoide-quickshell-components.json" (
+  componentsJsonFile = pkgs.writeText "strillix-quickshell-components.json" (
     builtins.toJSON config.strillix.components
   );
 
-  # ── Seed script for `home.activation.aoideSeedStage` (below) ───────────────
+  # ── Seed script for `home.activation.strillixSeedStage` (below) ───────────────
   # Lays down the DECLARED rice on every activation: the ACTIVE rice's
   # committed theme, with the venue applied (`stageTheme`, above),
   # into the live stage twin (`$STRILLIX_ROOT/stage/theme.json`, CONTRACTS.md §4) AND
@@ -260,7 +264,7 @@ let
   # and geometry (`$STRILLIX_ROOT/declared/venue.json`, `venueFile` above) laid over
   # it, so an edit to the rice shows and the venue still stands.
   # The seed is declared truth and nothing else: when `stage/mode.json` names
-  # a staged or drafted rice, `aoide-rice-reload` (below) puts that one back
+  # a staged or drafted rice, `strillix-rice-reload` (below) puts that one back
   # once the session is up.
   # Write-temp-then-rename in the SAME directory as each destination (so each
   # rename is atomic) mirrors `shellbridge::atomic_write`
@@ -270,7 +274,7 @@ let
   # script (not inline `run` commands) so a `--dry-run` activation either runs
   # it in full or not at all — never a half-applied mkdir/mktemp/jq/cp/mv
   # sequence.
-  seedStageScript = pkgs.writeShellScript "aoide-seed-stage" ''
+  seedStageScript = pkgs.writeShellScript "strillix-seed-stage" ''
     set -euo pipefail
     mkdir -p "${config.strillix.root}/stage" "${config.strillix.root}/declared"
     tmp=$(mktemp "${config.strillix.root}/stage/.theme.json.XXXXXX")
@@ -377,77 +381,79 @@ let
   # shelf-present path is exactly as permissive in effect — `composeRice`
   # types the fields but does not reject an undeclared (`kind = null`)
   # widget, it just excludes it, same as `.widgets` omitting a key.
-  quickshellConfig = pkgs.runCommand "aoide-quickshell-config" { nativeBuildInputs = [ pkgs.jq ]; } ''
-    mkdir -p "$out/qml"
-    cp -r ${strillixShell}/share/strillix/qml/. "$out/qml/"
+  quickshellConfig =
+    pkgs.runCommand "strillix-quickshell-config" { nativeBuildInputs = [ pkgs.jq ]; }
+      ''
+        mkdir -p "$out/qml"
+        cp -r ${strillixShell}/share/strillix/qml/. "$out/qml/"
 
-    # ── Manifest + registry: typed nix, formatted through jq ───────────────
-    # `manifestJsonFile`/`registryJsonFile` (above) are the validated
-    # content — `builtins.toJSON` is compact and this pretty-prints it to
-    # match the old jq-walk's formatting (2-space indent). `jq .` reorders
-    # nothing it is handed; both files' key order is whatever nix's
-    # `toJSON` already produced (alphabetic per level; consumers read keys,
-    # never their order).
-    mkdir -p "$out/qml/rices"
-    manifest="$out/qml/rices/manifest.json"
-    jq . ${manifestJsonFile} > "$manifest"
-    registry="$out/qml/rices/registry.json"
-    jq . ${registryJsonFile} > "$registry"
-    # The ACTIVE rice's expected-paint declaration (CONTRACTS.md §5) —
-    # `surfacesJsonFile` above. NOT keyed by rice, unlike the two above it:
-    # the expectation is about what the active rice should have mapped now,
-    # and the option it comes from already is that. A consumer finds this file
-    # absent (an older host, or a lane that never deployed) or empty (a rice
-    # that declares none) and falls back to its previous behaviour.
-    surfaces="$out/qml/rices/surfaces.json"
-    jq . ${surfacesJsonFile} > "$surfaces"
-    # The selected components (`componentsJsonFile` above), top level.
-    jq . ${componentsJsonFile} > "$out/qml/components.json"
+        # ── Manifest + registry: typed nix, formatted through jq ───────────────
+        # `manifestJsonFile`/`registryJsonFile` (above) are the validated
+        # content — `builtins.toJSON` is compact and this pretty-prints it to
+        # match the old jq-walk's formatting (2-space indent). `jq .` reorders
+        # nothing it is handed; both files' key order is whatever nix's
+        # `toJSON` already produced (alphabetic per level; consumers read keys,
+        # never their order).
+        mkdir -p "$out/qml/rices"
+        manifest="$out/qml/rices/manifest.json"
+        jq . ${manifestJsonFile} > "$manifest"
+        registry="$out/qml/rices/registry.json"
+        jq . ${registryJsonFile} > "$registry"
+        # The ACTIVE rice's expected-paint declaration (CONTRACTS.md §5) —
+        # `surfacesJsonFile` above. NOT keyed by rice, unlike the two above it:
+        # the expectation is about what the active rice should have mapped now,
+        # and the option it comes from already is that. A consumer finds this file
+        # absent (an older host, or a lane that never deployed) or empty (a rice
+        # that declares none) and falls back to its previous behaviour.
+        surfaces="$out/qml/rices/surfaces.json"
+        jq . ${surfacesJsonFile} > "$surfaces"
+        # The selected components (`componentsJsonFile` above), top level.
+        jq . ${componentsJsonFile} > "$out/qml/components.json"
 
-    # ── Carry over per-rice flavor widgets ──────────────────────────────────
-    # Copy the WHOLE widgets/ dir per rice (bring any helper .qml/asset
-    # subdirs along — a multi-file widget like sonata's bar.qml needs its
-    # WorkspaceRow.qml helper sitting right beside it). A file starting
-    # uppercase is a helper component (QML's own type-file convention: only
-    # an uppercase-first filename is a valid QML type name) — carried to
-    # disk so the slot file's relative imports resolve, but never
-    # independently resolvable as a slot itself (nix already decided the
-    # slot list, above — this loop no longer re-derives it).
-    # Each rice's folder is a nix-built store path (`riceDirOf`), handed to
-    # the shell as `<name>:<dir>`; nothing here interpolates the rices
-    # directory, so this derivation reads the built-in rices and no others.
-    for entry in ${lib.concatStringsSep " " (map (name: "\"${name}:${riceDirOf name}\"") builtIn)}; do
-      name="''${entry%%:*}"
-      d="''${entry#*:}/"
-      if [ -d "$d/widgets" ]; then
-        mkdir -p "$out/qml/rices/$name"
-        cp -r "$d/widgets/." "$out/qml/rices/$name/"
+        # ── Carry over per-rice flavor widgets ──────────────────────────────────
+        # Copy the WHOLE widgets/ dir per rice (bring any helper .qml/asset
+        # subdirs along — a multi-file widget like sonata's bar.qml needs its
+        # WorkspaceRow.qml helper sitting right beside it). A file starting
+        # uppercase is a helper component (QML's own type-file convention: only
+        # an uppercase-first filename is a valid QML type name) — carried to
+        # disk so the slot file's relative imports resolve, but never
+        # independently resolvable as a slot itself (nix already decided the
+        # slot list, above — this loop no longer re-derives it).
+        # Each rice's folder is a nix-built store path (`riceDirOf`), handed to
+        # the shell as `<name>:<dir>`; nothing here interpolates the rices
+        # directory, so this derivation reads the built-in rices and no others.
+        for entry in ${lib.concatStringsSep " " (map (name: "\"${name}:${riceDirOf name}\"") builtIn)}; do
+          name="''${entry%%:*}"
+          d="''${entry#*:}/"
+          if [ -d "$d/widgets" ]; then
+            mkdir -p "$out/qml/rices/$name"
+            cp -r "$d/widgets/." "$out/qml/rices/$name/"
 
-        # ── qmldir: register this rice's helper types ────────────────────────
-        # A slot body is loaded by WidgetSlot/SurfaceSlot through
-        # `Qt.createComponent(Qt.resolvedUrl("rices/<rice>/<slot>.qml"))`
-        # (StagingEngine.qml's `source`), which yields a `qs:` URL. QML's
-        # implicit "types in my own directory" resolution does NOT apply to a
-        # component loaded from that scheme, and this subdirectory is not on
-        # any import path — so without a qmldir an uppercase sibling is simply
-        # not a type, and the body fails to load with `X is not a type`.
-        #
-        # This is not hypothetical: it is exactly what broke sonata's bar when
-        # the helper components moved out of the shell's own qml/ directory
-        # (which IS the shell's implicit import scope, and is why nobody had
-        # to declare them before) and into the rices. The failure is loud
-        # in the log but silent on screen — the slot renders nothing.
-        #
-        # Uppercase-first only: lowercase-kebab files are SLOTS, resolved by
-        # URL through the manifest and never by type name.
-        for h in "$d/widgets/"[A-Z]*.qml; do
-          [ -e "$h" ] || continue
-          t=$(basename "$h" .qml)
-          printf '%s 1.0 %s.qml\n' "$t" "$t" >> "$out/qml/rices/$name/qmldir"
+            # ── qmldir: register this rice's helper types ────────────────────────
+            # A slot body is loaded by WidgetSlot/SurfaceSlot through
+            # `Qt.createComponent(Qt.resolvedUrl("rices/<rice>/<slot>.qml"))`
+            # (StagingEngine.qml's `source`), which yields a `qs:` URL. QML's
+            # implicit "types in my own directory" resolution does NOT apply to a
+            # component loaded from that scheme, and this subdirectory is not on
+            # any import path — so without a qmldir an uppercase sibling is simply
+            # not a type, and the body fails to load with `X is not a type`.
+            #
+            # This is not hypothetical: it is exactly what broke sonata's bar when
+            # the helper components moved out of the shell's own qml/ directory
+            # (which IS the shell's implicit import scope, and is why nobody had
+            # to declare them before) and into the rices. The failure is loud
+            # in the log but silent on screen — the slot renders nothing.
+            #
+            # Uppercase-first only: lowercase-kebab files are SLOTS, resolved by
+            # URL through the manifest and never by type name.
+            for h in "$d/widgets/"[A-Z]*.qml; do
+              [ -e "$h" ] || continue
+              t=$(basename "$h" .qml)
+              printf '%s 1.0 %s.qml\n' "$t" "$t" >> "$out/qml/rices/$name/qmldir"
+            done
+          fi
         done
-      fi
-    done
-  '';
+      '';
 
   # The tree this lane deploys into: $STRILLIX_ROOT/run/qml — the
   # rsync-deployed tree (see the home.activation entries below), never the
@@ -477,7 +483,7 @@ in
   # proceed. run/qml is a deploy target, never a source: a hand edit
   # there is lost at the next switch. A rice is edited in the runtime
   # rices (`$STRILLIX_ROOT/rices/<rice>`, house rule 10), and a
-  # STAGED rice lives there, not here — `aoide-rice-reload` (below)
+  # STAGED rice lives there, not here — `strillix-rice-reload` (below)
   # re-syncs its widget bodies into run/qml once the switch is done.
   # NOTE: this is a home-manager submodule FUNCTION (`{ lib, ... }:`), not a bare
   # attrset — so `lib` here is home-manager's EXTENDED lib (carrying `lib.hm.dag`),
@@ -573,7 +579,7 @@ in
         # strillix dendrite for the same reason the nucleus delta is: a
         # shell with no `strillix` installed has no reader for it.
         {
-          systemd.user.services.aoide-quickshell.Service.Environment = lib.mkAfter [
+          systemd.user.services.strillix-quickshell.Service.Environment = lib.mkAfter [
             "STRILLIX_TEMPLATES=${strillixRices}/share/strillix/rices"
           ];
         }
@@ -593,7 +599,7 @@ in
         # does not stop activation: the binary names it and the later entries
         # still run. Under a dry run nothing moves.
         {
-          home.activation.aoideMigrateRoots = lib.hm.dag.entryBefore [ "writeBoundary" ] ''
+          home.activation.strillixMigrateRoots = lib.hm.dag.entryBefore [ "writeBoundary" ] ''
             if [[ ! -v DRY_RUN ]]; then
               run ${pkgs.coreutils}/bin/env AOIDE_ROOT=${config.aoide.root} STRILLIX_ROOT=${config.strillix.root} ${strillixPkg}/bin/strillix migrate >/dev/null || true
             fi
@@ -667,7 +673,7 @@ in
         })
 
         (lib.mkIf (builtIn != [ ]) {
-          home.activation.aoideSeedRices = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+          home.activation.strillixSeedRices = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
             if [[ -v DRY_RUN ]]; then
               ${refreshCmd} --check
             else
@@ -687,13 +693,13 @@ in
         # QML, no seeded stage, no restart of the rice; not an empty surface,
         # simply absent. A host that names a rice gets exactly today's behaviour.
         #
-        # The `aoide-quickshell` unit is NOT part of this gate: it belongs to the
+        # The `strillix-quickshell` unit is NOT part of this gate: it belongs to the
         # `quickshell` lane, which starts a shell on whatever config this lane
         # deployed — or on a directory the host brought itself, rice or no rice.
         # A null-rice host with no such directory still runs no shell (that lane's
         # own bare case).
         (lib.mkIf (config.strillix.rice != null) {
-          home.activation.aoideDeployQml = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+          home.activation.strillixDeployQml = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
             run mkdir -p "${config.strillix.root}/run"
             run ${pkgs.rsync}/bin/rsync -a --delete --chmod=u+w \
               "${quickshellConfig}/qml/" "${config.strillix.root}/run/qml/"
@@ -712,9 +718,9 @@ in
           # `$STRILLIX_ROOT/stage/wallpaper.json` is never touched (CONTRACTS.md §4). The seed
           # is declared truth, written the same way whatever the mode: the staged
           # or drafted rice `stage/mode.json` names is brought back afterwards by
-          # `aoide-rice-reload` (below).
-          home.activation.aoideSeedStage =
-            lib.hm.dag.entryBetween [ "reloadSystemd" ] [ "writeBoundary" "aoideMigrateRoots" ]
+          # `strillix-rice-reload` (below).
+          home.activation.strillixSeedStage =
+            lib.hm.dag.entryBetween [ "reloadSystemd" ] [ "writeBoundary" "strillixMigrateRoots" ]
               ''
                 run ${seedStageScript}
               '';
@@ -730,7 +736,7 @@ in
           # fails the switch.
           #
           # ONE try-restart names both units, so systemd orders them: the shell is
-          # stopped, `aoide-rice-reload` (Before the shell, below) writes the staged
+          # stopped, `strillix-rice-reload` (Before the shell, below) writes the staged
           # or drafted rice over the declared seed, and only then does the shell
           # start. Ordered after the three writes (the QML rsync, the stage seed and
           # the rices seed, which the reload reads), so the reload lands over the
@@ -748,28 +754,28 @@ in
           #
           # This is the REBUILD-side half of the recovery, not the whole of it:
           # the identical lockup recurring live, mid-session, with no rebuild in
-          # sight is what `aoide-quickshell-healthcheck.timer` (below) exists to
+          # sight is what `strillix-quickshell-healthcheck.timer` (below) exists to
           # catch — of the two, that timer is the only one that ever runs
           # unprompted.
-          home.activation.aoideRestartRice =
+          home.activation.strillixRestartRice =
             lib.hm.dag.entryAfter
               [
-                "aoideDeployQml"
-                "aoideSeedRices"
-                "aoideSeedStage"
+                "strillixDeployQml"
+                "strillixSeedRices"
+                "strillixSeedStage"
                 "onFilesChange"
                 "reloadSystemd"
               ]
               ''
                 run env XDG_RUNTIME_DIR=/run/user/$(${pkgs.coreutils}/bin/id -u) \
-                  ${pkgs.systemd}/bin/systemctl --user try-restart aoide-rice-reload.service aoide-quickshell.service || true
+                  ${pkgs.systemd}/bin/systemctl --user try-restart strillix-rice-reload.service strillix-quickshell.service || true
               '';
 
           # ── Confirm the restart above actually landed ──────────────────────────
-          # `aoideRestartRice` is fire-and-forget: `try-restart ... || true` means
+          # `strillixRestartRice` is fire-and-forget: `try-restart ... || true` means
           # a switch reports success whether the shell came back painted or landed
           # straight in the placeholder-screen lockup its own restart was meant to
-          # fix. `aoide-quickshell-healthcheck.timer` (below) WOULD catch that
+          # fix. `strillix-quickshell-healthcheck.timer` (below) WOULD catch that
           # within ~15s regardless — this entry doesn't close a hole the timer
           # leaves open, it exists so the confirmation is immediate and visible in
           # the rebuild output itself, instead of waiting on the first timer tick
@@ -781,14 +787,14 @@ in
           # never falsely stuck), just a wasted check. It execs the same strillix binary
           # the healthcheck units below do, so it is part of this lane's body and
           # needs no gate of its own.
-          home.activation.aoideVerifyRice = lib.hm.dag.entryAfter [ "aoideRestartRice" ] ''
+          home.activation.strillixVerifyRice = lib.hm.dag.entryAfter [ "strillixRestartRice" ] ''
             run ${pkgs.coreutils}/bin/sleep 5
             run env XDG_RUNTIME_DIR=/run/user/$(${pkgs.coreutils}/bin/id -u) STRILLIX_ROOT=${config.strillix.root} \
               ${strillixPkg}/bin/strillix quickshell healthcheck || true
           '';
 
           # ── Live mid-session watchdog: the placeholder-screen lockup ───────────
-          # `aoideRestartRice` (above) only reasserts the paint on a REBUILD.
+          # `strillixRestartRice` (above) only reasserts the paint on a REBUILD.
           # Nothing caught the SAME failure live, mid-session, with no rebuild in
           # sight — the incident it documents recurred twice more the next day
           # (2026-08-29), the last one unnoticed for ~9 hours. `Restart=always`
@@ -816,10 +822,10 @@ in
           # Unlike `shellbridge`/`aoide-graph-reap` (NixOS-level `systemd.user.
           # services`, whose module gives a flat `path`/`description` sugar),
           # this pair is nested inside the home half,
-          # like `aoide-quickshell` in the quickshell lane — home-manager's OWN systemd
+          # like `strillix-quickshell` in the quickshell lane — home-manager's OWN systemd
           # module has no such sugar (checked against its `modules/systemd.nix`:
           # only `Unit`/`Service`/`Install` freeform sections exist, and no
-          # `path` option at all), so this follows `aoide-quickshell`'s own
+          # `path` option at all), so this follows `strillix-quickshell`'s own
           # Unit/Service/Install shape instead, with `hyprctl`/`notify-send`
           # (needed by health.rs's `hyprctl_json`/`notify_still_flapping`,
           # neither of which is guaranteed present on this manager's PATH) added
@@ -829,9 +835,9 @@ in
           # `journal_tail_since`/`restart_service` all shell out to them) rather
           # than leaning on an ambient default the way `aoide-graph-reap` does
           # under NixOS's richer default environment.
-          systemd.user.services.aoide-quickshell-healthcheck = {
+          systemd.user.services.strillix-quickshell-healthcheck = {
             Unit = {
-              Description = "Aoide Quickshell healthcheck — detect and recover a placeholder-screen lockup Restart=always cannot catch";
+              Description = "Strillix Quickshell healthcheck — detect and recover a placeholder-screen lockup Restart=always cannot catch";
               PartOf = [ "graphical-session.target" ];
               After = [ "graphical-session.target" ];
             };
@@ -859,9 +865,9 @@ in
             };
           };
 
-          systemd.user.timers.aoide-quickshell-healthcheck = {
+          systemd.user.timers.strillix-quickshell-healthcheck = {
             Unit = {
-              Description = "Aoide Quickshell healthcheck timer — periodic placeholder-screen sweep (~15s)";
+              Description = "Strillix Quickshell healthcheck timer — periodic placeholder-screen sweep (~15s)";
               PartOf = [ "graphical-session.target" ];
             };
             Timer = {
@@ -911,12 +917,12 @@ in
           #     ends the run with a non-zero exit, which the `-` already
           #     forgives, so the unit stays active; a `TimeoutStartSec` would
           #     leave it failed, and a try-restart skips a failed unit.
-          systemd.user.services.aoide-rice-reload = {
+          systemd.user.services.strillix-rice-reload = {
             Unit = {
               Description = "Strillix rice reload: bring the staged or drafted rice back after a login or a switch";
               After = [ "graphical-session.target" ];
               PartOf = [ "graphical-session.target" ];
-              Before = [ "aoide-quickshell.service" ];
+              Before = [ "strillix-quickshell.service" ];
             };
             Service = {
               Type = "oneshot";
@@ -925,7 +931,7 @@ in
               Environment = [
                 "AOIDE_ROOT=${config.aoide.root}"
                 "STRILLIX_ROOT=${config.strillix.root}"
-                # The same path aoide-quickshell and shellbridge spell: the staging
+                # The same path strillix-quickshell and shellbridge spell: the staging
                 # path's one variable, on the unit so a reload after a switch stages
                 # from THIS build's rices, whatever the login environment holds.
                 "STRILLIX_TEMPLATES=${strillixRices}/share/strillix/rices"

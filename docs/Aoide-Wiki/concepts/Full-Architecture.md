@@ -396,7 +396,7 @@ sessions a killed terminal could never mark `done`),
 `aoide-melete-adapter`, and `aoide-mcp` (gated on `aoide.mcp.enable`, default
 false) — plus the opt-in `aoide-a2a` ([[A2A-Door]], gated on `aoide.a2a.enable`)
 and `aoide-usage` (gated on `aoide.usage.enable`) units, and the
-`aoide-obsidian-register` oneshot from the shipped dendrite. The
+`strillix-obsidian-register` oneshot from the shipped dendrite. The
 [[Secrets-Broker]] runs separately, as its own SYSTEM (not user) service —
 `aoide-secrets-serve`, present when `aoide-secrets` is selected, own uid
 `aoide-secrets` — anchored to `multi-user.target` rather than a graphical

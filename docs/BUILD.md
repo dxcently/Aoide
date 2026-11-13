@@ -98,8 +98,8 @@ the system PATH, so `strillix` and `strx` find the shipped rices from any shell 
 session variable. A value already in the environment wins over the default. The units
 that exec or spawn `strillix` also spell the same path in their own `Environment=`, so a
 unit restarted by a switch takes this build's rices: `shellbridge.nix`'s `shellbridge`
-service, `modules/dendrites/quickshell/system.nix`'s `aoide-quickshell` unit, and
-`runtime.nix`'s `aoide-rice-reload` unit. Those exist where strillix is selected.
+service, `modules/dendrites/quickshell/system.nix`'s `strillix-quickshell` unit, and
+`runtime.nix`'s `strillix-rice-reload` unit. Those exist where strillix is selected.
 Core's `aoided` unit names none of it, and a headless core (no strillix dendrite
 selected) carries no `pkgs.strillix-rices` closure. The package
 (`pkgs/strillix-rices/default.nix`) bakes the built-in `rices/` tree plus

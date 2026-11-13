@@ -225,7 +225,7 @@ pkgs.testers.runNixOSTest {
             "f=/home/khoa/.strillix/run/qml/rices/aubade/lockscreen.qml; "
             f"chmod u+w $(dirname $f); rm -f $f; cp {fixture} $f; chown khoa $f"
         )
-        as_khoa(m, "systemctl --user restart aoide-quickshell.service")
+        as_khoa(m, "systemctl --user restart strillix-quickshell.service")
         wait_shell(m)
         o = strillix_lock(m)
         assert o["data"]["locker"] == "shell", f"strillix lock used {o}"
@@ -237,7 +237,7 @@ pkgs.testers.runNixOSTest {
     with subtest("face: the login screen is the Quickshell greeter"):
         face.wait_for_unit("greetd.service")
         face.wait_until_succeeds("ps -u greeter -o args= | grep -q /bin/cage", timeout=90)
-        face.wait_until_succeeds("ps -u greeter -o args= | grep -q 'quickshell.*aoide-greeter-tree'", timeout=90)
+        face.wait_until_succeeds("ps -u greeter -o args= | grep -q 'quickshell.*strillix-greeter-tree'", timeout=90)
         face.fail("systemctl is-active ly.service")
         # Two accounts: the face asks which. Past the 3 s ready wait, so a
         # face still standing here reported ready.
@@ -254,7 +254,7 @@ pkgs.testers.runNixOSTest {
         assert "the face did not report ready" not in said, said
         # The rice's wallpaper/ folder rode into the greeter tree, and the logon
         # picture it names is the background stage/wallpaper.json points the face at.
-        tree = face.succeed("ps -u greeter -o args= | grep -o '/nix/store/[^ ]*-aoide-greeter-tree' | head -n1").strip()
+        tree = face.succeed("ps -u greeter -o args= | grep -o '/nix/store/[^ ]*-strillix-greeter-tree' | head -n1").strip()
         wallpaper = json.loads(face.succeed(f"cat {tree}/stage/wallpaper.json"))
         assert wallpaper == {"path": f"{tree}/rices/aubade/wallpaper/aubade-logon.png", "rice": "aubade"}, wallpaper
         face.succeed(f"test -s {wallpaper['path']}")
@@ -322,9 +322,9 @@ pkgs.testers.runNixOSTest {
         assert locked_hint(face) == "yes"
 
     with subtest("face: the lock refuses a wrong password, then unlocks"):
-        before = pam_failures(face, "aoide-lock")
+        before = pam_failures(face, "strillix-lock")
         face.send_chars("wrong-password\n")
-        face.wait_until_succeeds(f"test $(journalctl -b --no-pager | grep -c 'pam_unix(aoide-lock:auth): authentication failure') -gt {before}", timeout=30)
+        face.wait_until_succeeds(f"test $(journalctl -b --no-pager | grep -c 'pam_unix(strillix-lock:auth): authentication failure') -gt {before}", timeout=30)
         face.sleep(2)
         assert locked_hint(face) == "yes", "a wrong password unlocked the session"
         assert lock_secure(face) == "true", "a wrong password released the shell's lock"
@@ -346,7 +346,7 @@ pkgs.testers.runNixOSTest {
         o = strillix_lock(face)
         assert o["data"]["locker"] == "shell", f"strillix lock used {o}"
         wait_hint(face, "yes")
-        pid = as_khoa(face, "systemctl --user show -p MainPID --value aoide-quickshell.service").strip()
+        pid = as_khoa(face, "systemctl --user show -p MainPID --value strillix-quickshell.service").strip()
         face.succeed(f"kill -KILL {pid}")
         face.sleep(2)
         face.screenshot("07-shell-crashed-while-locked")
@@ -385,8 +385,8 @@ pkgs.testers.runNixOSTest {
         face.send_chars("test\n")
         wait_hint(face, "no")
 
-    with subtest("face: with no aoide-lock PAM service the lock is hyprlock's, never a lockout"):
-        face.succeed("mv /etc/pam.d/aoide-lock /etc/pam.d/aoide-lock.off")
+    with subtest("face: with no strillix-lock PAM service the lock is hyprlock's, never a lockout"):
+        face.succeed("mv /etc/pam.d/strillix-lock /etc/pam.d/strillix-lock.off")
         # The shell refuses outright and locks nothing.
         said = as_khoa(face, "quickshell -p $HOME/.strillix/run/qml/shell.qml ipc call lock lock").strip()
         assert said == "false", f"the shell answered {said!r} with no PAM service"
@@ -405,7 +405,7 @@ pkgs.testers.runNixOSTest {
     with subtest("face: the start-up re-lock with no PAM service hands the lock to hyprlock"):
         as_khoa(face, "strillix lock hint yes")
         wait_hint(face, "yes")
-        as_khoa(face, "systemctl --user restart aoide-quickshell.service")
+        as_khoa(face, "systemctl --user restart strillix-quickshell.service")
         face.wait_until_succeeds(hyprlock_running, timeout=60)
         face.succeed("journalctl -b --no-pager | grep -q 'PAM conversation cannot start; not locking'")
         wait_hypr_locked(face, True)
@@ -415,7 +415,7 @@ pkgs.testers.runNixOSTest {
         face.send_chars("test\n")
         face.wait_until_fails(hyprlock_running, timeout=30)
         wait_hypr_locked(face, False)
-        face.succeed("mv /etc/pam.d/aoide-lock.off /etc/pam.d/aoide-lock")
+        face.succeed("mv /etc/pam.d/strillix-lock.off /etc/pam.d/strillix-lock")
 
     with subtest("face: a PAM stack that fails hands the held lock to hyprlock without unlocking"):
         # A module that will not load is PAM itself failing: Linux-PAM marks
@@ -423,8 +423,8 @@ pkgs.testers.runNixOSTest {
         # PAM_AUTH_ERR a refusing stack (pam_deny) gives — so this is an error
         # the conversation cannot get past, not a wrong password.
         face.succeed(
-            "mv /etc/pam.d/aoide-lock /etc/pam.d/aoide-lock.orig; "
-            "printf 'auth required /nonexistent/pam_aoide_missing.so\naccount required pam_unix.so\n' > /etc/pam.d/aoide-lock"
+            "mv /etc/pam.d/strillix-lock /etc/pam.d/strillix-lock.orig; "
+            "printf 'auth required /nonexistent/pam_aoide_missing.so\naccount required pam_unix.so\n' > /etc/pam.d/strillix-lock"
         )
         watch_locked(face)
         o = strillix_lock(face)
@@ -432,7 +432,7 @@ pkgs.testers.runNixOSTest {
         face.wait_until_succeeds("journalctl -b --no-pager | grep -q 'PAM failed while locked'", timeout=30)
         face.wait_until_succeeds("journalctl -b --no-pager | grep -q 'hyprlock holds the lock; letting go'", timeout=30)
         # The host quits so the unit restarts a shell that can lock again.
-        face.wait_until_succeeds("journalctl -b --no-pager | grep -q 'aoide-quickshell ended'", timeout=30)
+        face.wait_until_succeeds("journalctl -b --no-pager | grep -q 'strillix-quickshell ended'", timeout=30)
         face.wait_until_succeeds(hyprlock_running, timeout=10)
         wait_hypr_locked(face, True)
         wait_hint(face, "no")
@@ -442,7 +442,7 @@ pkgs.testers.runNixOSTest {
         face.wait_until_fails(hyprlock_running, timeout=30)
         wait_hypr_locked(face, False)
         assert_never_unlocked(face)
-        face.succeed("rm /etc/pam.d/aoide-lock; mv /etc/pam.d/aoide-lock.orig /etc/pam.d/aoide-lock")
+        face.succeed("rm /etc/pam.d/strillix-lock; mv /etc/pam.d/strillix-lock.orig /etc/pam.d/strillix-lock")
         wait_shell(face)
 
     with subtest("face: after a hand-over the shell locks again, and a conversation that cannot restart is handed over"):
@@ -454,14 +454,14 @@ pkgs.testers.runNixOSTest {
         watch_locked(face)
         # PAM goes away under a held lock; the next refusal cannot restart
         # the conversation, so the lock goes to hyprlock.
-        face.succeed("mv /etc/pam.d/aoide-lock /etc/pam.d/aoide-lock.off")
+        face.succeed("mv /etc/pam.d/strillix-lock /etc/pam.d/strillix-lock.off")
         # The fixture face never reports ready; let the floor take the keys.
         face.wait_until_succeeds(f"test $(journalctl -b --no-pager | grep -c 'the floor takes over') -gt {floors}", timeout=30)
         face.send_chars("wrong-password\n")
         face.wait_until_succeeds("journalctl -b --no-pager | grep -q 'the conversation could not restart'", timeout=30)
         face.wait_until_succeeds(hyprlock_running, timeout=30)
         wait_hypr_locked(face, True)
-        face.succeed("mv /etc/pam.d/aoide-lock.off /etc/pam.d/aoide-lock")
+        face.succeed("mv /etc/pam.d/strillix-lock.off /etc/pam.d/strillix-lock")
         face.sleep(10)
         face.send_chars("test\n")
         face.wait_until_fails(hyprlock_running, timeout=30)
@@ -518,7 +518,7 @@ pkgs.testers.runNixOSTest {
     # ══ night: a greeter face that never reports ready ═════════════════════
     with subtest("night: a greeter face that never reports ready gives way to the floor, which logs in"):
         night.wait_for_unit("greetd.service")
-        night.wait_until_succeeds("ps -u greeter -o args= | grep -q 'quickshell.*aoide-greeter-tree'", timeout=90)
+        night.wait_until_succeeds("ps -u greeter -o args= | grep -q 'quickshell.*strillix-greeter-tree'", timeout=90)
         night.sleep(8)
         night.screenshot("13-greeter-floor")
         said = greeter_log(night)

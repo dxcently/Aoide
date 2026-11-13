@@ -2,7 +2,7 @@
 # Quickshell runtime and its one service).
 #
 # Two things and nothing else: the quickshell PACKAGE, and the
-# `aoide-quickshell` user service, started from the config directory a host (or
+# `strillix-quickshell` user service, started from the config directory a host (or
 # another lane) has named. This lane renders no QML, deploys nothing, and knows
 # no rice: it starts the shell on whatever `strillix.quickshell.config` points at.
 #

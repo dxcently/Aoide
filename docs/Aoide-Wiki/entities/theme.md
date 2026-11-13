@@ -56,7 +56,7 @@ Because both fan-outs derive from the same theme values, staged state and
 adopted state cannot diverge. This is the "zero drift" guarantee. Beyond
 `rice stage`/`wallpaper set` writing `stage/theme.json` live (while `rice mode
 staging` allows it — see [[Self-Ricing#Staging vs Declarative Mode]]), the strillix
-lane's `home.activation.aoideSeedStage` reasserts it from the active rice's
+lane's `home.activation.strillixSeedStage` reasserts it from the active rice's
 committed `rices/<rice>/theme.json` on every activation (see
 [[Codebase#Runtime contracts (socket + stage files)]]), through
 `lib/theme.nix`'s `stagePatch` — the same `strillix.theme.override` venue
@@ -65,7 +65,7 @@ host's `strillix.theme.geometry` laid over the document's — so a
 freshly booted host carries a correctly recoloured stage twin even before
 `rice stage` ever runs. That seed is declared truth: when `stage/mode.json`
 names a staged or drafted rice, `strx reload` — run by the lane's
-`aoide-rice-reload` unit at every login and after every switch — re-stages it
+`strillix-rice-reload` unit at every login and after every switch — re-stages it
 over the seed. The same script also publishes the DECLARED twin,
 `/declared/theme.json` (CONTRACTS.md §4) — those same bytes under their
 own name, its `"rice"` field naming the rice the venue declared — and the

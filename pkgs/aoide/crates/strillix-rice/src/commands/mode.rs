@@ -142,7 +142,7 @@ fn handle_mode_status(_inv: &Invocation) -> Outcome {
 
 /// Read the rice `stage/theme.json` is CURRENTLY carrying, straight off its
 /// own `"rice"` field — the same field both `rice stage` (below) and the nix
-/// activation's `home.activation.aoideSeedStage` reseed script
+/// activation's `home.activation.strillixSeedStage` reseed script
 /// (the strillix lane's activation) write on every stage, every activation.
 /// This is how "the current rice" is knowable at all: the Rust
 /// side has no nix evaluation access, so the stage file's own breadcrumb is
@@ -661,7 +661,7 @@ mod tests {
         // The rice ships a lock picture, so staging it dresses the lock.
         let lock = std::fs::read_to_string(stage.join("hyprlock.conf")).unwrap();
         let picture = rice.join("lockscreen.png");
-        assert!(lock.lines().any(|l| l == format!("$aoide_lock_image = {}", picture.display())), "{lock}");
+        assert!(lock.lines().any(|l| l == format!("$strillix_lock_image = {}", picture.display())), "{lock}");
         assert!(out.changed.iter().any(|c| c.ends_with("stage/hyprlock.conf")));
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -912,9 +912,9 @@ mod tests {
         // rice's own picture from the runtime rices.
         let lock = std::fs::read_to_string(stage.join("hyprlock.conf")).unwrap();
         let picture = sonata.join("lockscreen.png");
-        assert!(lock.lines().any(|l| l == format!("$aoide_lock_image = {}", picture.display())), "{lock}");
-        assert!(lock.lines().any(|l| l == "$aoide_lock_color = rgb(0b1021)"), "{lock}");
-        assert!(lock.lines().any(|l| l == "$aoide_lock_field_check = rgb(ebbcba)"), "{lock}");
+        assert!(lock.lines().any(|l| l == format!("$strillix_lock_image = {}", picture.display())), "{lock}");
+        assert!(lock.lines().any(|l| l == "$strillix_lock_color = rgb(0b1021)"), "{lock}");
+        assert!(lock.lines().any(|l| l == "$strillix_lock_field_check = rgb(ebbcba)"), "{lock}");
         assert!(out.changed.iter().any(|c| c.ends_with("stage/hyprlock.conf")));
         let marker = load_mode_marker();
         assert_eq!(marker.mode, RiceMode::Declarative);

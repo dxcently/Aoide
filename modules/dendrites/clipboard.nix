@@ -55,8 +55,8 @@ in
       clipboardWatch
     ];
 
-    systemd.user.services.aoide-clipboard = {
-      description = "Aoide clipboard history provider";
+    systemd.user.services.strillix-clipboard = {
+      description = "Strillix clipboard history provider";
       wantedBy = [ "graphical-session.target" ];
       after = [ "graphical-session.target" ];
       partOf = [ "graphical-session.target" ];
@@ -70,15 +70,12 @@ in
         ExecStart = "${clipboardWatch}/bin/strillix-clipboard-watch";
         Restart = "on-failure";
         RestartSec = "3s";
-        # The DB and previews live under ~/.cache — the watcher sandbox
-        # allows writes only to those two trees. Keep it constrained to the
-        # Wayland/Unix resources it actually needs.
+        # The DB lives under ~/.cache/cliphist, the one tree the watcher
+        # writes and the only one its sandbox lets it write. Keep it
+        # constrained to the Wayland/Unix resources it actually needs.
         UMask = "0077";
         ProtectSystem = "strict";
-        ReadWritePaths = [
-          "%h/.cache/cliphist"
-          "%h/.cache/aoide-clipboard"
-        ];
+        ReadWritePaths = [ "%h/.cache/cliphist" ];
         PrivateTmp = true;
         NoNewPrivileges = true;
         ProtectKernelTunables = true;

@@ -10,7 +10,7 @@ source: "[[references/AOIDE-HANDOFF]]"
 
 Strillix ships the rice engine as a builtin. The engine provides the loop, the schema, and the staging mechanism. Everything else — the rices, the preferences, the accumulated taste — it learns by doing.
 
-**Status today:** the loop below is real end to end, `rice declare` included. `rice lint` (runs the native [[theme]] engine), `rice stage`, `rice compose`, `strx reload` (the one mode-aware iteration command — absorbed `quickshell reload` outright), the `rice draft` group (`save`/`list`/`drop`), and the `rice mode` group (`status`/`stage`/`declarative`/`draft`) are all implemented. `rice stage` stages `stage/theme.json`, [[Quickshell]] hot-reloads it live via `FileView`, geometry, window-border colours and the hyprglass switch apply to the running compositor over `hyprctl` in the same step, and the terminals follow: `stage/terminal-colors.conf` for every new kitty window, and a `kitty @ load-config` per instance for the open ones — while `rice mode declarative` is locked (below), `rice stage` refuses instead of writing. Beyond a live `rice stage`, the activation seed reseeds `stage/theme.json` from the active rice's committed notes with the venue's `strillix.theme.override` and the host's geometry applied and publishes the same bytes at `/declared/theme.json`, the declared twin that `rice mode declarative` re-pins from, beside `/declared/venue.json`, the slots the venue recolours and the geometry the host sets, as data ([[Codebase#Runtime contracts (socket + stage files)]]) — so a host that boots without ever staging still carries the correct stage twin, and a later re-stage of the declared rice reads the runtime rices, where the rice is edited, with the venue laid over it: the venue wins on the slots it recolours and the geometry it sets, and an edit shows everywhere else. The seed is declared truth and nothing more: the strillix lane's `aoide-rice-reload` unit then runs `strx reload` at every login (before the shell starts) and on every switch, which brings back whatever `stage/mode.json` names — the last staged rice, or the routed draft. `rice declare` is implemented — gated, it copies the runtime rice tree, less its top-level `history/` and `drafts/` (the machine's undo history and scratch, which stay behind), into the checkout's `rices/<name>/` (byte-diff, a repeat with nothing new is a no-op; no `git add`, no rebuild — the user runs those herself). `rice transpose` remains the one declared-but-not-implemented stub (exit `64`) — narrate it as planned, not as a working pipeline. There is no `rice gen`; `rice compose` is the real, working scaffolding entry point.
+**Status today:** the loop below is real end to end, `rice declare` included. `rice lint` (runs the native [[theme]] engine), `rice stage`, `rice compose`, `strx reload` (the one mode-aware iteration command — absorbed `quickshell reload` outright), the `rice draft` group (`save`/`list`/`drop`), and the `rice mode` group (`status`/`stage`/`declarative`/`draft`) are all implemented. `rice stage` stages `stage/theme.json`, [[Quickshell]] hot-reloads it live via `FileView`, geometry, window-border colours and the hyprglass switch apply to the running compositor over `hyprctl` in the same step, and the terminals follow: `stage/terminal-colors.conf` for every new kitty window, and a `kitty @ load-config` per instance for the open ones — while `rice mode declarative` is locked (below), `rice stage` refuses instead of writing. Beyond a live `rice stage`, the activation seed reseeds `stage/theme.json` from the active rice's committed notes with the venue's `strillix.theme.override` and the host's geometry applied and publishes the same bytes at `/declared/theme.json`, the declared twin that `rice mode declarative` re-pins from, beside `/declared/venue.json`, the slots the venue recolours and the geometry the host sets, as data ([[Codebase#Runtime contracts (socket + stage files)]]) — so a host that boots without ever staging still carries the correct stage twin, and a later re-stage of the declared rice reads the runtime rices, where the rice is edited, with the venue laid over it: the venue wins on the slots it recolours and the geometry it sets, and an edit shows everywhere else. The seed is declared truth and nothing more: the strillix lane's `strillix-rice-reload` unit then runs `strx reload` at every login (before the shell starts) and on every switch, which brings back whatever `stage/mode.json` names — the last staged rice, or the routed draft. `rice declare` is implemented — gated, it copies the runtime rice tree, less its top-level `history/` and `drafts/` (the machine's undo history and scratch, which stay behind), into the checkout's `rices/<name>/` (byte-diff, a repeat with nothing new is a no-op; no `git add`, no rebuild — the user runs those herself). `rice transpose` remains the one declared-but-not-implemented stub (exit `64`) — narrate it as planned, not as a working pipeline. There is no `rice gen`; `rice compose` is the real, working scaffolding entry point.
 
 ## The Rice Loop
 
@@ -230,7 +230,7 @@ Multiple drafts coexist independently — saving `amber-dusk` alongside
 `rice stage` and `wallpaper set` are the only two COMMAND writers of
 `stage/theme.json`, and three commands write `stage/wallpaper.json`: `rice
 stage`, `wallpaper set` and `rice back` (the lane's own
-`home.activation.aoideSeedStage` reseeds `theme.json` on every activation and
+`home.activation.strillixSeedStage` reseeds `theme.json` on every activation and
 never touches `wallpaper.json`) — unaffected by which of
 `stage`/`declarative`/`draft` currently owns the routing, see below.
 
@@ -286,7 +286,7 @@ reboot or a switch) restores that rice, never the declared one.
 
 A switch and a reboot restore it the same way. The activation lays the
 declared rice over the runtime tree — the rsync into `run/qml` and the seed
-into both stage twins — and never reads the mode. Then `aoide-rice-reload`, a
+into both stage twins — and never reads the mode. Then `strillix-rice-reload`, a
 user unit of the strillix lane, runs `strx reload` in the user manager, before the
 shell: it re-stages the rice `stage/mode.json` names (palette, wallpaper, widget
 bodies, slot map, registry, compositor keywords, terminal colours), or
@@ -311,7 +311,7 @@ else in this section — locked under `declarative`, allowed under
 `staging`/`draft` — so there is no separate lock to reason about. A
 brand-new widget file is the one thing this doesn't cover: `manifest.json`
 is only read at Quickshell startup, so a new slot still needs a
-`systemctl --user restart aoide-quickshell.service` to be discovered.
+`systemctl --user restart strillix-quickshell.service` to be discovered.
 `strx reload`'s final beat, in every mode, is an unconditional Quickshell
 IPC reload (rebuilds the whole scene fresh from `shell.qml` — the absorbed
 `quickshell reload` mechanism, byte-for-byte in the `declarative` arm);

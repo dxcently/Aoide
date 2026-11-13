@@ -116,7 +116,7 @@ start at [[aoide-cli]] and the group pages linked below.
 - `strx lock` — the one lock entry (`SUPER+ESCAPE`, the power menu, the `lock`
   alias): the running shell's `LockHost` in the staged rice's face when that
   rice dresses the `lockscreen` slot and the shell's PAM service
-  (`/etc/pam.d/aoide-lock`) exists, confirmed by the compositor within 5 s,
+  (`/etc/pam.d/strillix-lock`) exists, confirmed by the compositor within 5 s,
   else hyprlock, which clears a `LockedHint` a dead shell lock left at `yes`;
   `--hyprlock` skips the shell (the lock host's hand-over when its PAM
   conversation fails while it holds the lock).

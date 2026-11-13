@@ -22,7 +22,7 @@ what those checks actually test.
   restarted shell take the lock back on its own, swaps in
   `lock-greeter/broken-lockscreen.qml` (does not compile) and
   `lock-greeter/throwing-lockscreen.qml` (never reports ready) to prove the
-  floor, and removes the `aoide-lock` PAM service to prove the lock falls to
+  floor, and removes the `strillix-lock` PAM service to prove the lock falls to
   hyprlock instead of locking the user out. The greeter's own log is read
   from its Quickshell instance's log file.
   Screenshots land in the driver's output directory. Requires KVM.
@@ -66,7 +66,7 @@ what those checks actually test.
 - `quickshell-seam/` — `tests/quickshell-seam/run.sh` evaluates three fixture
   hosts through the real constructor (habit's composition) with the real
   catalogue and nucleus, and checks the quickshell/strillix seam: a host with its
-  own `quickshell.config` runs the `aoide-quickshell` service on that directory
+  own `quickshell.config` runs the `strillix-quickshell` service on that directory
   and owes strillix nothing (no rice binary, no `rices/`, no shellbridge, no
   healthcheck); a host with no config gets the package and no service; and a
   rice with no `strillix` lane fails its own evaluation with the taught message.

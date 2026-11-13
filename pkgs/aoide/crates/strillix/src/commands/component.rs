@@ -122,7 +122,7 @@ pub fn shell_argv(shell_qml: &Path, slot: &str, verb: &str, arg: Option<&str>) -
 }
 
 fn shell_act(cmd: &str, shell_qml: &Path, slot: &str, verb: &str, arg: Option<&str>) -> Outcome {
-    let fix = Fix::Run("systemctl --user status aoide-quickshell.service".to_string());
+    let fix = Fix::Run("systemctl --user status strillix-quickshell.service".to_string());
     match run_ipc(&shell_argv(shell_qml, slot, verb, arg), Instant::now() + SHELL_ANSWER) {
         Ok(answer) if answer == "true" => {
             Outcome::ok(cmd, format!("the shell ran {verb} on {slot}")).with_data(json!({ "route": "shell", "slot": slot, "verb": verb }))

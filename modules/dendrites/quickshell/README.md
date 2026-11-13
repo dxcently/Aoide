@@ -1,6 +1,6 @@
 # modules/dendrites/quickshell
 
-The shell lane: the Quickshell package and the one `aoide-quickshell` user
+The shell lane: the Quickshell package and the one `strillix-quickshell` user
 service, started on whatever directory `strillix.quickshell.config` names. It
 renders no QML, deploys nothing and knows no rice — bring your own QML, or let
 a lane (`strillix`) name its deployed tree.
@@ -12,7 +12,7 @@ modules/dendrites/quickshell/
 ├── system.nix    the package on NixOS, the session anchor, the
 │                 `strillix.quickshell.enable` fact, `strillix.quickshell.nixos`
 └── home.nix      the `strillix.quickshell.enable` fact at the home level, the
-                  package on a standalone home, and the `aoide-quickshell` unit
+                  package on a standalone home, and the `strillix-quickshell` unit
 ```
 
 ## Named seams
@@ -31,7 +31,7 @@ modules/dendrites/quickshell/
 
 Selecting `quickshell` imports both halves. `strillix`'s runtime imports the same
 two paths (`../quickshell/system.nix`, `../quickshell/home.nix`), so a host
-with both lanes has one module of each and one `aoide-quickshell` unit. A
+with both lanes has one module of each and one `strillix-quickshell` unit. A
 standalone home has no system half: `home.nix` alone installs the package and
 runs the unit. The
 seam with `strillix` and the two strillix-less shapes are charted in

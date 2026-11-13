@@ -90,7 +90,7 @@ let
   # The dress as the shell reads it: the resolved theme without its override
   # tier and without null tiers (ThemeState reads a present tier as set),
   # stamped with the declared rice so the staging engine resolves its face.
-  dress = pkgs.writeText "aoide-greeter-theme.json" (
+  dress = pkgs.writeText "strillix-greeter-theme.json" (
     builtins.toJSON (
       lib.filterAttrsRecursive (_: v: v != null) (removeAttrs t [ "override" ])
       // {
@@ -99,7 +99,7 @@ let
     )
   );
 
-  manifest = pkgs.writeText "aoide-greeter-manifest.json" (
+  manifest = pkgs.writeText "strillix-greeter-manifest.json" (
     builtins.toJSON {
       ${config.strillix.rice} = {
         greeter = face;
@@ -119,7 +119,7 @@ let
   wrapper = config.services.displayManager.sessionData.wrapper;
   xkb = config.services.xserver.xkb;
 
-  tree = pkgs.runCommand "aoide-greeter-tree" { nativeBuildInputs = [ pkgs.jq ]; } ''
+  tree = pkgs.runCommand "strillix-greeter-tree" { nativeBuildInputs = [ pkgs.jq ]; } ''
     q=$out/run/qml
     mkdir -p "$q/rices/${face.owner}" "$out/stage"
     cp ${pkgs.strillix-shell}/share/strillix/qml/ThemeState.qml ${pkgs.strillix-shell}/share/strillix/qml/StagingEngine.qml "$q/"
@@ -180,22 +180,22 @@ let
   # off; cage runs as `-m extend` then, so the greeter spans every connected
   # output. Empty when no output is named, so the script stays as it was.
   outputOnly = lib.optionalString (output != null) ''
-    json=$(${pkgs.wlr-randr}/bin/wlr-randr --json) || { echo "aoide-greeter: wlr-randr failed; every output stays on" >&2; json=; }
-    names=$(printf '%s\n' "$json" | ${pkgs.jq}/bin/jq -r '.[] | select(.enabled) | .name') || { echo "aoide-greeter: could not read the outputs; every output stays on" >&2; names=; }
+    json=$(${pkgs.wlr-randr}/bin/wlr-randr --json) || { echo "strillix-greeter: wlr-randr failed; every output stays on" >&2; json=; }
+    names=$(printf '%s\n' "$json" | ${pkgs.jq}/bin/jq -r '.[] | select(.enabled) | .name') || { echo "strillix-greeter: could not read the outputs; every output stays on" >&2; names=; }
     if printf '%s\n' "$names" | ${pkgs.gnugrep}/bin/grep -qxF ${lib.escapeShellArg output}; then
       printf '%s\n' "$names" | while IFS= read -r name; do
         [ -n "$name" ] && [ "$name" != ${lib.escapeShellArg output} ] || continue
         ${pkgs.wlr-randr}/bin/wlr-randr --output "$name" --off ||
-          echo "aoide-greeter: could not turn $name off; it stays on" >&2
+          echo "strillix-greeter: could not turn $name off; it stays on" >&2
       done
     else
-      echo "aoide-greeter: output" ${lib.escapeShellArg output} "is not connected or enabled; cage runs -m extend, so the greeter spans every connected output" >&2
+      echo "strillix-greeter: output" ${lib.escapeShellArg output} "is not connected or enabled; cage runs -m extend, so the greeter spans every connected output" >&2
     fi
   '';
 
   # What cage runs as the greeter user. The cache goes under the greeter's
   # runtime dir: the greeter account has no home to write.
-  greeterShell = pkgs.writeShellScript "aoide-greeter" ''
+  greeterShell = pkgs.writeShellScript "strillix-greeter" ''
     export AOIDE_ROOT=${tree}
     export STRILLIX_ROOT=${tree}
     export XKB_DEFAULT_LAYOUT=${lib.escapeShellArg xkb.layout}
@@ -205,7 +205,7 @@ let
     export QT_QPA_PLATFORMTHEME=
     export QT_WAYLAND_DISABLE_WINDOWDECORATION=1
     export QT_PLUGIN_PATH=${pkgs.qt6.qtimageformats}/lib/qt-6/plugins
-    export XDG_CACHE_HOME="''${XDG_RUNTIME_DIR:-/tmp}/aoide-greeter-cache"
+    export XDG_CACHE_HOME="''${XDG_RUNTIME_DIR:-/tmp}/strillix-greeter-cache"
     ${outputOnly}exec ${quickshellPkg}/bin/quickshell -p ${tree}/run/qml/shell.qml
   '';
 in

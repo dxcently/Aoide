@@ -160,8 +160,8 @@ strx rice compose <name> [--from <rice>] [--force] [--json]
   takes `composeRice` in the nix evaluator, which the templates fallback
   cannot run. `$STRILLIX_TEMPLATES` is wired only onto strillix-execing units
   (`modules/dendrites/strillix/shellbridge.nix`'s shellbridge service,
-  `modules/dendrites/quickshell/system.nix`'s `aoide-quickshell` and
-  `modules/dendrites/strillix/runtime.nix`'s `aoide-rice-reload`) plus
+  `modules/dendrites/quickshell/system.nix`'s `strillix-quickshell` and
+  `modules/dendrites/strillix/runtime.nix`'s `strillix-rice-reload`) plus
   `modules/dendrites/aoided.nix`'s `environment.sessionVariables` (gated on
   `strillix.enable`) — core-only units don't carry it.
 

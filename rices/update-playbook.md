@@ -38,7 +38,7 @@ A rice's `rice.nix` is handed two things by ARGUMENT and never by a path
 A shelf's `_widgets/default.nix` is `{ lib, rice, borrow, ... }:`, and takes
 only the arguments it uses. A `../` path literal in any `.nix` under a rice
 folder breaks every machine whose rices is not this checkout — which is what
-`pkgs/strillix-rices`, `aoideSeedRices` and the offline generator assume — and
+`pkgs/strillix-rices`, `strillixSeedRices` and the offline generator assume — and
 `checks.rice-shape` scans for it.
 
 ## Per-rice flavor widgets (`widgets/<slot>.qml`)
@@ -142,7 +142,7 @@ The note schema (§1) and the rice body (§5) are unchanged.
 
 Strillix's trees found under aoide's root (`run/qml`, `run/elements`,
 `state/skwd-wall`, `state/captures`, `state/pointer-pos.json`) move into
-this layout on every switch (the activation's `aoideMigrateRoots`) or by
+this layout on every switch (the activation's `strillixMigrateRoots`) or by
 `strx migrate`; the per-entry rules are in CONTRACTS.md §4. Nothing moves
 rice state from the older places (a `song` directory under `$AOIDE_ROOT`
 or `~/Aoide`, and `~/.local/state/lyra`); it stays where it is. The

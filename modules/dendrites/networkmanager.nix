@@ -25,8 +25,8 @@
   config = {
     environment.systemPackages = [ pkgs.networkmanagerapplet ];
 
-    systemd.user.services.aoide-nm-applet = {
-      description = "NetworkManager tray applet (docks in the Aoide bar's SNI tray)";
+    systemd.user.services.strillix-nm-applet = {
+      description = "NetworkManager tray applet (docks in the Strillix bar's SNI tray)";
       wantedBy = [ "graphical-session.target" ];
       after = [ "graphical-session.target" ];
       partOf = [ "graphical-session.target" ];

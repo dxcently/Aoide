@@ -26,7 +26,7 @@ they act on the same database `cliphist list` reads (its default is
 (`modules/dendrites/clipboard.nix`) installs cliphist; a host running its own
 watcher brings its own.
 
-Thumbnails are `$XDG_CACHE_HOME/aoide-clipboard/previews/<id>`, with
+Thumbnails are `$XDG_CACHE_HOME/strillix-clipboard/previews/<id>`, with
 `~/.cache` when `XDG_CACHE_HOME` is empty or relative: the directory
 `AoideClipboard.qml` decodes image entries into.
 

@@ -98,7 +98,7 @@ stay the runtime's own. `runtime.nix` publishes the filled slots as
   Quickshell, builds the config from `pkgs/strillix-shell`'s QML
   plus the widget bodies of the rices this host BUILT IN
   (`strillix.rices.builtIn`, from its own record), and deploys it to
-  `$STRILLIX_ROOT/run/qml` (`home.activation.aoideDeployQml` — an rsync, not a
+  `$STRILLIX_ROOT/run/qml` (`home.activation.strillixDeployQml` — an rsync, not a
   symlink tree: a deploy target the runtime writes into, never a source, so a
   switch reasserts the store over it). It declares
   the surfaces it owns in `strillix.surfaces` (stylix stands down for those),
@@ -110,7 +110,7 @@ stay the runtime's own. `runtime.nix` publishes the filled slots as
   means at the byte level: the deployed `manifest.json`/`registry.json` cover
   the built-in rices only, `pkgs.strillix-rices` is overridden to ship just those
   folders plus `builtin.json` (`{ declared, rices, packages }`), and
-  `home.activation.aoideSeedRices` runs `strx rice refresh` over them: a
+  `home.activation.strillixSeedRices` runs `strx rice refresh` over them: a
   file the machine never edited takes the repo's change, a built-in rice absent
   from the machine is added whole, a file the machine edited (or that has no
   record) is kept and reported, and `history/`, `drafts/` and symlinks are never
@@ -131,19 +131,19 @@ stay the runtime's own. `runtime.nix` publishes the filled slots as
   runs `strillix focus session` with the session id and, with Aoide on,
   exports `AOIDE_CORE_BIN` first.
 - **`lock.nix` — the lock.** `strx lock` runs one of two lockers, and the
-  `lock` slot's strillix provider installs both and their PAM services: `aoide-lock`
+  `lock` slot's strillix provider installs both and their PAM services: `strillix-lock`
   for the shell's `LockHost.qml` (a service of its own, not `login`'s
   session-and-tty stack, and a name a host can tune for the lock alone) and
   `hyprlock` for hyprlock, whose package goes in directly rather than through
   `programs.hyprlock` (which would also start a config-less hypridle). It
   ships hyprlock's system-wide config, `/etc/xdg/hypr/hyprlock.conf`: the ten
-  `$aoide_lock_*` variables at the plain look, `source` of the declared then
+  `$strillix_lock_*` variables at the plain look, `source` of the declared then
   the staged dress (CONTRACTS.md §4), then the widgets that read them, by
   paint keys only. A user's own `~/.config/hypr/hyprlock.conf` wins over it.
   All of this is the NixOS system half. A standalone home writes none of it: no
   PAM services, no `/etc/xdg` file, no hyprlock package and no user
   `hyprlock.conf`. The standalone user installs hyprlock and the PAM service
-  `aoide-lock` themselves; the declared dress still reaches `$STRILLIX_ROOT`
+  `strillix-lock` themselves; the declared dress still reaches `$STRILLIX_ROOT`
   from the home half, so hyprlock can read it through a `source` line of its own.
 - **`shellbridge.nix` — the bridge.** The bidirectional seam between the daemon
   / agents and the live desktop: OUT as atomic JSON under `state/stage/`, IN as
@@ -161,24 +161,24 @@ stay the runtime's own. `runtime.nix` publishes the filled slots as
   shipped rices, and `strx` linked beside it. The default applies while the environment leaves the variable unset. `runtime.nix` puts the wrapper on the system
   PATH in place of the bare binary, and the runtime's units and activation exec it.
   Core's `aoided` unit names no strillix variable, and nothing here writes onto it.
-- **`runtime.nix` — `aoide-rice-reload`, the staged rice comes back.** Declared truth is laid
+- **`runtime.nix` — `strillix-rice-reload`, the staged rice comes back.** Declared truth is laid
   down first, exactly as the activation always does (the rsync into `run/qml`
   and the seed into both stage twins), and nix never reads `stage/mode.json`.
   Then one user unit runs `strx reload`, which re-stages whatever the mode names:
   the last staged rice (palette, wallpaper, widget bodies, slot map, registry,
   compositor keywords, terminal colours), the routed draft (re-routed and
   re-synced), or, in `declarative`, nothing but the shell's reload. The unit is
-  a one-shot ordered Before `aoide-quickshell.service`, so the shell's first
+  a one-shot ordered Before `strillix-quickshell.service`, so the shell's first
   frame is the staged rice, and it runs in the user manager because
   home-manager's activation has no Hyprland environment. It runs under
   `timeout 60`, since a oneshot has no start timeout and `strx reload` spawns
   children with none, and it stays active even when the reload refuses or is
   cut off. At login the session starts it; on a switch
-  `aoideRestartRice` restarts it together with the shell in ONE `try-restart`,
+  `strillixRestartRice` restarts it together with the shell in ONE `try-restart`,
   after home-manager's file and systemd steps and after the QML deploy and both
-  seeds (`aoideDeployQml`, `aoideSeedStage`, `aoideSeedRices` — the reload
+  seeds (`strillixDeployQml`, `strillixSeedStage`, `strillixSeedRices` — the reload
   reads the runtime rices), which is what puts the reload between the seed
-  and the shell's restart. `aoideMigrateRoots` runs before every seed and
+  and the shell's restart. `strillixMigrateRoots` runs before every seed and
   before `strillixRice`: it runs `strillix migrate` once, so `run/qml`,
   `run/elements` and Strillix's `state/` trees move from `aoide.root` into
   `strillix.root` before the deploy or any seed writes there (a dry run skips
@@ -187,7 +187,7 @@ stay the runtime's own. `runtime.nix` publishes the filled slots as
 ## The seam with `quickshell`
 
 The shell PROCESS is not this lane's: `modules/dendrites/quickshell/` holds the
-quickshell package and the one `aoide-quickshell` user service. What this lane
+quickshell package and the one `strillix-quickshell` user service. What this lane
 holds is the surface — what gets painted, from which rice, deployed where. The
 runtime brings the shell with it by importing the shell lane's plain halves by
 path (`../quickshell/system.nix` from `runtime.nix`, `../quickshell/home.nix`
@@ -295,4 +295,4 @@ The home defaults `aoide.user` to `home.username` and the two roots to
 is set by the home half and must not be written by the host (mkFact refuses it).
 Nothing the NixOS system half does is written: no PAM service, no `/etc/xdg`
 hyprlock config, no hyprlock package. The user installs hyprlock and a PAM service
-for `aoide-lock` themselves.
+for `strillix-lock` themselves.

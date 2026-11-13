@@ -523,11 +523,11 @@ strx rice stage sonata
 strillix quickshell reload
 
 # 3. a BRAND-NEW slot file the manifest has never seen needs a real restart:
-systemctl --user restart aoide-quickshell.service
+systemctl --user restart strillix-quickshell.service
 
 # 4. QML errors, binding loops, RangeErrors, console.warn from the slot
 #    anchors — all land here:
-journalctl --user -u aoide-quickshell.service -n 80 --no-pager
+journalctl --user -u strillix-quickshell.service -n 80 --no-pager
 
 # 5. look at it
 grim /tmp/full.png

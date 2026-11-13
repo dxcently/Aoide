@@ -33,7 +33,7 @@
     # Obsidian uses the window class "obsidian". We wire this into shellbridge
     # so that Terminal Commander can show vault windows alongside agent windows.
     # The registration is a one-shot service that writes the fragment and exits.
-    systemd.user.services.aoide-obsidian-register = {
+    systemd.user.services.strillix-obsidian-register = {
       description = "Register Obsidian window class with shellbridge";
 
       wantedBy = [ "shellbridge.service" ];

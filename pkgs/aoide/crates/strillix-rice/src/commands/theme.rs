@@ -348,10 +348,10 @@ mod tests {
         std::fs::write(rice.join("lockscreen.png"), b"").unwrap();
         let out = emit_hyprlock(Some(&rice));
         assert_eq!(out.status, Status::Ok, "{:?}", out.data);
-        let want = format!("$aoide_lock_image = {}", rice.join("lockscreen.png").display());
+        let want = format!("$strillix_lock_image = {}", rice.join("lockscreen.png").display());
         let text = stdout(&out);
         assert!(text.lines().any(|l| l == want), "{text}");
-        assert_eq!(text.lines().filter(|l| l.starts_with("$aoide_lock_")).count(), 10, "{text}");
+        assert_eq!(text.lines().filter(|l| l.starts_with("$strillix_lock_")).count(), 10, "{text}");
         let _ = std::fs::remove_dir_all(&rice);
     }
 

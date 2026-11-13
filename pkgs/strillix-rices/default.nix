@@ -35,7 +35,7 @@
 # Only `strillix-rice` and `strillix` read any of it, so the path is named where
 # strillix runs: the installed strillix (`modules/dendrites/strillix/package.nix`)
 # defaults `STRILLIX_TEMPLATES` to `rices/`, and the strillix dendrite's units
-# (`shellbridge`, `aoide-rice-reload`, `aoide-quickshell`) and its activation's
+# (`shellbridge`, `strillix-rice-reload`, `strillix-quickshell`) and its activation's
 # `strillix rice refresh` spell the same path themselves. Core's `aoided` unit
 # names none of it. On a NixOS host the installed strillix sets the variable by
 # default, so the core Rust's own sibling-of-binary fallback is reached only by a
@@ -50,7 +50,7 @@
 # ships an empty templates dir, and yomi ships sonata's folder and no other.
 # This package is where "built in" stops being an attribute of the host and
 # becomes bytes on disk — the baseline `strillix rice stage` falls back to, and the
-# source `aoideSeedRices` seeds the machine's rices from.
+# source `strillixSeedRices` seeds the machine's rices from.
 {
   lib,
   runCommand,

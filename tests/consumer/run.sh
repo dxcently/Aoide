@@ -102,7 +102,7 @@ expr="
     greeterCmd = out.nixosConfigurations.greeter.config.services.greetd.settings.default_session.command;
     greeterOutCmd = out.nixosConfigurations.greeter-output.config.services.greetd.settings.default_session.command;
     # The greeter script behind a command: its derivation, from the string context.
-    greeterScriptDrv = c: builtins.head (builtins.filter (k: builtins.match \".*aoide-greeter[.]drv\" k != null) (builtins.attrNames (builtins.getContext c)));
+    greeterScriptDrv = c: builtins.head (builtins.filter (k: builtins.match \".*strillix-greeter[.]drv\" k != null) (builtins.attrNames (builtins.getContext c)));
     # ── The front door (CONTRACTS.md §2, PACKAGE-LAYOUT) ──────────────────────
     # The stubbed host mixes value slots: the consumer's own bar and Aoide's dock
     # part. Its shell is read from the home it is built into, and its components
@@ -114,7 +114,7 @@ expr="
       drv = stubbedCfg.system.build.toplevel.drvPath;
       components = builtins.mapAttrs (_: c: c.provider) stubbedCfg.strillix.components;
       shellUnits = builtins.length (
-        builtins.filter (n: n == \"aoide-quickshell\") (builtins.attrNames (stubbedHome.systemd.user.services or { }))
+        builtins.filter (n: n == \"strillix-quickshell\") (builtins.attrNames (stubbedHome.systemd.user.services or { }))
       );
       bridgeUnits = builtins.length (
         builtins.filter (n: n == \"shellbridge\") (builtins.attrNames stubbedCfg.systemd.user.services)
@@ -209,7 +209,7 @@ expr="
       aoided = builtins.hasAttr \"aoided\" onlyCfg.systemd.user.services;
       components = builtins.mapAttrs (_: c: c.provider) onlyCfg.strillix.components;
       shellUnits = builtins.length (
-        builtins.filter (n: n == \"aoide-quickshell\") (builtins.attrNames (onlyHome.systemd.user.services or { }))
+        builtins.filter (n: n == \"strillix-quickshell\") (builtins.attrNames (onlyHome.systemd.user.services or { }))
       );
       bridgeUnits = builtins.length (
         builtins.filter (n: n == \"shellbridge\") (builtins.attrNames onlyCfg.systemd.user.services)
@@ -245,9 +245,9 @@ check "the stylix lane is on"                 "true" "$(o .stylix)"
 check "the shell lane is on"                  "true" "$(o .quickshell)"
 check "the shell runs the deployed config"    "/home/fixture/.strillix/run/qml" "$(o .config)"
 check "the rice's seed activation is there"   "1" \
-  "$(o '[.activation[] | select(test("^aoideSeedRices$"))] | length')"
+  "$(o '[.activation[] | select(test("^strillixSeedRices$"))] | length')"
 check "the shell's unit is there"             "1" \
-  "$(o '[.hmServices[] | select(test("^aoide-quickshell$"))] | length')"
+  "$(o '[.hmServices[] | select(test("^strillix-quickshell$"))] | length')"
 check "the bridge's unit is there"            "1" \
   "$(o '[.systemdUserServices[] | select(test("^shellbridge$"))] | length')"
 check "the bridge unit carries the templates"  "1" "$(o '.templates | length')"
@@ -393,7 +393,7 @@ check "greeter: its off-loop turns other outputs off"     "true" \
 # The login screen's picture: barcarolle ships no logon picture, so the tree the
 # script runs over names the desktop picture, and no logon picture is in it.
 # The tree is the script's own input, found among its references and realised.
-greeter_tree_drv=$(nix-store -q --references "$(o .greeter.plainDrv)" | grep -- '-aoide-greeter-tree[.]drv$')
+greeter_tree_drv=$(nix-store -q --references "$(o .greeter.plainDrv)" | grep -- '-strillix-greeter-tree[.]drv$')
 greeter_tree=$([ -n "$greeter_tree_drv" ] && nix build --no-link --print-out-paths "$greeter_tree_drv^out" 2>"$tmp/greeter-tree.err") || greeter_tree=""
 check "greeter: login screen is the desktop picture"      "true" \
   "$([ -n "$greeter_tree" ] && jq -e '.rice == "barcarolle" and (.path | endswith("/rices/barcarolle/wallpaper/barcarolle-desktop.jpg"))' "$greeter_tree/stage/wallpaper.json" >/dev/null 2>&1 && [ -f "$(jq -r .path "$greeter_tree/stage/wallpaper.json")" ] && [ -z "$(find "$greeter_tree" -name 'barcarolle-logon.*')" ] && echo true || echo false)"

@@ -33,7 +33,7 @@ Every slot below is hosted by one of three anchors:
   answers only through the `auth` extra; it gets `bridge` as null, so no
   shellbridge action (power included) is reachable from a locked screen.
   The host starts its PAM conversation before it asks for the lock: one that
-  cannot start (no `/etc/pam.d/aoide-lock`) means the host does not lock
+  cannot start (no `/etc/pam.d/strillix-lock`) means the host does not lock
   (`ipc call lock lock` answers `false`) and `strx lock` runs hyprlock. A
   conversation that fails while locked (a PAM error, not a wrong password)
   or cannot restart hands the held lock to hyprlock (`strx lock
@@ -108,7 +108,7 @@ carried to disk, never loaded.
 (and any helper/asset files alongside it) into `run/qml/rices/<rice>/`
 live, no rebuild — Quickshell's own file-watcher picks the edit up. A
 **brand-new** slot file still needs `systemctl --user restart
-aoide-quickshell.service` to be discovered (`manifest.json` is only read at
+strillix-quickshell.service` to be discovered (`manifest.json` is only read at
 startup) — unchanged limitation.
 
 Every widget QML file, whatever slot it fills, must follow this shape:

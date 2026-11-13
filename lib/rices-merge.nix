@@ -63,7 +63,7 @@ let
     ) perBook
   );
 
-  merged = pkgs.runCommand "aoide-rices-merged" { } (
+  merged = pkgs.runCommand "strillix-rices-merged" { } (
     ''
       mkdir -p $out
     ''

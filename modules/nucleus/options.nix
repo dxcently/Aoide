@@ -823,7 +823,7 @@ in
           A fact: a Quickshell shell surface exists on this host. True exactly
           when the `quickshell` dendrite's system half is imported
           (`dendrites/quickshell/system.nix`, the package and the
-          `aoide-quickshell` service), which sets it: by selecting the
+          `strillix-quickshell` service), which sets it: by selecting the
           dendrite, or by a lane that brings the shell (`strillix`). Set only from
           that dendrite's directory; read it, never set it. A host whose shell is
           painted by something else leaves the dendrite unselected and this

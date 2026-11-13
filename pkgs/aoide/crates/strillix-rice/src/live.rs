@@ -847,8 +847,8 @@ mod tests {
         let picture = std::path::Path::new("/r/rices/cadenza/lockscreen.png");
 
         let dressed = lockscreen_fragment(&notes, Some(picture)).unwrap();
-        assert!(dressed.lines().any(|l| l == "$aoide_lock_image = /r/rices/cadenza/lockscreen.png"), "{dressed}");
-        assert!(dressed.lines().any(|l| l == "$aoide_lock_color = rgb(1e1e2e)"), "{dressed}");
+        assert!(dressed.lines().any(|l| l == "$strillix_lock_image = /r/rices/cadenza/lockscreen.png"), "{dressed}");
+        assert!(dressed.lines().any(|l| l == "$strillix_lock_color = rgb(1e1e2e)"), "{dressed}");
 
         // No picture: nothing, whatever the notes are — even notes that
         // cannot resolve clear a previously staged dress.

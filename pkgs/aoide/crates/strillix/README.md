@@ -412,7 +412,7 @@ are core `aoide` identity, root `AGENTS.md`).
   has the commands.
 - `commands::clipboard` — `clipboard delete <id>`/`clipboard clear`: one
   cliphist history entry or all of them, plus the launcher's cached
-  thumbnails under `$XDG_CACHE_HOME/aoide-clipboard/previews`, over the
+  thumbnails under `$XDG_CACHE_HOME/strillix-clipboard/previews`, over the
   `cliphist` on `PATH`. The bridge `AoideClipboard.qml`'s `deleteById`/`clear`
   run. docs/Aoide-Wiki/concepts/cli/Clipboard-Commands.md has the commands
   and their `data.reason` codes.
@@ -450,7 +450,7 @@ are core `aoide` identity, root `AGENTS.md`).
 - `commands::lock` — `lock` and `lock hint [yes|no]`, the one lock entry
   (`SUPER+ESCAPE`, shellbridge's power-menu `lock`, the `lock` alias). A
   staged rice whose OWN manifest entry carries `lockscreen` is locked by the
-  running shell when `/etc/pam.d/aoide-lock` exists:
+  running shell when `/etc/pam.d/strillix-lock` exists:
   `quickshell -p run/qml/shell.qml ipc call lock lock` (the shell answers
   `false` when its PAM conversation cannot start, and then never locks),
   then `ipc call lock secure` until it answers `true` (the compositor

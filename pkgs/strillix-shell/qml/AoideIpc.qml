@@ -2,7 +2,7 @@
 //
 // Exposes `quickshell ipc call shell reload` (Quickshell.Io.IpcHandler): the
 // only way an outside process can trigger a QML-visible change without a
-// full `systemctl --user restart aoide-quickshell.service`. `aoide shell
+// full `systemctl --user restart strillix-quickshell.service`. `aoide shell
 // reload` (crates/strillix-rice/src/ipc.rs) shells out to exactly this call.
 //
 // `Quickshell.reload(hard: bool)` (rootwrapper.cpp's reloadGraph()) always

@@ -372,7 +372,7 @@
   answers `true`; anything short of that falls through to hyprlock, and a
   hyprlock that exits inside the settle window is a refusal unless one more
   `secure` says the shell holds the lock after all. The shell is never asked
-  to lock without `/etc/pam.d/aoide-lock`: a lock nothing can open is the
+  to lock without `/etc/pam.d/strillix-lock`: a lock nothing can open is the
   one outcome worse than no lock. A stale
   `LockedHint` is cleared only after hyprlock holds the screen: a failed
   hyprlock leaves it standing, because the restarted shell re-locks on it.
@@ -394,9 +394,9 @@
   A new thing `Resolver` reads belongs in `inputs`. `--run` is CLI-only,
   because over another door it would hold the call open forever.
 
-- **Strillix's trees move only through `strx migrate`, and `aoideMigrateRoots`
+- **Strillix's trees move only through `strx migrate`, and `strillixMigrateRoots`
   is the activation that runs it.** No start-up hook moves anything: any other
-  verb leaves `$AOIDE_ROOT` as it found it. `aoideMigrateRoots` runs before
+  verb leaves `$AOIDE_ROOT` as it found it. `strillixMigrateRoots` runs before
   `writeBoundary`, so the move precedes the QML deploy and every seed. Never add
   a nix or Rust path that writes Strillix's state under `$AOIDE_ROOT`: the run
   trees and Strillix's `state/` trees live under `$STRILLIX_ROOT`.

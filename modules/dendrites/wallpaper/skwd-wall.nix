@@ -58,7 +58,7 @@ let
   # applying a fully transparent 1x1 still paints nothing, so the wallpaper
   # surface below it shows again.
   standinPng =
-    pkgs.runCommand "aoide-skwd-wall-standin.png"
+    pkgs.runCommand "strillix-skwd-wall-standin.png"
       {
         nativeBuildInputs = [ pkgs.imagemagick ];
       }
@@ -77,7 +77,7 @@ let
   # dir, no restore-on-startup (a restore would repaint over a rice staged
   # with the shell's own layer — `ExecStartPost` re-applies instead), and the
   # one hook, replaced rather than appended.
-  engineConfig = pkgs.writeShellScript "aoide-skwd-wall-config" ''
+  engineConfig = pkgs.writeShellScript "strillix-skwd-wall-config" ''
     set -euo pipefail
     mkdir -p "${configDir}" "${cacheDir}" "${staticDir}" "${videoDir}"
     cfg="${configDir}/config.json"
@@ -131,7 +131,7 @@ in
           # The config merge runs on every activation, before the session: the
           # app rewrites this file in place, so the merge is what keeps
           # Aoide-owned keys true while the user's own settings survive.
-          home.activation.aoideSeedSkwdWallConfig =
+          home.activation.strillixSeedSkwdWallConfig =
             lib.hm.dag.entryBetween [ "reloadSystemd" ] [ "writeBoundary" ]
               ''
                 run ${engineConfig}
@@ -196,7 +196,7 @@ in
           # ── Re-assert the engine after an activation ─────────────────────────
           # Only a START runs the unit's `ExecStartPost` sync, and systemd does
           # not restart a unit whose file merely changed: ask for one restart.
-          home.activation.aoideResyncSkwdWall = lib.hm.dag.entryAfter [ "reloadSystemd" ] ''
+          home.activation.strillixResyncSkwdWall = lib.hm.dag.entryAfter [ "reloadSystemd" ] ''
             run env XDG_RUNTIME_DIR=/run/user/$(${pkgs.coreutils}/bin/id -u) \
               ${pkgs.systemd}/bin/systemctl --user try-restart skwd-walld.service || true
           '';

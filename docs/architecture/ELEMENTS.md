@@ -174,7 +174,7 @@ stage` overwrites freely; a rebuild reasserts the declared rice's
 store truth, exactly as the strillix lane's `rsync -a --delete`
 reasserts `run/qml`, and a staged rice is then restored from the
 runtime rices by `strx reload` (the strillix lane's
-`aoide-rice-reload` unit), as it restores the rest of the stage.
+`strillix-rice-reload` unit), as it restores the rest of the stage.
 
 ## Flows
 
@@ -207,7 +207,7 @@ nixos-rebuild / home-manager switch          (user-gated, house rule 2)
     declared theme → run/elements/   (re-seeds; then EVERY element
     unit is try-restarted unconditionally — the house ruling that
     activation always brings the rice elements back up, same as the
-    strillix lane's aoideRestartRice hook; changed-unit-only
+    strillix lane's strillixRestartRice hook; changed-unit-only
     restarts leave a wedged element invisible to every rebuild)
 ```
 

@@ -59,7 +59,7 @@ one and opening its own plain wallpaper picker otherwise.
 
 The repo root carries no `qml/` directory — widget source lives in
 `pkgs/strillix-shell/qml/` and each active rice's `widgets/`, and the strillix lane's
-`home.activation.aoideDeployQml` rsyncs the built config tree
+`home.activation.strillixDeployQml` rsyncs the built config tree
 (`rsync -a --delete --chmod=u+w`) into `$STRILLIX_ROOT/run/qml/` (default
 `~/.strillix/run/qml/` — the rice runtime root, outside the git checkout), which
 Quickshell reads as its entry point (`quickshell -p
@@ -68,7 +68,7 @@ deploy target, never a source, and every activation's rsync reasserts the
 store's build over it, so a hand edit under `$STRILLIX_ROOT/run/qml/` is lost at
 the next switch. A rice is edited in the runtime rices
 (`$STRILLIX_ROOT/rices/<rice>`), and a STAGED rice is restored from
-there: after the switch the strillix lane's `aoide-rice-reload` unit runs `strillix
+there: after the switch the strillix lane's `strillix-rice-reload` unit runs `strillix
 reload`, which syncs its widget bodies back into `run/qml/rices/<rice>/`.
 `hyprland.conf` is owned by
 home-manager's `wayland.windowManager.hyprland`: the compositor lane
@@ -87,7 +87,7 @@ dynamically via `Qt.createComponent(url)` (`WidgetSlot`/`SurfaceSlot`, see
 by static import sits in the same blind spot — `shell.qml`, `ShellBridge.qml`,
 `StagingEngine.qml`, `WidgetSlot.qml`, `SurfaceSlot.qml`. In practice this
 meant editing an existing widget body (or any of those lane files) never
-rendered until a full `systemctl --user restart aoide-quickshell.service` —
+rendered until a full `systemctl --user restart strillix-quickshell.service` —
 found via live debugging.
 
 `AoideIpc.qml` closes it: a `Quickshell.Io.IpcHandler` singleton
@@ -97,7 +97,7 @@ instantiated in `shell.qml` alongside `theme`/`bridge`/`stagingEngine`/`shared`
 call shell reload` invokes it from outside the process; `strx reload`
 (`crates/strillix-rice/src/commands/reload.rs`, `crates/strillix-rice/src/ipc.rs`) shells out to
 exactly that call, no-oping to a reported (never fatal) `not-running` status
-when `aoide-quickshell.service` isn't up.
+when `strillix-quickshell.service` isn't up.
 
 `Quickshell.reload(hard: bool)` (`rootwrapper.cpp`'s `reloadGraph()`) is not a
 selective "reload what changed" call — it always tears down and rebuilds the
@@ -217,11 +217,11 @@ and the blur rules are baked into `hyprland.conf`, so the launcher needs a gated
 
 ## Session service & resilience
 
-The shell surface is started by the **`aoide-quickshell`** systemd *user*
+The shell surface is started by the **`strillix-quickshell`** systemd *user*
 service, defined in `modules/dendrites/quickshell/system.nix`. The service is
 the session-assembly seam: it orders after `graphical-session.target` (so
 Quickshell inherits a valid Wayland env), logs to journald (`journalctl
---user -u aoide-quickshell`), and respawns on any exit, a clean one included. Three layers keep one
+--user -u strillix-quickshell`), and respawns on any exit, a clean one included. Three layers keep one
 bad load from bringing the desktop down for good:
 
 - `ConditionPathExists = <shellQmlEntry>` — if the QML entry hasn't landed, the
@@ -242,7 +242,7 @@ The unit also records how it ended. `-v` copies quickshell's INFO lines, the
 level of its lifecycle lines (`Exiting due to IPC request.`), into the journal;
 its own `log.qslog` under `$XDG_RUNTIME_DIR/quickshell/` holds them too but
 does not survive a reboot. `ExecStopPost` writes one journal line on every
-ending, a stop job included: `aoide-quickshell ended: result=<$SERVICE_RESULT>
+ending, a stop job included: `strillix-quickshell ended: result=<$SERVICE_RESULT>
 code=<$EXIT_CODE> status=<$EXIT_STATUS>`. Quickshell installs no SIGTERM
 handler and systemd counts TERM as a clean stop, so `code=exited status=0` is
 quickshell leaving on its own, and `code=killed status=TERM` is either a stop
@@ -262,13 +262,13 @@ watchdog below provides. That is the one case a restart is for: a surface
 bound to `Quickshell.screens` or to the focused monitor re-homes by itself
 when the screen list comes back, and only an unbound singleton stays lost.
 
-**`aoide-quickshell-healthcheck.timer`**
+**`strillix-quickshell-healthcheck.timer`**
 (`modules/dendrites/strillix/runtime.nix`, gated on `strillix.enable`) is
 the live watchdog: a oneshot `systemd.user.service` running `strx quickshell
 healthcheck` (`pkgs/aoide/crates/strillix-rice/src/health.rs`, [[Meta-and-Upkeep]])
 20s after the session comes up and every 15s thereafter.
-**`home.activation.aoideVerifyRice`** runs the same check again, 5s after
-every rebuild's `aoideRestartRice` bounce, so a `switch` reports which of
+**`home.activation.strillixVerifyRice`** runs the same check again, 5s after
+every rebuild's `strillixRestartRice` bounce, so a `switch` reports which of
 the two happened — painted, or dropped straight back into the lockup its
 own restart was meant to clear — instead of finishing green over a bare
 desktop.

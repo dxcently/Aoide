@@ -12,9 +12,9 @@
 // `quickshell ipc call lock lock`, then polls `ipc call lock secure` until the
 // compositor confirms. Nothing else locks through here.
 //
-// PAM first, the lock second: `lock` starts the `aoide-lock` conversation and
+// PAM first, the lock second: `lock` starts the `strillix-lock` conversation and
 // only then asks the compositor for the lock. A conversation that cannot
-// start (no `/etc/pam.d/aoide-lock`) means no lock at all — `lock` answers
+// start (no `/etc/pam.d/strillix-lock`) means no lock at all — `lock` answers
 // `false` and `strillix lock` runs hyprlock — never a screen that nothing can
 // open. A lock the compositor denies aborts the conversation. After a
 // refused password (a plain `Failed`, or `MaxTries`) the conversation
@@ -132,7 +132,7 @@ Scope {
         root._pamAgain = false
         if (pam.active) pam.abort()
         if (!pam.start()) {
-            console.warn("[aoide/lockhost] the aoide-lock PAM conversation cannot start; not locking")
+            console.warn("[aoide/lockhost] the strillix-lock PAM conversation cannot start; not locking")
             return false
         }
         sessionLock.locked = true
@@ -232,7 +232,7 @@ Scope {
 
     property PamContext _pam: PamContext {
         id: pam
-        config: "aoide-lock"
+        config: "strillix-lock"
 
         onActiveChanged: if (!pam.active && root._pamAgain) root._restartPam()
 

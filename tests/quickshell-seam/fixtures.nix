@@ -66,7 +66,7 @@ let
   host = hostWith { };
 
   # What the seam is, in readings: which directory the shell runs, whether ONE
-  # `aoide-quickshell` unit exists and what it says, and which of the things a
+  # `strillix-quickshell` unit exists and what it says, and which of the things a
   # strillix host would have brought are absent. Named explicitly rather than
   # counted, so a green run says what it checked.
   #
@@ -113,14 +113,14 @@ let
       systemdUserServices = builtins.attrNames cfg.systemd.user.services;
       activation = builtins.attrNames (home.home.activation or { });
       templates =
-        templatesOf (unitEnv userUnits "aoide-quickshell")
+        templatesOf (unitEnv userUnits "strillix-quickshell")
         ++ templatesOf (unitEnv systemUnits "aoided")
         ++ templatesOf (unitEnv systemUnits "shellbridge");
       service =
-        if userUnits ? aoide-quickshell then
+        if userUnits ? strillix-quickshell then
           {
-            condition = userUnits.aoide-quickshell.Unit.ConditionPathExists;
-            execStart = userUnits.aoide-quickshell.Service.ExecStart;
+            condition = userUnits.strillix-quickshell.Unit.ConditionPathExists;
+            execStart = userUnits.strillix-quickshell.Service.ExecStart;
           }
         else
           null;
@@ -149,7 +149,7 @@ in
       cfg = two.config;
       home = cfg.home-manager.users.${cfg.aoide.user};
       userUnits = home.systemd.user.services or { };
-      env = userUnits.aoide-quickshell.Service.Environment or [ ];
+      env = userUnits.strillix-quickshell.Service.Environment or [ ];
     in
     {
       shellUnits = builtins.length (
@@ -160,7 +160,7 @@ in
       );
       envDuplicates = builtins.length env - builtins.length (lib.unique env);
       homeActivation = builtins.length (
-        lib.filter (n: n == "aoideMigrateRoots") (builtins.attrNames (home.home.activation or { }))
+        lib.filter (n: n == "strillixMigrateRoots") (builtins.attrNames (home.home.activation or { }))
       );
       components = builtins.attrNames cfg.strillix.components;
       strillix = cfg.strillix.enable;
@@ -188,15 +188,15 @@ in
       templates = {
         aoided = templatesOf (unitEnv cfg.systemd.user.services "aoided");
         shellbridge = templatesOf (unitEnv cfg.systemd.user.services "shellbridge");
-        quickshell = templatesOf (unitEnv (home.systemd.user.services or { }) "aoide-quickshell");
-        riceReload = templatesOf (unitEnv (home.systemd.user.services or { }) "aoide-rice-reload");
+        quickshell = templatesOf (unitEnv (home.systemd.user.services or { }) "strillix-quickshell");
+        riceReload = templatesOf (unitEnv (home.systemd.user.services or { }) "strillix-rice-reload");
       };
       # The unit that brings the staged or drafted rice back after a login or a
       # switch, as the lane declares it — null when it is absent, so a check
       # reads a missing unit as a failed comparison, not an evaluation error.
       riceReload =
         let
-          unit = (home.systemd.user.services or { }).aoide-rice-reload or null;
+          unit = (home.systemd.user.services or { }).strillix-rice-reload or null;
         in
         if unit == null then null else { inherit (unit) Unit Service Install; };
     in
@@ -208,12 +208,12 @@ in
       # and its systemd step are done: the one try-restart that orders the reload
       # before the shell.
       restartRice = {
-        inherit (home.home.activation.aoideRestartRice) after data;
+        inherit (home.home.activation.strillixRestartRice) after data;
       };
       # The move's activation: it runs `strillix migrate`, the only place
       # Strillix's trees are moved out of core's root.
       migrateRoots = {
-        inherit (home.home.activation.aoideMigrateRoots) data;
+        inherit (home.home.activation.strillixMigrateRoots) data;
       };
       # Every unit must agree on ONE directory: a unit left with a different
       # answer is the drift this reading exists to catch.

@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Strillix's units, activation steps and store paths are named strillix
+
+- Strillix's user units are `strillix-quickshell`, with its `strillix-quickshell-healthcheck` service and timer, `strillix-rice-reload`, `strillix-clipboard`, `strillix-nm-applet` and `strillix-obsidian-register`. The switch stops the old shell units and starts the new ones; the clipboard watcher and the tray applet take their new names at the next login, and the Obsidian registration the next time shellbridge starts. A drop-in written for an `aoide-*` unit no longer applies.
+- The shell's lock authenticates through the PAM service `strillix-lock`. A host that tunes the lock, for a fingerprint reader or a key, tunes `security.pam.services.strillix-lock`.
+- The home activation's steps are `strillixMigrateRoots`, `strillixSeedStage`, `strillixSeedRices`, `strillixDeployQml`, `strillixRestartRice`, `strillixVerifyRice`, `strillixSeedSkwdWallConfig` and `strillixResyncSkwdWall`. An activation entry ordered against one of them names the new step.
+- The store paths Strillix builds are named `strillix-*`: the deployed QML tree and its manifest, registry, surfaces and components files, the merged rice book, the greeter's tree, theme, manifest and script, the seeded stage and stage theme, the declared dress, skwd-wall's config and stand-in, stylix's solid wallpaper, and the script dunst hands notifications to. The greeter's log lines begin `strillix-greeter:`, and its cache is `strillix-greeter-cache`.
+- Clipboard previews live in `$XDG_CACHE_HOME/strillix-clipboard/previews`. The old `~/.cache/aoide-clipboard` is no longer read and can be deleted. The watcher's sandbox no longer lists the previews directory, which it never writes.
+- hyprlock's ten dress variables are `$strillix_lock_*`. A host that writes its own `hyprlock.conf` names the new variables; until it does, its lock draws its own defaults. The switch writes the declared dress again under the new names, and `strillix-rice-reload`, which runs at the switch and at each login, writes the staged one again in staging or draft.
+
 ### Strillix's trees leave core's root
 
 - `strx migrate` moves `run/qml`, `run/elements`, `state/skwd-wall`, `state/captures` and `state/pointer-pos.json` from `$AOIDE_ROOT` into `$STRILLIX_ROOT`, merged into a tree the strillix root already holds, and deletes the `$AOIDE_ROOT/song` marker file. The home activation runs it on every switch. An entry the strillix root holds with other bytes stays where it is, is named, and makes the verb exit nonzero; `strx migrate --check` lists what a run would move.

@@ -1162,7 +1162,7 @@ let
   # exercises the call the runtime makes: `strillix rice stage` and `reload`
   # pass the generator its argument by name. This drives the BUILT `strillix`
   # as a host does. `rice refresh` seeds the machine's rices (the activation's
-  # `aoideSeedRices`), one built-in rice's machine copy is edited, staging is
+  # `strillixSeedRices`), one built-in rice's machine copy is edited, staging is
   # unlocked as `rice mode stage` unlocks it, and `rice stage` runs over the
   # real `nix-instantiate`. The run tree must then hold the edited file and both
   # generated JSON files. A full copy of that machine rice under a name the

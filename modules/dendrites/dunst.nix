@@ -156,7 +156,7 @@
           # derivation (P-A7), but as of P-A8 `strillix` lives in that
           # derivation's separate `strillix` output (`pkgs.aoide.strillix`) — named
           # explicitly here, same reasoning as shellbridge.nix's ExecStart.
-          script = "${pkgs.writeShellScript "aoide-notifications-push" ''
+          script = "${pkgs.writeShellScript "strillix-notifications-push" ''
             exec ${pkgs.aoide.strillix}/bin/strillix notifications push
           ''}";
         };

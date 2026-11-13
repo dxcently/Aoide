@@ -245,7 +245,7 @@ switched on by selecting their dendrite (each sets `aoide.enable`):
 | `aoide-a2a` | `dendrites/aoided.nix` | **gated on `aoide.a2a.enable`**; the [[A2A-Door]] serve unit |
 | `aoide-usage` + timer | `dendrites/aoided.nix` | **gated on `aoide.usage.enable`**; runs `aoide usage` on `aoide.usage.interval` |
 | `aoide-secrets-serve` | `dendrites/aoide-secrets.nix` | **present when `aoide-secrets` is selected**; SYSTEM (not user) service, own uid `aoide-secrets`, anchored to `multi-user.target` — see [[Secrets-Broker]] |
-| `aoide-obsidian-register` | `dendrites/obsidian.nix` | oneshot; registers a window class with shellbridge |
+| `strillix-obsidian-register` | `dendrites/obsidian.nix` | oneshot; registers a window class with shellbridge |
 
 `systemd.user.tmpfiles.rules` create `${config.aoide.root}/log` (0700),
 `${config.strillix.root}/stage` (0755, rice staging),
@@ -281,12 +281,12 @@ Live-side state, all under the runtime root (`$AOIDE_ROOT`, default
   [[Self-Ricing#Staging vs Declarative Mode]] — and reseeded from the active
   rice's committed
   `rices/<rice>/theme.json` on every activation by
-  `home.activation.aoideSeedStage` in `modules/dendrites/strillix/runtime.nix`
+  `home.activation.strillixSeedStage` in `modules/dendrites/strillix/runtime.nix`
   — a write-temp-then-rename script that injects the same `"rice"` field
   `rice stage` writes, so a host that boots without ever staging still
   carries a correct live stage twin from the baked default; when `mode.json`
   names a staged or drafted rice, `strx reload`, run by the lane's
-  `aoide-rice-reload` unit at every login and after every switch, re-stages it
+  `strillix-rice-reload` unit at every login and after every switch, re-stages it
   over that seed), `mode.json`
   (the staging/declarative mode marker — absent reads as `declarative`), and
   `grimoire.json` (QML-only writer). That same seed also publishes the

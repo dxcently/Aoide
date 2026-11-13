@@ -10,7 +10,7 @@
 # of it, so a commit ref tests that commit. Every eval below carries the ref.
 #
 # `test-quickshell-only` — quickshell selected, `strillix.quickshell.config` = the
-# fixture directory, no strillix: the host's own shell runs (one `aoide-quickshell`
+# fixture directory, no strillix: the host's own shell runs (one `strillix-quickshell`
 # unit, on that directory), and nothing strillix would have brought is there (no
 # rice binary, no `rices/`, no shellbridge unit, no healthcheck, no rice-reload
 # unit, no deploy activation).
@@ -25,7 +25,7 @@
 # platform assertion's own message.
 # `yomi-strix` — the positive control, from the same ref: the two absence
 # checks above are only worth anything against a host that HAS the things,
-# among them the `aoide-rice-reload` unit that brings a staged rice back after a
+# among them the `strillix-rice-reload` unit that brings a staged rice back after a
 # login or a switch, and the switch's one try-restart that runs it before the shell.
 #
 # A fixture that fails to evaluate is a failing test, not a skipped one; the
@@ -184,7 +184,7 @@ else
   # oneshot has no start timeout of its own, carrying the runtime root and the
   # templates but no PATH (the manager's own reaches the tools).
   check "control: the rice reload is before the shell" "1" \
-    "$(y '[(.riceReload.Unit.Before // [])[] | select(. == "aoide-quickshell.service")] | length')"
+    "$(y '[(.riceReload.Unit.Before // [])[] | select(. == "strillix-quickshell.service")] | length')"
   check "control: the rice reload follows the session" "1" \
     "$(y '[(.riceReload.Unit.After // [])[] | select(. == "graphical-session.target")] | length')"
   check "control: the rice reload is part of it" "1" \
@@ -209,7 +209,7 @@ else
   check "control: restart follows hm's systemd step" "1" \
     "$(y '[(.restartRice.after // [])[] | select(. == "reloadSystemd")] | length')"
   check "control: one restart runs both units"  "true" \
-    "$(y '(.restartRice.data // "") | contains("try-restart aoide-rice-reload.service aoide-quickshell.service")')"
+    "$(y '(.restartRice.data // "") | contains("try-restart strillix-rice-reload.service strillix-quickshell.service")')"
   # Strillix's trees leave core's root only through this activation's verb.
   check "control: the migrate activation runs the verb" "true" \
     "$(y '(.migrateRoots.data // "") | contains("/bin/strillix migrate ")')"

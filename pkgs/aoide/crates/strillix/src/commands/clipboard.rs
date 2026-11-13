@@ -13,7 +13,7 @@
 //! Only an id travels to cliphist: `delete` writes `<id>\t` to `cliphist
 //! delete`'s stdin, the shape it parses from a `cliphist list` line. The
 //! history's text is read only to learn which ids exist and never reaches
-//! output. Thumbnails live in `$XDG_CACHE_HOME/aoide-clipboard/previews/<id>`
+//! output. Thumbnails live in `$XDG_CACHE_HOME/strillix-clipboard/previews/<id>`
 //! (`~/.cache` when unset), the directory `AoideClipboard.qml` decodes into.
 
 use crate::dispatch::Invocation;
@@ -121,11 +121,11 @@ fn held_ids(listed: &str) -> Vec<u64> {
     listed.lines().filter_map(|l| l.split_once('\t')).filter_map(|(id, _)| parse_id(id)).collect()
 }
 
-/// `$XDG_CACHE_HOME/aoide-clipboard/previews`, `~/.cache` when the variable is empty or relative.
+/// `$XDG_CACHE_HOME/strillix-clipboard/previews`, `~/.cache` when the variable is empty or relative.
 fn preview_dir() -> PathBuf {
     let var = |k: &str| std::env::var(k).ok().filter(|v| !v.is_empty()).map(PathBuf::from).filter(|p| p.is_absolute());
     let cache = var("XDG_CACHE_HOME").unwrap_or_else(|| var("HOME").unwrap_or_else(aoide_protocol::aoide_home).join(".cache"));
-    cache.join("aoide-clipboard/previews")
+    cache.join("strillix-clipboard/previews")
 }
 
 /// Runs `cliphist <args>`, feeding `stdin` when given; its stdout on success.
@@ -207,7 +207,7 @@ mod tests {
             let root = unique_tmp(tag);
             let bin = root.join("bin");
             std::fs::create_dir_all(&bin).unwrap();
-            std::fs::create_dir_all(root.join("cache/aoide-clipboard/previews")).unwrap();
+            std::fs::create_dir_all(root.join("cache/strillix-clipboard/previews")).unwrap();
             std::fs::write(root.join("db"), history).unwrap();
             let stub = bin.join("cliphist");
             std::fs::write(
@@ -251,7 +251,7 @@ esac
         }
 
         fn preview(&self, id: &str) -> PathBuf {
-            let p = self.path("cache/aoide-clipboard/previews").join(id);
+            let p = self.path("cache/strillix-clipboard/previews").join(id);
             std::fs::write(&p, b"png").unwrap();
             p
         }
@@ -351,8 +351,8 @@ esac
         assert_eq!(o.data.unwrap(), json!({ "previewsRemoved": 2 }));
         assert_eq!(rig.read("argv.log"), "wipe\n");
         assert_eq!(rig.read("db"), "");
-        assert!(!rig.path("cache/aoide-clipboard/previews").exists());
-        assert!(rig.path("cache/aoide-clipboard").exists(), "only the previews dir goes");
+        assert!(!rig.path("cache/strillix-clipboard/previews").exists());
+        assert!(rig.path("cache/strillix-clipboard").exists(), "only the previews dir goes");
 
         let again = handle_clear(&inv(&["clipboard", "clear"], &[]));
         assert_eq!(again.status, Status::Ok, "an empty history clears again: {again:?}");
@@ -369,7 +369,7 @@ esac
             assert_eq!(reason(&o), "cliphist-missing");
             assert_eq!(o.data.unwrap()["refusal"]["fix"]["set"], "habit.dendrites.clipboard.enable = true");
         }
-        assert!(rig.path("cache/aoide-clipboard/previews").exists(), "no thumbnail touched");
+        assert!(rig.path("cache/strillix-clipboard/previews").exists(), "no thumbnail touched");
     }
 
     #[test]
@@ -401,10 +401,10 @@ esac
         let _env = EnvSaver::capture(&["HOME", "XDG_CACHE_HOME"]);
         std::env::set_var("HOME", "/h");
         std::env::set_var("XDG_CACHE_HOME", "/c");
-        assert_eq!(preview_dir(), Path::new("/c/aoide-clipboard/previews"));
+        assert_eq!(preview_dir(), Path::new("/c/strillix-clipboard/previews"));
         std::env::set_var("XDG_CACHE_HOME", "relative");
-        assert_eq!(preview_dir(), Path::new("/h/.cache/aoide-clipboard/previews"));
+        assert_eq!(preview_dir(), Path::new("/h/.cache/strillix-clipboard/previews"));
         std::env::remove_var("XDG_CACHE_HOME");
-        assert_eq!(preview_dir(), Path::new("/h/.cache/aoide-clipboard/previews"));
+        assert_eq!(preview_dir(), Path::new("/h/.cache/strillix-clipboard/previews"));
     }
 }

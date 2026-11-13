@@ -1,6 +1,6 @@
 //! Live watchdog for the quickshell placeholder-screen lockup.
 //!
-//! `aoide-quickshell.service`'s `Restart=always` (the quickshell
+//! `strillix-quickshell.service`'s `Restart=always` (the quickshell
 //! lane) is useless against one specific failure mode:
 //! after a transient output blip on the real monitor, Qt's wayland QPA
 //! backend sometimes falls onto an internal placeholder screen and never
@@ -8,10 +8,10 @@
 //! `active` (no crash, no exit), so systemd has nothing to restart on.
 //! Confirmed live 2026-08-28 and twice more 2026-08-29: the desktop (bar/
 //! dock/wallpaper/notifications) goes bare for hours until someone notices and runs
-//! `systemctl --user restart aoide-quickshell.service` by hand. A rebuild-
-//! time mitigation already exists (`home.activation.aoideRestartRice`), but
+//! `systemctl --user restart strillix-quickshell.service` by hand. A rebuild-
+//! time mitigation already exists (`home.activation.strillixRestartRice`), but
 //! it only fires on a nix switch, not live mid-session — this closes that
-//! gap with a periodic check (`aoide-quickshell-healthcheck.timer`).
+//! gap with a periodic check (`strillix-quickshell-healthcheck.timer`).
 //!
 //! The first question is whether the unit is running at all. A host with no
 //! systemd, or with the unit not installed, has no shell lane and no opinion
@@ -590,7 +590,7 @@ fn now_epoch() -> i64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0)
 }
 
-/// `systemctl --user show aoide-quickshell.service --property=ActiveEnterTimestamp
+/// `systemctl --user show strillix-quickshell.service --property=ActiveEnterTimestamp
 /// --value` — a systemd timestamp string, passed straight through to
 /// `journalctl --since` rather than parsed to an epoch here: journalctl
 /// already understands systemd's own timestamp format, so there is nothing
@@ -599,7 +599,7 @@ fn now_epoch() -> i64 {
 /// skipped in that case — [`HealthOutcome::Healthy`], nothing to watch).
 fn active_enter_timestamp() -> Option<String> {
     let out = Command::new("systemctl")
-        .args(["--user", "show", "aoide-quickshell.service", "--property=ActiveEnterTimestamp", "--value"])
+        .args(["--user", "show", "strillix-quickshell.service", "--property=ActiveEnterTimestamp", "--value"])
         .output()
         .ok()?;
     if !out.status.success() {
@@ -614,7 +614,7 @@ fn unit_properties() -> String {
         .args([
             "--user",
             "show",
-            "aoide-quickshell.service",
+            "strillix-quickshell.service",
             "--property=LoadState,ActiveState,SubState",
         ])
         .output()
@@ -651,7 +651,7 @@ pub(crate) fn not_running_state(show: &str) -> Option<String> {
 
 fn journal_tail_since(since: &str) -> String {
     Command::new("journalctl")
-        .args(["--user", "-u", "aoide-quickshell.service", "--no-pager", "--since"])
+        .args(["--user", "-u", "strillix-quickshell.service", "--no-pager", "--since"])
         .arg(since)
         .output()
         .map(|out| String::from_utf8_lossy(&out.stdout).into_owned())
@@ -705,7 +705,7 @@ fn published_json(path: &std::path::Path) -> Option<Value> {
 }
 
 fn restart_service() {
-    let _ = Command::new("systemctl").args(["--user", "restart", "aoide-quickshell.service"]).status();
+    let _ = Command::new("systemctl").args(["--user", "restart", "strillix-quickshell.service"]).status();
 }
 
 /// Raise a toast through the stock freedesktop client, detached — same
@@ -1619,7 +1619,7 @@ mod tests {
     }
 
     // `run_healthcheck()` itself isn't unit-tested here: it reads the REAL
-    // `aoide-quickshell.service` state via `systemctl`/`journalctl`/
+    // `strillix-quickshell.service` state via `systemctl`/`journalctl`/
     // `hyprctl`, environment-dependent the same way `ipc.rs`'s
     // `quickshell_service_main_pid()` and `quickshell_ipc_reload()` are —
     // only their pure halves get unit tests, for the same reason.

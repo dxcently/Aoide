@@ -114,7 +114,7 @@ in
     # ── What this lane brings into existence ────────────────────────────────
     # One thing, and it is a FACT rather than this lane's own option: the
     # directory the shell runs. Quickshell itself is the `quickshell` lane's
-    # (package and the `aoide-quickshell` service); no module reads another
+    # (package and the `strillix-quickshell` service); no module reads another
     # module (root AGENTS.md house rule 5), so this lane NAMES the config it
     # deploys into and the shell lane reads that name. Strillix paints a rice —
     # deploy the tree, seed the stage, restart the rice — and the shell lane

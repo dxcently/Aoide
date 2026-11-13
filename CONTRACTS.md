@@ -84,7 +84,7 @@ shell's own layer:
 
 | Fact | What it means | Set by |
 |---|---|---|
-| `strillix.quickshell.enable` | a Quickshell shell surface exists here | its dendrite's system half, `dendrites/quickshell/system.nix` (the package and the `aoide-quickshell` service), which sets it `true` |
+| `strillix.quickshell.enable` | a Quickshell shell surface exists here | its dendrite's system half, `dendrites/quickshell/system.nix` (the package and the `strillix-quickshell` service), which sets it `true` |
 | `strillix.quickshell.config` (`nullOr str`, `null`) | the directory a shell runs; `null` is the bare case — package installed, no shell service | whoever supplies one: a lane, or the host |
 | `strillix.enable` | the strillix runtime is present: the paint/rice binary is installed (`pkgs.aoide.strillix`) and the shell is wired | `dendrites/strillix/runtime.nix`, which every `strillix` component provider imports by path, and which sets it `true` (the renderer `dendrites/strillix/default.nix` does not) |
 | `strillix.stylix.enable` | the theme is baked at build time, painted by nix | its dendrite, `dendrites/stylix.nix`, which sets it `true` |
@@ -1447,8 +1447,8 @@ where it can be READ: `STRILLIX_TEMPLATES` is paint data (only
 onto units whose process execs or spawns `strillix` —
 `modules/dendrites/strillix/shellbridge.nix`'s
 main `shellbridge` service, `modules/dendrites/quickshell/system.nix`'s
-`aoide-quickshell` unit (the QML it starts execs `strillix`) and
-`modules/dendrites/strillix/runtime.nix`'s `aoide-rice-reload` unit (it runs `strillix
+`strillix-quickshell` unit (the QML it starts execs `strillix`) and
+`modules/dendrites/strillix/runtime.nix`'s `strillix-rice-reload` unit (it runs `strillix
 reload`) — plus
 `modules/dendrites/aoided.nix`'s
 `environment.sessionVariables` (an operator's own interactive `strx rice
@@ -1884,12 +1884,12 @@ Beyond `strx rice stage <name>`/`wallpaper set`/other emitters writing this
 live, it is also **seeded from the active rice's committed notes, with the
 venue's `strillix.theme.override` applied and the host's geometry laid over the
 rice's own, on every activation**
-(`home.activation.aoideSeedStage`, `modules/dendrites/strillix/runtime.nix`,
+(`home.activation.strillixSeedStage`, `modules/dendrites/strillix/runtime.nix`,
 via `lib/theme.nix`'s `stagePatch`) — so a host that boots without ever
 running `rice stage` still has a correct, recoloured live stage twin from
 boot. The seed is declared truth, written whatever the mode: when
 `stage/mode.json` names a staged or drafted rice, `strx reload` (the strillix lane's
-`aoide-rice-reload` user unit, run Before the shell at login and restarted with
+`strillix-rice-reload` user unit, run Before the shell at login and restarted with
 it on every switch) re-stages it over the seed. The same script publishes the
 declared twin below, which `rice mode declarative` re-pins from, and the
 venue (`/declared/venue.json`, below: the slots it recolours and the
@@ -2061,7 +2061,7 @@ Writers, and the exact shape each leaves:
 | `strx rice mode declarative` | NOTHING — a lock is not a rice switch. Its re-pin writes `theme.json` alone, and a pick stamped for another rice is hidden by the read-side rule rather than dropped |
 | `strx rice back <entry>` | the target entry's wallpaper value VERBATIM — an entry minted while a pick stood restores it as a pick, `rice`, `position` and `tile` and all; an entry with no wallpaper removes whatever stands |
 | `strx rice draft save <name>` | a verbatim copy into `rices/<rice>/drafts/<name>/wallpaper.json` (§4's drafts entry; never a routing target) |
-| the strillix lane's `home.activation.aoideSeedStage` | when the declared rice sets `strillix.theme.wallpaper`, `{"path": <that store path>, "rice": <declared>}` — the declared rice's own picture as the default — unless `wallpaper.json` already holds a pick for any rice, which is left byte-identical (`lib/wallpaper-seed.sh`, proved by `tests/wallpaper-seed/run.sh`). With no `strillix.theme.wallpaper` it writes NOTHING; the read-side rule above is what keeps a pick off another rice |
+| the strillix lane's `home.activation.strillixSeedStage` | when the declared rice sets `strillix.theme.wallpaper`, `{"path": <that store path>, "rice": <declared>}` — the declared rice's own picture as the default — unless `wallpaper.json` already holds a pick for any rice, which is left byte-identical (`lib/wallpaper-seed.sh`, proved by `tests/wallpaper-seed/run.sh`). With no `strillix.theme.wallpaper` it writes NOTHING; the read-side rule above is what keeps a pick off another rice |
 | the greeter tree build (`modules/dendrites/greeter.nix`) | inside the tree only, `{"path": <tree>/rices/<owner>/wallpaper/<owner>-logon.{webp,png,jpg,jpeg}, "rice": <declared>}` when the face's rice ships a logon picture (`wallpaper/<owner>-logon.<ext>`, first match in that order); otherwise `{"path": <tree>/rices/<owner>/wallpaper/<basename of strillix.theme.wallpaper>, "rice": <declared>}` when the declared rice sets `strillix.theme.wallpaper` (copied into the tree when the face's `wallpaper/` folder lacks it); with neither, no file. The greeter's `LockPreview` draws it as the logon background; the tree's `wallpaper/` folder rides along whole |
 
 `stage_for_rice` — the one implementation of the stage half, shared by
@@ -2155,9 +2155,9 @@ non-null fields of `strillix.theme.geometry`) laid over the rice's own
 (`lib/theme.nix`'s `stagePatch`, §1's override and geometry tiers), its
 top-level `rice` field set to that rice's name, keys sorted (`jq -S`, matching `serde_json::Value`'s BTreeMap ordering). Written by
 the SAME activation seed that writes `/stage/theme.json` above
-(`home.activation.aoideSeedStage`, `modules/dendrites/strillix/runtime.nix`) —
+(`home.activation.strillixSeedStage`, `modules/dendrites/strillix/runtime.nix`) —
 one `jq` run, two destinations. In `staging` and `draft` mode the session's
-`strx reload` (the `aoide-rice-reload` unit) then re-stages the stage twin
+`strx reload` (the `strillix-rice-reload` unit) then re-stages the stage twin
 from the staged or drafted rice, and the declared twin stays as the seed wrote
 it.
 
@@ -2195,7 +2195,7 @@ active rice's committed `theme.json`; `geometry`'s is the fields the host's
 `lib/theme.nix`'s `venueDelta` — `stagePatch`'s result minus the committed
 document — so a slot or field the venue leaves alone is not in it, and the file
 is `{}` when the host sets neither. Written by the SAME activation seed as the
-twin above (`home.activation.aoideSeedStage`,
+twin above (`home.activation.strillixSeedStage`,
 `modules/dendrites/strillix/runtime.nix`): a temp file made in `/declared/` and
 renamed over the target, so a reader never sees a torn file. The rules stay in
 nix (§1's override and geometry tiers, guarded by `checks.theme-fanout`); no
@@ -2240,7 +2240,7 @@ atomically, under the stage lock. Sole reader: `rice refresh`. **Absent** is
 One line, `background_opacity <n>` (`n` in [0, 1]), in kitty's own config
 syntax — the DECLARED rice's terminal opacity, and nothing else.
 
-Writer: `home.activation.aoideSeedStage`'s seed script
+Writer: `home.activation.strillixSeedStage`'s seed script
 (`modules/dendrites/strillix/runtime.nix`), the same run that publishes the two
 `theme.json` twins above and below. It writes the active rice's
 `strillix.theme.geometry.terminalOpacity` (§1), and **deletes the file when that
@@ -2310,7 +2310,7 @@ current mode was entered.
 
 `strx reload` is the reader that restores the marked mode at login and after a
 switch, when the activation has laid the declared rice over the runtime tree
-(the strillix lane runs it from its `aoide-rice-reload` unit). It acts on `mode`,
+(the strillix lane runs it from its `strillix-rice-reload` unit). It acts on `mode`,
 `rice` and `draft`: `staging` re-stages `rice`, `draft` re-syncs the draft in
 place, `declarative` reloads the shell only. It never changes the mode. In
 `draft` it first re-routes `stage/theme.json` to the marked draft when the
@@ -2465,16 +2465,16 @@ venue's own look has it.
 
 | Variable | Value | Source |
 | --- | --- | --- |
-| `$aoide_lock_color` | `rgb(rrggbb)` | `palette.bg`, the ground behind the picture |
-| `$aoide_lock_image` | absolute path | the rice's `lockscreen.<ext>` (§5) in the RUNTIME rices, `$STRILLIX_ROOT/rices/<rice>/` |
-| `$aoide_lock_field_y` | `-26%` | `theme::emit::hyprlock::FIELD_Y`: the password field's centre, percent of output height below the middle |
-| `$aoide_lock_field_outer` | `rgb(rrggbb)` | `window.border` |
-| `$aoide_lock_field_inner` | `rgb(rrggbb)` | `notif.bg` |
-| `$aoide_lock_field_font` | `rgb(rrggbb)` | `notif.fg` |
-| `$aoide_lock_field_check` | `rgb(rrggbb)` | `palette.accent` |
-| `$aoide_lock_field_fail` | `rgb(rrggbb)` | `notif.urgent` |
-| `$aoide_lock_name_y` | `-21%` | `theme::emit::hyprlock::NAME_Y`: the account name's centre, between the tile and the field |
-| `$aoide_lock_name_font` | `rgb(ffffff)` | `theme::emit::hyprlock::NAME_FONT`, a constant: no tier knows a picture's luminance |
+| `$strillix_lock_color` | `rgb(rrggbb)` | `palette.bg`, the ground behind the picture |
+| `$strillix_lock_image` | absolute path | the rice's `lockscreen.<ext>` (§5) in the RUNTIME rices, `$STRILLIX_ROOT/rices/<rice>/` |
+| `$strillix_lock_field_y` | `-26%` | `theme::emit::hyprlock::FIELD_Y`: the password field's centre, percent of output height below the middle |
+| `$strillix_lock_field_outer` | `rgb(rrggbb)` | `window.border` |
+| `$strillix_lock_field_inner` | `rgb(rrggbb)` | `notif.bg` |
+| `$strillix_lock_field_font` | `rgb(rrggbb)` | `notif.fg` |
+| `$strillix_lock_field_check` | `rgb(rrggbb)` | `palette.accent` |
+| `$strillix_lock_field_fail` | `rgb(rrggbb)` | `notif.urgent` |
+| `$strillix_lock_name_y` | `-21%` | `theme::emit::hyprlock::NAME_Y`: the account name's centre, between the tile and the field |
+| `$strillix_lock_name_font` | `rgb(ffffff)` | `theme::emit::hyprlock::NAME_FONT`, a constant: no tier knows a picture's luminance |
 
 The mapping reuses decisions the rice already made: `notif.bg`/`notif.fg` is
 the pair it checks for contrast as plate and ink, and `window.border` is its
@@ -2511,7 +2511,7 @@ file, and only then writes its widgets, which name the variables. hyprlang
 substitutes the LAST definition for every line parsed after it, so a dressed
 file overrides the defaults and an undressed one leaves them, and the staged
 rice wins over the declared one the moment one is staged. The lane's
-`$aoide_lock_name_font` default is fully transparent, so a lock no rice dresses
+`$strillix_lock_name_font` default is fully transparent, so a lock no rice dresses
 shows no name, and its name label carries a shadow, which is what lets the
 white read over any picture.
 
@@ -2544,7 +2544,7 @@ The DECLARED rice's lock-screen dress, in the format of
 `/stage/hyprlock.conf` above: `#` comment lines and, when the rice ships a
 lock picture (§5), the ten variables.
 
-Writer: `home.activation.aoideSeedStage`'s seed script
+Writer: `home.activation.strillixSeedStage`'s seed script
 (`modules/dendrites/strillix/runtime.nix`), the run that publishes the other
 declared files. The content is rendered at BUILD time by the strillix binary, `strillix
 theme emit hyprlock <notes> --rice-dir <rice folder>`, over the same

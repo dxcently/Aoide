@@ -8,7 +8,7 @@ pi-coding-agent, OpenAI Codex + ChatGPT), local model-serving tooling
 (inference: Ollama + llama.cpp), system services (dunst, networkmanager,
 tailscale, audio), and **the paint lanes** — what makes a machine paint at all:
 `compositor` (with its `hyprland` provider), `stylix`, `quickshell`
-(the shell runtime: the package and the one `aoide-quickshell` service), `strillix`
+(the shell runtime: the package and the one `strillix-quickshell` service), `strillix`
 (the Quickshell surface, its shellbridge, and the rice-gated deploy half) and
 the ten component slots — `bar`, `launcher`, `powermenu`, `notifications`,
 `wallpaper`, `dock`, `calendar`, `switcher`, `lock`, `greeter` — each a
@@ -58,7 +58,7 @@ provider, so two components on one host share one runtime.
 The shell runtime is two lanes, split by what each one knows:
 
 ```
-quickshell/       the PACKAGE, and the one `aoide-quickshell` user service.
+quickshell/       the PACKAGE, and the one `strillix-quickshell` user service.
                   Knows no rice, deploys nothing: it starts a shell on the
                   directory `strillix.quickshell.config` names and stops there.
 strillix/             the SURFACE. Builds the QML tree from `pkgs/strillix-shell` plus
@@ -79,7 +79,7 @@ no rice binary:
 
 | Shape | How | What runs |
 |---|---|---|
-| own config | the host sets `strillix.quickshell.config` to its own config directory (a store path or a host path) | the package, plus `aoide-quickshell` on that directory, plus the graphical-session anchor `aoided` needs |
+| own config | the host sets `strillix.quickshell.config` to its own config directory (a store path or a host path) | the package, plus `strillix-quickshell` on that directory, plus the graphical-session anchor `aoided` needs |
 | bare | nothing sets it (`null`, the default) | the package only: no service, no session claim |
 
 The service is gated on the config, never on `strillix.rice` — a shell that paints

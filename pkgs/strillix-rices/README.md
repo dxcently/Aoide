@@ -61,7 +61,7 @@ subdirectory of the whole `rices` tree, and the baked
 That is a contract with every host, not a micro-optimisation. This package's
 store path is a STRING in the installed strillix (`modules/dendrites/strillix/package.nix`,
 its `STRILLIX_TEMPLATES` default), in the units that spell it, and in the
-`aoideSeedRices` activation entry, so the system derivations that name it move with
+`strillixSeedRices` activation entry, so the system derivations that name it move with
 it — which means anything that rehashes this derivation moves the host's
 **toplevel drvPath** even when no configuration changed. While the build read the rices directory,
 that was true of every rice in the repo: editing a rice a host does not even

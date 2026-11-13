@@ -89,7 +89,7 @@ QtObject {
 
     // Thumbnails are cached per id under the user's XDG cache, so they last
     // as long as the history does. The decoder writes here; previewPath reads.
-    readonly property string previewDir: (Quickshell.env("XDG_CACHE_HOME") || (Quickshell.env("HOME") + "/.cache")) + "/aoide-clipboard/previews"
+    readonly property string previewDir: (Quickshell.env("XDG_CACHE_HOME") || (Quickshell.env("HOME") + "/.cache")) + "/strillix-clipboard/previews"
 
     function previewPath(id) {
         return "file://" + root.previewDir + "/" + id

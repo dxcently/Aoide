@@ -239,13 +239,13 @@ strx reload [--json]
   bodies, manifest, registry and history written, and in a draft re-route the
   link and `stage/mode.json`.
 - **Pipes to / output:** the last beat, in every mode: when
-  `aoide-quickshell.service` is up, spawns `quickshell -p
+  `strillix-quickshell.service` is up, spawns `quickshell -p
   <run_qml_dir>/shell.qml ipc call shell reload` — the `-p` is required
   because `ipc call` does not auto-discover an instance launched with a path
   config. This invokes the `Quickshell.reload(false)` IPC handler
   (`AoideIpc.qml`), which tears down and rebuilds the whole scene from
   `shell.qml`, no systemd restart (the probe is `systemctl --user show
-  aoide-quickshell.service --property=MainPID --value`,
+  strillix-quickshell.service --property=MainPID --value`,
   `pkgs/aoide/crates/strillix-rice/src/ipc.rs`). Success is judged on OUTPUT, not the
   exit code: `ipc call` exits 0 even for an unknown target/function
   (printing `Not ready to accept queries yet.`), and `reload()` is a void
@@ -265,7 +265,7 @@ strx reload [--json]
   fix is `strx rice mode stage`, which leaves draft mode. `strx reload` is
   also what brings a staged or drafted rice back after a login or a switch:
   the activation lays the declared rice over the runtime tree, and the strillix
-  lane runs this command from its `aoide-rice-reload` unit. It is the reload
+  lane runs this command from its `strillix-rice-reload` unit. It is the reload
   lane for dynamically-loaded widget QML (`Qt.createComponent`) and
   lane-owned QML that Quickshell's own file watcher never tracks
   ([[Quickshell]]). It absorbed the old `quickshell reload`; the group keeps
@@ -277,19 +277,19 @@ strx reload [--json]
 strx quickshell healthcheck [--json]
 ```
 
-- **Reads:** `systemctl --user show aoide-quickshell.service
+- **Reads:** `systemctl --user show strillix-quickshell.service
   --property=LoadState,ActiveState,SubState` (an installed unit that is
   `inactive` or `failed`, whatever its load state, is `not-running`; no systemd or an uninstalled unit
   is `HealthOutcome::Healthy` — nothing to watch) and `--property=
   ActiveEnterTimestamp --value`; the journal since that
-  timestamp (`journalctl --user -u aoide-quickshell.service --since
+  timestamp (`journalctl --user -u strillix-quickshell.service --since
   <timestamp>`) for Qt's placeholder-screen line; `hyprctl -j layers` for the
   live surface count. A restart-history marker at
   `quickshell-healthcheck-restarts` under the strillix root (`$STRILLIX_ROOT`)
   (`pkgs/aoide/crates/strillix-rice/src/health.rs`).
 - **Writes:** the marker file (restart timestamps plus an optional
   `notified:<epoch>` sentinel), and — on a confirmed, ladder-permitted
-  lockup — restarts `aoide-quickshell.service` via `systemctl --user
+  lockup — restarts `strillix-quickshell.service` via `systemctl --user
   restart`.
 - **Pipes to / output:** always `status: "ok"`; `--json` data `{status:
   "healthy" | "not-running" | "blank" | "restarted" | "deferred"}` with a
@@ -297,7 +297,7 @@ strx quickshell healthcheck [--json]
   restarted: the watchdog cannot tell a deliberate stop from a StartLimit
   park or an unmet condition; a `deferred` message names the seconds until
   the next attempt and the restart count in the last hour). Meant to run off
-  `aoide-quickshell-healthcheck.timer`, not interactively.
+  `strillix-quickshell-healthcheck.timer`, not interactively.
 - **Notes:** not gated; best-effort throughout — a failed
   `systemctl`/`journalctl`/`hyprctl` call reads as `healthy` (nothing
   confirmed), never as a command failure. The two signals are asked in

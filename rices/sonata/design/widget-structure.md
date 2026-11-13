@@ -42,7 +42,7 @@ Three consequences worth internalising:
   surface embeds an anchor for that exact slot name. Dropping
   `widgets/whatever.qml` with no anchor wired is inert.
 - A brand-new slot FILE needs `systemctl --user restart
-  aoide-quickshell.service` (the manifest is read once, at startup). An edit
+  strillix-quickshell.service` (the manifest is read once, at startup). An edit
   to an existing file only needs `strx rice stage`.
 
 ### The hard line: a widget is a RENDER SURFACE

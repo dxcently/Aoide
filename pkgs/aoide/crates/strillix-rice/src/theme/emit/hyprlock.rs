@@ -131,7 +131,7 @@ pub fn emit_hyprlock(r: &Resolved, image: Option<&Path>) -> Result<String, EmitE
     ];
     let mut out = String::from(NO_DRESS);
     for (name, value) in variables {
-        out.push_str(&format!("$aoide_lock_{name} = {value}\n"));
+        out.push_str(&format!("$strillix_lock_{name} = {value}\n"));
     }
     Ok(out)
 }
@@ -156,7 +156,7 @@ mod tests {
 
     fn variable<'a>(out: &'a str, name: &str) -> Option<&'a str> {
         out.lines()
-            .find_map(|l| l.strip_prefix(&format!("$aoide_lock_{name} = ")))
+            .find_map(|l| l.strip_prefix(&format!("$strillix_lock_{name} = ")))
     }
 
     #[test]
@@ -176,16 +176,16 @@ mod tests {
         assert_eq!(
             names,
             [
-                "$aoide_lock_color",
-                "$aoide_lock_image",
-                "$aoide_lock_field_y",
-                "$aoide_lock_field_outer",
-                "$aoide_lock_field_inner",
-                "$aoide_lock_field_font",
-                "$aoide_lock_field_check",
-                "$aoide_lock_field_fail",
-                "$aoide_lock_name_y",
-                "$aoide_lock_name_font",
+                "$strillix_lock_color",
+                "$strillix_lock_image",
+                "$strillix_lock_field_y",
+                "$strillix_lock_field_outer",
+                "$strillix_lock_field_inner",
+                "$strillix_lock_field_font",
+                "$strillix_lock_field_check",
+                "$strillix_lock_field_fail",
+                "$strillix_lock_name_y",
+                "$strillix_lock_name_font",
             ]
         );
     }
@@ -195,7 +195,7 @@ mod tests {
             return false;
         };
         let body = value.strip_prefix("rgb(").and_then(|v| v.strip_suffix(')'));
-        name.starts_with("$aoide_lock_")
+        name.starts_with("$strillix_lock_")
             && body.is_some_and(|b| {
                 b.len() == 6 && b.chars().all(|c| matches!(c, '0'..='9' | 'a'..='f'))
             })
@@ -208,7 +208,7 @@ mod tests {
             assert_eq!(out.lines().filter(|l| l.starts_with('#')).count(), 2, "{fixture}");
             for l in out.lines().filter(|l| !l.starts_with('#')) {
                 assert!(!l.contains('#'), "{fixture}: {l}");
-                if !l.starts_with("$aoide_lock_image ") && !l.contains("_y = ") {
+                if !l.starts_with("$strillix_lock_image ") && !l.contains("_y = ") {
                     assert!(is_rgb_variable(l), "{fixture}: {l}");
                 }
             }
@@ -261,7 +261,7 @@ mod tests {
         let r = resolve(&json!({
             "schemaVersion": "0",
             "palette": {
-                "bg": "#000000\n$aoide_lock_image = /etc/passwd",
+                "bg": "#000000\n$strillix_lock_image = /etc/passwd",
                 "fg": "#ffffff",
                 "accent": "#00ff00",
                 "urgent": "#ff0000"

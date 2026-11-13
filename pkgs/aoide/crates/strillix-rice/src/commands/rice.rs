@@ -1631,10 +1631,10 @@ mod tests {
         assert_eq!(out.status, Status::Ok, "{:?}", out.data);
         let dress = std::fs::read_to_string(stage.join("hyprlock.conf")).unwrap();
         let picture = barcarolle.join("lockscreen.png");
-        assert!(dress.lines().any(|l| l == format!("$aoide_lock_image = {}", picture.display())), "{dress}");
-        assert!(dress.lines().any(|l| l == "$aoide_lock_color = rgb(0b1021)"), "{dress}");
-        assert!(dress.lines().any(|l| l == "$aoide_lock_field_check = rgb(82aaff)"), "{dress}");
-        assert!(dress.lines().any(|l| l == "$aoide_lock_field_y = -26%"), "{dress}");
+        assert!(dress.lines().any(|l| l == format!("$strillix_lock_image = {}", picture.display())), "{dress}");
+        assert!(dress.lines().any(|l| l == "$strillix_lock_color = rgb(0b1021)"), "{dress}");
+        assert!(dress.lines().any(|l| l == "$strillix_lock_field_check = rgb(82aaff)"), "{dress}");
+        assert!(dress.lines().any(|l| l == "$strillix_lock_field_y = -26%"), "{dress}");
         assert!(out.changed.iter().any(|c| c.ends_with("stage/hyprlock.conf")));
         let data = out.data.unwrap();
         assert_eq!(data["lockScreen"]["status"], "written");

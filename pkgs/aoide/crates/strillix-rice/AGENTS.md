@@ -267,7 +267,7 @@
 - **`/declared/theme.json` (the declared twin) and
   `/declared/venue.json` (the venue's slots and geometry), CONTRACTS.md §4,
   are READ-ONLY for this crate — only the nix side writes them.** The strillix
-  lane's activation seed (`home.activation.aoideSeedStage`) publishes them: the
+  lane's activation seed (`home.activation.strillixSeedStage`) publishes them: the
   twin is the declared rice's committed notes with the venue's
   `strillix.theme.override` applied and the host's geometry laid over the rice's
   own, `"rice"` injected, keys sorted; `venue.json` is `venueDelta`, only the

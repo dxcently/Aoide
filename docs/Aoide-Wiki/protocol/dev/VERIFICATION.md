@@ -24,7 +24,7 @@ sudo <toplevel>/bin/switch-to-configuration switch
 
 # desktop-only reloads — no switch needed
 hyprctl reload                                     # compositor rules
-systemctl --user restart aoide-quickshell.service  # bar / dock / gadgets
+systemctl --user restart strillix-quickshell.service  # bar / dock / gadgets
 strx rice stage <rice>                             # theme hot-reload
 qs -p pkgs/strillix-shell/qml/shell.qml               # QML parse check
 
