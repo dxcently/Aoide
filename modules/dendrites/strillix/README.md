@@ -98,7 +98,7 @@ stay the runtime's own. `runtime.nix` publishes the filled slots as
   Quickshell, builds the config from `pkgs/strillix-shell`'s QML
   plus the widget bodies of the rices this host BUILT IN
   (`strillix.rices.builtIn`, from its own record), and deploys it to
-  `$AOIDE_ROOT/run/qml` (`home.activation.aoideDeployQml` — an rsync, not a
+  `$STRILLIX_ROOT/run/qml` (`home.activation.aoideDeployQml` — an rsync, not a
   symlink tree: a deploy target the runtime writes into, never a source, so a
   switch reasserts the store over it). It declares
   the surfaces it owns in `strillix.surfaces` (stylix stands down for those),
@@ -179,15 +179,10 @@ stay the runtime's own. `runtime.nix` publishes the filled slots as
   seeds (`aoideDeployQml`, `aoideSeedStage`, `aoideSeedRices` — the reload
   reads the runtime rices), which is what puts the reload between the seed
   and the shell's restart. `aoideMigrateRoots` runs before every seed and
-  before `strillixRice`: with Aoide on, it first runs `aoide --help`, so core
-  moves its own old root, which the rice move waits for; it then runs
-  `strillix --help` once under `STRILLIX_MIGRATE=1` (with Aoide on, also under
-  `AOIDE_CORE_BIN`, the core binary's path), so the old rice state moves into
-  the strillix root before any seed creates it (a dry run skips it). Outside
-  that activation the rice move waits for `strx migrate`, and `strillix`
-  refuses every verb that could write until it settles.
-  Once the rice tree has moved, `$AOIDE_ROOT/song` is a marker file, and the
-  migration reads it as already done. Nothing here creates `song/` again.
+  before `strillixRice`: it runs `strillix migrate` once, so `run/qml`,
+  `run/elements` and Strillix's `state/` trees move from `aoide.root` into
+  `strillix.root` before the deploy or any seed writes there (a dry run skips
+  it). A path that cannot move is named, and activation goes on.
 
 ## The seam with `quickshell`
 
@@ -202,7 +197,7 @@ that selects both lanes gets the one module of each.
 Beyond those imports the two meet on one fact:
 
 ```
-strillix      sets  strillix.quickshell.config = "$AOIDE_ROOT/run/qml"   (this lane's deploy target)
+strillix      sets  strillix.quickshell.config = "$STRILLIX_ROOT/run/qml"   (this lane's deploy target)
 quickshell reads it, installs the package, runs  quickshell -p <config>/shell.qml,
           and anchors `aoided` at graphical-session.target
 ```

@@ -60,12 +60,12 @@ one and opening its own plain wallpaper picker otherwise.
 The repo root carries no `qml/` directory — widget source lives in
 `pkgs/strillix-shell/qml/` and each active rice's `widgets/`, and the strillix lane's
 `home.activation.aoideDeployQml` rsyncs the built config tree
-(`rsync -a --delete --chmod=u+w`) into `$AOIDE_ROOT/run/qml/` (default
-`~/.aoide/run/qml/` — the runtime root, outside the git checkout), which
+(`rsync -a --delete --chmod=u+w`) into `$STRILLIX_ROOT/run/qml/` (default
+`~/.strillix/run/qml/` — the rice runtime root, outside the git checkout), which
 Quickshell reads as its entry point (`quickshell -p
-$AOIDE_ROOT/run/qml/shell.qml`). The deployed tree is self-healing: it is a
+$STRILLIX_ROOT/run/qml/shell.qml`). The deployed tree is self-healing: it is a
 deploy target, never a source, and every activation's rsync reasserts the
-store's build over it, so a hand edit under `$AOIDE_ROOT/run/qml/` is lost at
+store's build over it, so a hand edit under `$STRILLIX_ROOT/run/qml/` is lost at
 the next switch. A rice is edited in the runtime rices
 (`$STRILLIX_ROOT/rices/<rice>`), and a STAGED rice is restored from
 there: after the switch the strillix lane's `aoide-rice-reload` unit runs `strillix
@@ -213,7 +213,7 @@ Two design decisions worth carrying forward:
 The compositor lane also adds `aoide-launcher` to the blur / `ignore_alpha` /
 hyprglass namespaces so the pane frosts like the bar and dock. Both the keybind
 and the blur rules are baked into `hyprland.conf`, so the launcher needs a gated
-`switch` to land live (the QML rsyncs into `$AOIDE_ROOT/run/qml/` the same way).
+`switch` to land live (the QML rsyncs into `$STRILLIX_ROOT/run/qml/` the same way).
 
 ## Session service & resilience
 

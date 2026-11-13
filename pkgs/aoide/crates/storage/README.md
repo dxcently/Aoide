@@ -199,14 +199,8 @@ by decision — no embedded database yet
   `fs::root`'s own resolution, because the stage locks reach `root` and
   `state_dir`, and a migration hung off them would run from any test that
   takes a lock. The two core binaries (`aoide`, `aoided`) call it
-  once, explicitly, at the top of their `main()`. The rice tree
-  (`~/Aoide/song`, `$AOIDE_ROOT/song`) is not core's: `strillix-rice`'s
-  `migrate` moves it on explicit request only, with the
-  `~/.local/state/lyra` link tree in the same request. With an aoide binary
-  installed, it waits while core's legacy `~/Aoide/state` is still due to
-  move. Rice state held in
-  both roots, or across homes, is refused there (see
-  `strillix-rice/AGENTS.md`), with nothing moved. `fs::repo_root` is GONE (its one caller, `aoide-upkeep`'s
+  once, explicitly, at the top of their `main()`.
+  `fs::repo_root` is GONE (its one caller, `aoide-upkeep`'s
   `soundcheck`, now reads `fs::flake_root` directly — a runtime root is not
   a repo, so deriving a checkout path from stage-dir parentage stopped
   making sense the moment the two could diverge). `fs::rice_templates_dir`

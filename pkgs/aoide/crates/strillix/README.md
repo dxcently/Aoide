@@ -626,23 +626,18 @@ reads `sessions.json` and writes nothing in it.
 `aoide-protocol`, `strillix-rice`, `aoide-conduct` (for the `shellbridge` socket
 loop and the `notifications` registry line), `aoide-screen`.
 
-## Start-up migration
+## Migration
 
-A `strillix` run moves no core state. `aoide_storage::fs::migrate_root_once` is
-the core binaries' call (`aoide`, `aoided`): it moves a pre-split host's
-`~/Aoide/{state,log}` into the root. The rice tree moves from `$AOIDE_ROOT/song/`
-into `$STRILLIX_ROOT` only when asked: `STRILLIX_MIGRATE=1` (the home activation sets
-it on every switch) or `strx migrate`. A plain run with old state prints one
-line naming `strx migrate` and moves nothing. `strx migrate --check` reports
-the rice state (`settled`, `due`, or `both`) and moves nothing; `strx migrate`
-moves it and reports before and after. A `song` that is a marker file (a regular
-file, not a directory) means that move is done. Rice state held by both roots
-is refused: nothing moves, and `strillix` still runs on the strillix root. While
-an aoide binary is installed and core's legacy `~/Aoide/state` still holds
-state, the rice move refuses with `core has not moved its old root yet` and
-moves nothing; running any `aoide` command once moves that state into the root,
-and the retry goes through. With no aoide binary, the rice move runs and leaves
-`~/Aoide/state` where it is.
+A `strillix` run moves no core state, and no start-up hook moves anything.
+`aoide_storage::fs::migrate_root_once` is the core binaries' call (`aoide`,
+`aoided`): it moves a pre-split host's `~/Aoide/{state,log}` into the root.
+`strx migrate` moves Strillix's trees out of `$AOIDE_ROOT` into
+`$STRILLIX_ROOT`: `run/qml`, `run/elements`, `state/skwd-wall`, `state/captures`
+and `state/pointer-pos.json`, merged into a tree the strillix root already
+holds. It deletes the `song` marker file the rice tree's earlier move left. The
+home activation runs it on every switch. An entry the strillix root holds with
+other bytes stays where it is, named on stderr, and the verb exits nonzero.
+`strx migrate --check` lists the old paths a run would move and moves nothing.
 
 ## How it composes
 

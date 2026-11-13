@@ -1189,7 +1189,7 @@ let
         export AOIDE_ROOT="$TMPDIR/aoide" STRILLIX_ROOT="$TMPDIR/strillix"
         export STRILLIX_TEMPLATES="${strillixRices}/share/strillix/rices"
         mkdir -p "$HOME" "$XDG_CACHE_HOME" "$XDG_STATE_HOME" "$XDG_RUNTIME_DIR"
-        mkdir -p "$AOIDE_ROOT/run/qml"
+        mkdir -p "$STRILLIX_ROOT/run/qml"
         strillix="${strillix}/bin/strillix"
         marker='// generator-runtime: a machine copy the stage must carry'
         fail() {
@@ -1212,11 +1212,11 @@ let
           fail "rice stage did not report status ok"
         fi
         for file in manifest.json registry.json; do
-          if ! jq -e --arg rice "${rice}" 'has($rice)' "$AOIDE_ROOT/run/qml/rices/$file" >/dev/null; then
+          if ! jq -e --arg rice "${rice}" 'has($rice)' "$STRILLIX_ROOT/run/qml/rices/$file" >/dev/null; then
             fail "run/qml/rices/$file is not JSON with a ${rice} key"
           fi
         done
-        staged="$AOIDE_ROOT/run/qml/rices/${rice}/bar.qml"
+        staged="$STRILLIX_ROOT/run/qml/rices/${rice}/bar.qml"
         if [ "$(tail -n 1 "$staged")" != "$marker" ]; then
           fail "the staged bar.qml does not end with the machine copy's marker"
         fi
@@ -1237,7 +1237,7 @@ let
           fail "rice stage runtime-copy did not report status ok"
         fi
         for file in manifest.json registry.json; do
-          if ! jq -e 'has("runtime-copy")' "$AOIDE_ROOT/run/qml/rices/$file" >/dev/null; then
+          if ! jq -e 'has("runtime-copy")' "$STRILLIX_ROOT/run/qml/rices/$file" >/dev/null; then
             fail "run/qml/rices/$file is not JSON with a runtime-copy key"
           fi
         done

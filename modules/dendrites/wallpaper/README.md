@@ -44,7 +44,7 @@ each declares `strillix.surfaces.wallpaper` and writes its own
   the whole suite and a second unit of the same name), and an activation-time
   jq merge that enforces the engine config keys Aoide owns while keeping the
   user's own settings — the engine rewrites that file in place, so it is seeded
-  under `aoide.root`, never a store symlink. A 1x1 fully transparent PNG,
+  under `strillix.root`, never a store symlink. A 1x1 fully transparent PNG,
   exported as `AOIDE_SKWD_WALL_STANDIN`, is the step-aside: the `clear` verb
   this release does not have is stood in for by applying an image that paints
   nothing, and the shell's own layer shows through it.

@@ -179,7 +179,7 @@ let
   # staged colours — so a host that has never staged a rice still opens its
   # terminal at the rice's opacity. This lane carries the read because it is
   # the lane that already reads the dress (root AGENTS.md rule 5); the kitty
-  # lane names only the file's path under `aoide.root`.
+  # lane names only the file's path under `strillix.root`.
   opacity = config.strillix.theme.geometry.terminalOpacity;
 
   # ── Rices manifest + registry, typed (W3a/W3b), generated once (C4) ──
@@ -331,13 +331,12 @@ let
 
   # ── QML root — the full skeleton config installed into run/qml/ ────────────
   # Each surface widget is a stub that reads its colors from theme. Deployed
-  # to a gitignored root-runtime dir (run/, alongside catalog/index/log —
-  # never the repo's checked-in tree) so the live copy can never be confused
-  # with source (pkgs/strillix-shell/qml/) or collide with it — this is
-  # what CONTRACTS.md §2 and the deploy-path fix this comment accompanies are
-  # about. At runtime Quickshell hot-reloads from $STRILLIX_ROOT/stage/theme.json via
-  # a FileView; the build only installs the structural QML, not the note
-  # values themselves.
+  # to `$STRILLIX_ROOT/run/qml` — never the repo's checked-in tree — so the
+  # live copy can never be confused with source (pkgs/strillix-shell/qml/) or
+  # collide with it — this is what CONTRACTS.md §2 and the deploy-path fix
+  # this comment accompanies are about. At runtime Quickshell hot-reloads from
+  # $STRILLIX_ROOT/stage/theme.json via a FileView; the build only installs
+  # the structural QML, not the note values themselves.
   #
   # ── Per-rice flavor widgets (CONTRACTS.md §5) ───────────────────────────
   # Beyond the shared, rice-blind QML tree above, this also carries per-rice
@@ -450,18 +449,17 @@ let
     done
   '';
 
-  # The runtime root this lane deploys into: $AOIDE_ROOT/run/qml — the
+  # The tree this lane deploys into: $STRILLIX_ROOT/run/qml — the
   # rsync-deployed tree (see the home.activation entries below), never the
-  # repo's source tree. L-C2 (task #107): the runtime root moved off
-  # `~/Aoide` onto `aoide.root` (default `~/.aoide`).
-  qmlDir = "${config.aoide.root}/run/qml";
+  # repo's source tree.
+  qmlDir = "${config.strillix.root}/run/qml";
 in
 {
   imports = [ ../quickshell/home.nix ];
 
   # ── Deploy QML config tree into run/qml/ (rsync, not a symlink tree) ────
   # The config tree (bar/notif/launcher/OSD/lockscreen/greeter/wallpaper)
-  # lands at /home/<user>/Aoide/run/qml/ — a gitignored root-runtime dir,
+  # lands at `$STRILLIX_ROOT/run/qml/` (default `~/.strillix/run/qml/`),
   # never the repo's checked-in tree (CONTRACTS.md §2).
   #
   # `home.file` would manage this as a tree of symlinks into the nix
@@ -486,7 +484,7 @@ in
   # not the outer NixOS-module lib (which lacks `hm`). `config`/`pkgs`/`quickshellConfig`
   # still resolve lexically to the outer module scope, unshadowed by the pattern.
   # ── The machine's own rices first (house rule 10) ─────────────────────
-  # The machine OWNS `~/.aoide/rices` (CONTRACTS.md §5): its
+  # The machine OWNS `$STRILLIX_ROOT/rices` (CONTRACTS.md §5): its
   # built-in rices plus whatever it made itself, never a link to or a sync
   # of the repo. Activation runs `strillix rice refresh` over the built-in set,
   # which applies one three-way rule per file (shipped copy, machine copy,
@@ -500,7 +498,7 @@ in
   #     touched.
   #
   # What refresh wrote is recorded in
-  # `$AOIDE_ROOT/$STRILLIX_ROOT/declared/rices/<rice>.json`, outside the rice
+  # `$STRILLIX_ROOT/declared/rices/<rice>.json`, outside the rice
   # folder so nothing that reads the rices sees it. The command is the
   # CLI twin of this step: `strillix rice refresh [--check]` does by hand what
   # activation does, and `--check` writes nothing and reports each file's
@@ -588,25 +586,16 @@ in
           systemd.user.sessionVariables.AOIDE_DIALOG_CMD = "${dialogCmd}";
           home.sessionVariables.AOIDE_FOCUS_CMD = "${focusCmd}";
         }
-        # ── Move the old rice state before anything seeds the strillix root ───
-        # Every seed below creates `$STRILLIX_ROOT/*` or `~/.local/state/strillix`
-        # before any binary starts, and `migrate_dir` only moves into an absent
-        # or empty target. So the migration runs first. Core moves its own old root
-        # when any aoide command starts, and the rice move waits for that root, so
-        # with Aoide on, `aoide --help` runs before `strillix --help`. With Aoide on,
-        # the `strillix --help` call also passes `AOIDE_CORE_BIN`, the core binary's
-        # path: strillix runs out of its own output and aoide out of another, so the
-        # sibling lookup cannot find core, and the rice move finds it through the
-        # variable. A failure in either does not stop activation: the binary prints
-        # its refusal and the later entries still run. Under a dry run the hook moves
-        # nothing.
+        # ── Move Strillix's trees out of core's root before anything uses them ──
+        # `strillix migrate` moves `run/qml`, `run/elements` and Strillix's
+        # `state/` trees from `aoide.root` into `strillix.root`, so it runs before
+        # the deploy and the seeds below write there. A path that cannot move
+        # does not stop activation: the binary names it and the later entries
+        # still run. Under a dry run nothing moves.
         {
           home.activation.aoideMigrateRoots = lib.hm.dag.entryBefore [ "writeBoundary" ] ''
             if [[ ! -v DRY_RUN ]]; then
-              ${lib.optionalString config.aoide.enable ''
-                run ${pkgs.coreutils}/bin/env AOIDE_ROOT=${config.aoide.root} ${aoide}/bin/aoide --help >/dev/null || true
-              ''}
-              run ${pkgs.coreutils}/bin/env AOIDE_ROOT=${config.aoide.root} STRILLIX_ROOT=${config.strillix.root} STRILLIX_MIGRATE=1 ${lib.optionalString config.aoide.enable "AOIDE_CORE_BIN=${aoide}/bin/aoide "}${strillixPkg}/bin/strillix --help >/dev/null || true
+              run ${pkgs.coreutils}/bin/env AOIDE_ROOT=${config.aoide.root} STRILLIX_ROOT=${config.strillix.root} ${strillixPkg}/bin/strillix migrate >/dev/null || true
             fi
           '';
         }
@@ -705,9 +694,9 @@ in
         # own bare case).
         (lib.mkIf (config.strillix.rice != null) {
           home.activation.aoideDeployQml = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
-            run mkdir -p "${config.aoide.root}/run"
+            run mkdir -p "${config.strillix.root}/run"
             run ${pkgs.rsync}/bin/rsync -a --delete --chmod=u+w \
-              "${quickshellConfig}/qml/" "${config.aoide.root}/run/qml/"
+              "${quickshellConfig}/qml/" "${config.strillix.root}/run/qml/"
           '';
 
           # ── Seed the live stage twin from the active rice ──────────────────────
@@ -794,7 +783,7 @@ in
           # needs no gate of its own.
           home.activation.aoideVerifyRice = lib.hm.dag.entryAfter [ "aoideRestartRice" ] ''
             run ${pkgs.coreutils}/bin/sleep 5
-            run env XDG_RUNTIME_DIR=/run/user/$(${pkgs.coreutils}/bin/id -u) \
+            run env XDG_RUNTIME_DIR=/run/user/$(${pkgs.coreutils}/bin/id -u) STRILLIX_ROOT=${config.strillix.root} \
               ${strillixPkg}/bin/strillix quickshell healthcheck || true
           '';
 
@@ -858,11 +847,9 @@ in
                     pkgs.libnotify
                   ]
                 }"
-                # Same "a configured aoide.root must win" reasoning as
-                # aoide-quickshell's own Environment above — health.rs reads the live QML
-                # tree under $AOIDE_ROOT/run/qml, and its restart backoff marker lives under
-                # $STRILLIX_ROOT.
-                "AOIDE_ROOT=${config.aoide.root}"
+                # A configured strillix.root must win: health.rs reads the live QML
+                # tree under $STRILLIX_ROOT/run/qml, and its restart backoff marker
+                # lives there too.
                 "STRILLIX_ROOT=${config.strillix.root}"
               ];
 

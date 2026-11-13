@@ -210,8 +210,8 @@ in
       restartRice = {
         inherit (home.home.activation.aoideRestartRice) after data;
       };
-      # The start-up move's activation: it runs `strillix --help` under
-      # STRILLIX_MIGRATE=1, the only place the rice-tree move is asked for.
+      # The move's activation: it runs `strillix migrate`, the only place
+      # Strillix's trees are moved out of core's root.
       migrateRoots = {
         inherit (home.home.activation.aoideMigrateRoots) data;
       };

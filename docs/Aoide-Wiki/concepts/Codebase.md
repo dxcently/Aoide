@@ -173,10 +173,11 @@ no behaviour, so an empty config evaluates. The surface:
 
 - `aoide.enable` (master switch), `aoide.user` (default `"khoa"`, owner of the
   `~/Aoide` clone).
-- `aoide.root` (default `~/.aoide`, exported as `AOIDE_ROOT`) — the runtime
-  root: `/stage/`, `/declared/`, `state/` (+ `state/stage/`),
-  `run/qml/`, the composed
-  host `rices/`, the audit log. `aoide.checkout` (default `~/Aoide`,
+- `aoide.root` (default `~/.aoide`, exported as `AOIDE_ROOT`) — core's
+  runtime root: `state/` (+ `state/stage/`) and the audit log.
+  `strillix.root` (default `~/.strillix`, exported as `STRILLIX_ROOT`) carries
+  `/stage/`, `/declared/`, the composed host `rices/`, `run/qml/`,
+  `run/elements/` and Strillix's own `state/`. `aoide.checkout` (default `~/Aoide`,
   exported as `AOIDE_FLAKE_ROOT`) — the dev git checkout: `soundcheck`'s scan
   root, `rice declare`'s commit-in target, the rices `nix eval` registry
   regen. `strillix.hostConfig` (default `<checkout>/hosts/<hostName>/default.nix`,

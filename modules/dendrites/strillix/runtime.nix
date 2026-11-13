@@ -83,8 +83,8 @@ let
   aoide = aoideInputs.aoide.packages.${pkgs.stdenv.hostPlatform.system}.default;
   strillixRices = pkgs.strillix-rices;
   strillixPkg = import ./package.nix { inherit pkgs aoide strillixRices; };
-  # `~/Aoide` onto `aoide.root` (default `~/.aoide`).
-  qmlDir = "${config.aoide.root}/run/qml";
+  # The deployed QML tree the shell lane runs: `$STRILLIX_ROOT/run/qml`.
+  qmlDir = "${config.strillix.root}/run/qml";
 in
 {
   # shellbridge is this capability's other half (strillix owns the bridge,
@@ -121,8 +121,7 @@ in
     # is what knows how to run a shell on the result.
     #
     # The shell lane spells `<dir>/shell.qml` for quickshell's entry point,
-    # so `$AOIDE_ROOT/run/qml` here is the same command line as the day the
-    # service lived in this file.
+    # so the shell runs `$STRILLIX_ROOT/run/qml/shell.qml`.
     strillix.quickshell.config = qmlDir;
 
     # ── The templates this host ships ───────────────────────────────────────

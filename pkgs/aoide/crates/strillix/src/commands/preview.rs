@@ -2013,7 +2013,7 @@ mod tests {
 
     #[test]
     fn parse_qs_list_picks_the_instance_whose_config_path_is_this_roots_canvas() {
-        let text = "Instance a:\n  Process ID: 11\n  Shell ID: x\n  Config path: /home/u/.aoide/run/qml/shell.qml\n\nInstance b:\n  Process ID: 22\n  Config path: /tmp/r/run/qml/WidgetPreview.qml\n";
+        let text = "Instance a:\n  Process ID: 11\n  Shell ID: x\n  Config path: /home/u/.strillix/run/qml/shell.qml\n\nInstance b:\n  Process ID: 22\n  Config path: /tmp/r/run/qml/WidgetPreview.qml\n";
         assert_eq!(
             parse_qs_list(text, Path::new("/tmp/r/run/qml/WidgetPreview.qml")),
             Some(22)

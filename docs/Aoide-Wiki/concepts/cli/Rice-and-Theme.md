@@ -16,20 +16,18 @@ native [[theme]] engine. Handlers live in
 `rice declare`'s handler and the `rice transpose` stub registration live in
 `pkgs/aoide/crates/strillix/src/commands/stubs.rs`.
 
-Path resolution (all in `pkgs/aoide/crates/storage/src/fs.rs`): one runtime
-root carries every runtime tree — `$AOIDE_ROOT` when set to an absolute
-path (relative/empty ignored), default `~/.aoide` — with `/stage/`,
-`rices/<name>/` (and `rices/<rice>/drafts/`),
-`/wallpapers/`, `state/`, and `run/qml/` all hanging off it. `~/Aoide` is
-purely the dev git checkout, reached through the separate `$AOIDE_FLAKE_ROOT`
-seam (absolute, default `~/Aoide`); the nix options `aoide.root`/
-`aoide.checkout` export the two envs. `$AOIDE_STAGE_DIR` (absolute) wins
-above `$AOIDE_ROOT` for the stage dir; `rice/` derives as the stage dir's
-parent, so the whole rice tree rides that one override, and `run/qml/`
-resolves one level further up (the stage dir's parent's parent —
-`$AOIDE_ROOT/run/qml/` on the default layout, relocated by an
-`$AOIDE_STAGE_DIR` override too). `$AOIDE_STATE_DIR` (absolute) likewise
-overrides `state/`. Both core binaries call `fs::migrate_root_once()` at
+Path resolution: two runtime roots, each taken only when set to an absolute
+path (relative/empty ignored). Core's, `$AOIDE_ROOT` (default `~/.aoide`,
+`pkgs/aoide/crates/storage/src/fs.rs`), carries `state/` and the conducting
+stage `state/stage/`; `$AOIDE_STATE_DIR` and `$AOIDE_STAGE_DIR` override those
+two. Strillix's, `$STRILLIX_ROOT` (default `~/.strillix`,
+`pkgs/aoide/crates/strillix-rice/src/paths.rs`), carries the rice stage
+`stage/`, `declared/`, `rices/<name>/` (and `rices/<rice>/drafts/`),
+`wallpapers/`, `run/qml/`, `run/elements/` and its own `state/`; no core
+override relocates any of them. `~/Aoide` is purely the dev git checkout,
+reached through the separate `$AOIDE_FLAKE_ROOT` seam (absolute, default
+`~/Aoide`); the nix options `aoide.root`/`aoide.checkout` export the two
+envs. Both core binaries call `fs::migrate_root_once()` at
 process start: on first run it moves a pre-existing
 `~/Aoide/{state,log}` tree into the current root, each piece
 gated on its own override being unset. All file

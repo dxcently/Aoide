@@ -128,7 +128,7 @@ ShellRoot {
         }
     }
     // The staging engine (CONTRACTS.md §5) — reads the manifest
-    // the strillix lane's build carries into $AOIDE_ROOT/run/qml/rices/, resolves
+    // the strillix lane's build carries into $STRILLIX_ROOT/run/qml/rices/, resolves
     // WidgetSlot's "does the active rice dress this slot" / "where's its QML".
     StagingEngine { id: stagingEngine }
 

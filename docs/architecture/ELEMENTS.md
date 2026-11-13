@@ -32,7 +32,7 @@ management seam"). This lane completes that seam.
    authoring tool), foreign-flake drop-in polish last (the venue).
    The design center is the EDIT/SAVE/DRAFT loop for element rices.
 2. **Runtime mirrors `run/qml`.** The elements lane renders the declared
-   rice's element configs into `$AOIDE_ROOT/run/elements/<element>/`;
+   rice's element configs into `$STRILLIX_ROOT/run/elements/<element>/`;
    units and exec-onces point THERE — never store symlinks in
    `~/.config`. `strx rice stage` overwrites the staged configs and
    RESTARTS the element; a rebuild re-seeds (stage-beats-declared
@@ -81,7 +81,7 @@ management seam"). This lane completes that seam.
 An element is a program with a config directory and a way to be
 restarted. That is the whole contract, and it is uniform:
 
-- **Config dir**: `$AOIDE_ROOT/run/elements/<element>/` — the ONLY
+- **Config dir**: `$STRILLIX_ROOT/run/elements/<element>/` — the ONLY
   place the running program reads config from. The unit or exec line
   the elements lane generates points there; nothing under `~/.config` is
   managed, symlinked, or fought over.
@@ -162,10 +162,10 @@ same commit that lands the parser):
 ## Runtime layout
 
 ```
-$AOIDE_ROOT/run/elements/            (sibling of run/qml — storage
-  waybar/                             fs.rs gains run_elements_dir(),
-    config                            resolving exactly as
-    style.css                         run_qml_dir() does)
+$STRILLIX_ROOT/run/elements/         (sibling of run/qml —
+  waybar/                             strillix-rice's paths.rs
+    config                            run_elements_dir(), resolving
+    style.css                         exactly as run_qml_dir() does)
 ```
 
 Two writers, one rank rule — the same stage-beats-declared convention

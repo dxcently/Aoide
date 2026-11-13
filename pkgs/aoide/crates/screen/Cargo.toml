@@ -21,6 +21,8 @@ aoide-storage = { workspace = true }
 # same-process function call, never a subprocess shell-out) so it inherits
 # that command's own hold/gate/audit behavior for free.
 aoide-conduct = { workspace = true }
+# `paths` hangs the captures and the saved pointer off the strillix root.
+strillix-rice = { workspace = true }
 libc = { workspace = true }
 # `screen::synth`'s pointer-synthesis backend (Phase A of the
 # pointer-emulation workstream) — see the workspace manifest's own comment on

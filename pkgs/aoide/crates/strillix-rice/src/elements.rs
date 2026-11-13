@@ -504,11 +504,11 @@ mod tests {
 
     #[test]
     fn substitute_run_token_replaces_every_occurrence() {
-        let run_dir = Path::new("/home/x/.aoide/run/elements/waybar");
+        let run_dir = Path::new("/home/x/.strillix/run/elements/waybar");
         let out = substitute_run_token("waybar -c {run}/config -s {run}/style.css", run_dir);
         assert_eq!(
             out,
-            "waybar -c /home/x/.aoide/run/elements/waybar/config -s /home/x/.aoide/run/elements/waybar/style.css"
+            "waybar -c /home/x/.strillix/run/elements/waybar/config -s /home/x/.strillix/run/elements/waybar/style.css"
         );
     }
 

@@ -27,9 +27,9 @@ It is one alternative of the `wallpaper` capability
 `habit.dendrites.wallpaper.provider = "skwd-wall"`; the provider file that
 answers installs the packages, runs one `skwd-walld` user service of its own
 (never the upstream NixOS module, which installs the whole suite and defines a
-second unit of the same name), and enforces the engine config keys Aoide owns
+second unit of the same name), and enforces the engine config keys Strillix owns
 at activation — the engine rewrites its `config.json` in place, so that file is
-seeded under `aoide.root` and is never a store symlink.
+seeded under `strillix.root` and is never a store symlink.
 
 **Aoide owns the colours; the engine's theming is off** (`theme.policy = "off"`,
 the whole-fan-out switch). Its library never indexes the user's Pictures folder

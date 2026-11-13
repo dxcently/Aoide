@@ -22,7 +22,7 @@ rices/<rice>/widgets/<slot>.qml
         │
         ├── nixos-rebuild ──> $out/qml/rices/<rice>/<slot>.qml + manifest.json
         │
-        └── strx rice stage <rice> ──> ~/Aoide/run/qml/rices/<rice>/<slot>.qml
+        └── strx rice stage <rice> ──> $STRILLIX_ROOT/run/qml/rices/<rice>/<slot>.qml
                                         (+ auto quickshell reload when a body changed)
         │
    StagingEngine.resolveRice(activeRice, slot)

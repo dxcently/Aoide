@@ -140,10 +140,13 @@ The note schema (§1) and the rice body (§5) are unchanged.
   each draft keeps the same names.
 - `mode.json`'s key for the active rice is `rice`.
 
-Old rice state moves into this layout on a rebuild (the activation's
-`aoideMigrateRoots`) or by `strx migrate`. Until it settles, `strillix`
-refuses every verb except `migrate`, help and version. The per-file rules
-and refusals are in CONTRACTS.md §4; the change record is in CHANGELOG.md.
+Strillix's trees found under aoide's root (`run/qml`, `run/elements`,
+`state/skwd-wall`, `state/captures`, `state/pointer-pos.json`) move into
+this layout on every switch (the activation's `aoideMigrateRoots`) or by
+`strx migrate`; the per-entry rules are in CONTRACTS.md §4. Nothing moves
+rice state from the older places (a `song` directory under `$AOIDE_ROOT`
+or `~/Aoide`, and `~/.local/state/lyra`); it stays where it is. The
+change record is in CHANGELOG.md.
 
 ## What this playbook does NOT cover
 

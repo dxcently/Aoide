@@ -2,8 +2,8 @@
 // size, on any viewport, against a fixture roster, with every action inert.
 //
 //   strillix preview [<widget>] …            builds the isolated root and launches this
-//   env -u QS_STAGE AOIDE_ROOT=<root> AOIDE_STATE_DIR=<root>/state \
-//     AOIDE_STAGE_DIR=<root>/state/stage qs -p <root>/run/qml/WidgetPreview.qml
+//   env -u QS_STAGE AOIDE_ROOT=<root> STRILLIX_ROOT=<root> \
+//     AOIDE_STATE_DIR=<root>/state qs -p <root>/run/qml/WidgetPreview.qml
 //
 // ── Why a canvas and not another fixed-size *Preview.qml ────────────────────
 // ConductorPreview/TerminalsPreview/DockPreview each pin ONE widget into ONE
@@ -30,13 +30,15 @@
 // (`pkgs/strillix-shell/icons/`), copied by `strillix preview` to `run/qml/icons/`
 // beside this file and tinted from the chrome — no network, no icon font.
 //
-// ── Isolation: one env var, no socket ──────────────────────────────────────
-// Every read a widget performs is already rooted at $AOIDE_ROOT — ThemeState
-// (stage/theme.json), conductor.qml (state/stage/ via its own stageDir),
-// terminals.qml (`stagePath`), SessionMenu (AOIDE_STATE_DIR), StagingEngine
-// (run/qml/rices/manifest.json) — so pointing AOIDE_ROOT at a fixture root
-// isolates every read with nothing else to configure. `QS_STAGE` must be
-// UNSET or it overrides conductor's stage dir back out of the root.
+// ── Isolation: env vars, no socket ─────────────────────────────────────────
+// Every read a widget performs is already rooted at $AOIDE_ROOT,
+// $STRILLIX_ROOT or $AOIDE_STATE_DIR — ThemeState (stage/theme.json) and
+// StagingEngine (run/qml/rices/manifest.json) under the strillix root,
+// conductor.qml (state/stage/ via its own stageDir) and terminals.qml
+// (`stagePath`) under core's, SessionMenu under $AOIDE_STATE_DIR — and
+// `strillix preview` points all three into its fixture root, which isolates
+// every read with nothing else to configure. `QS_STAGE` must be UNSET or it
+// overrides conductor's stage dir back out of the root.
 // Writes are isolated by construction: this file never instantiates
 // ShellBridge and opens no socket. Every action a widget fires lands in the
 // stub bridge below, which only appends to the on-screen log. Nothing here

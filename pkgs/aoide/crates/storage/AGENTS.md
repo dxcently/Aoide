@@ -303,10 +303,9 @@
   on it rather than read a tree they could not make private. A `state/` that
   is absent is not created there, and one whose parent is not a directory
   counts as absent, so the narrated failure stays the failure.
-- **The rice tree's move is `strillix-rice`'s, not core's.** `strillix_rice::migrate`
-  owns `migrate_rice_root`, `rice_status` and `rice_root_at_start`. The
-  invariants for the move, its refusals and its marker live in
-  `strillix-rice/AGENTS.md`. Core's `migrate_root_once` never moves a rice path.
+- **Strillix's moves are `strillix-rice`'s, not core's.** `strillix_rice::migrate`
+  owns them, and their invariants live in `strillix-rice/AGENTS.md`. Core's
+  `migrate_root_once` never moves a rice path.
 - **A checkout-relative source path is named ONCE, in `strillix_rice::paths` — `STRILLIX_SHELL_SRC`
   (`"pkgs/strillix-shell"`) is the pattern, not an exception.** The strillix shell's
   QML/icons/preview tree is read by `strillix`'s `commands::preview` (which

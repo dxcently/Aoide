@@ -17,7 +17,7 @@
 #     host", a read-only fact true exactly when this file is imported.
 #   - READ here: `strillix.quickshell.config : nullOr str` — the directory the
 #     shell runs — which the `strillix` lane sets to its deployed runtime root
-#     (`$AOIDE_ROOT/run/qml`) and a host may set to any config directory of its
+#     (`$STRILLIX_ROOT/run/qml`) and a host may set to any config directory of its
 #     own. strillix sets it, this lane reads it; neither names the other's option.
 #
 # The two allowed shapes of quickshell WITHOUT strillix:
@@ -27,11 +27,13 @@
 #   * bare — `config` stays null (the default): the package is installed and no
 #     service runs. No shell, no graphical-session anchor, nothing to fail.
 #
-# Reading discipline (house rule 5): the dress and the core scalars this lane
-# genuinely uses — `strillix.theme.wallpaper` (the shell's baked wallpaper env, so a
-# wallpapered rice survives a rebuild) and `aoide.root` (the runtime root the
-# QML reads its stage files from). Nothing else, and no `rice/` path at all:
-# what this lane starts is a directory, not a rice.
+# Reading discipline (house rule 5): the dress, the core scalar and the rice
+# runtime root this lane genuinely uses — `strillix.theme.wallpaper` (the
+# shell's baked wallpaper env, so a wallpapered rice survives a rebuild),
+# `aoide.root` (the root the QML reads core's stage files from) and
+# `strillix.root` (the one it reads the rice stage and the deployed QML tree
+# from) — and its own `strillix.quickshell.*`. Nothing else, and no `rice/`
+# path at all: what this lane starts is a directory, not a rice.
 {
   config,
   lib,

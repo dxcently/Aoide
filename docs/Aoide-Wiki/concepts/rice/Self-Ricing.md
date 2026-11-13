@@ -69,9 +69,8 @@ Staging is the sketch — a live compositor call, no rebuild; `habit.rice.declar
 
 Every runtime path on this page — `/stage/`, `run/qml/`, the composed
 `rices/<name>/` and its `drafts/` — hangs off ONE runtime root:
-`$AOIDE_ROOT` when set to an absolute path, else `~/.aoide` (on first run
-the core binaries move any pre-existing trees into it via
-`fs::migrate_root_once()`). The git checkout is a separate thing, reached
+`$STRILLIX_ROOT` when set to an absolute path, else `~/.strillix`. The git
+checkout is a separate thing, reached
 through `$AOIDE_FLAKE_ROOT` (default `~/Aoide`): it holds the COMMITTED
 rices at `rices/`, and `rice declare` is the seam that copies a
 composed rice from the runtime root into it, less its top-level `history/` and

@@ -4,14 +4,14 @@
 //!
 //! `$STRILLIX_ROOT` (default `<home>/.strillix`) carries the rice stage
 //! (`stage/`), the declared twin (`declared/`), the rice tree (`rices/`,
-//! `wallpapers/`) and the rice drafts. `$AOIDE_STAGE_DIR` is the conducting
-//! stage's override and never relocates any of them. The live QML and element
-//! trees (`run/`) stay under `$AOIDE_ROOT`.
+//! `wallpapers/`), the rice drafts, and the live QML and element trees
+//! (`run/`). `$AOIDE_STAGE_DIR` is the conducting stage's override and never
+//! relocates any of them.
 
-use aoide_storage::fs::{flake_root, root};
+use aoide_storage::fs::flake_root;
 
 /// The rice runtime root: `$STRILLIX_ROOT` (absolute-path-wins, the same
-/// discipline as [`root`]), default `<home>/.strillix`. Rice state (the
+/// discipline as [`aoide_storage::fs::root`]), default `<home>/.strillix`. Rice state (the
 /// stage, the declared twin, the machine's rices, the wallpaper library)
 /// hangs off it; aoide's own state never does. Every rice path, [`stage_dir`]
 /// included, derives from it.
@@ -38,19 +38,18 @@ pub fn audit_log() -> std::path::PathBuf {
     strillix_root().join("log")
 }
 
-/// The live-deployed QML tree the desktop shell reads: `$AOIDE_ROOT/run/qml/`
-/// (default `~/.aoide/run/qml/`), a sibling of `state/`. Never under the rice
-/// stage.
+/// The live-deployed QML tree the desktop shell reads: `$STRILLIX_ROOT/run/qml/`
+/// (default `~/.strillix/run/qml/`), beside the rice stage and never under it.
 pub fn run_qml_dir() -> std::path::PathBuf {
-    root().join("run").join("qml")
+    strillix_root().join("run").join("qml")
 }
 
 /// The live-deployed element config tree non-QML rice targets (waybar,
-/// dunst, ...) read from: `$AOIDE_ROOT/run/elements/` (default
-/// `~/.aoide/run/elements/`), a sibling of [`run_qml_dir`] (ELEMENTS.md,
+/// dunst, ...) read from: `$STRILLIX_ROOT/run/elements/` (default
+/// `~/.strillix/run/elements/`), a sibling of [`run_qml_dir`] (ELEMENTS.md,
 /// "Runtime layout").
 pub fn run_elements_dir() -> std::path::PathBuf {
-    root().join("run").join("elements")
+    strillix_root().join("run").join("elements")
 }
 
 /// The host's own config file — the NixOS module holding this machine's
@@ -133,7 +132,7 @@ fn resolve_rice_templates_dir(
 /// Two tiers, tried in order, absolute-path-wins discipline matching every
 /// other override in this file:
 ///   1. `$STRILLIX_TEMPLATES` — trusted unconditionally once it resolves
-///      to an absolute path, no existence check (same as [`root`]/
+///      to an absolute path, no existence check (same as [`aoide_storage::fs::root`]/
 ///      [`flake_root`]). A store-path boundary sibling resolution cannot
 ///      cross, so the nix side sets it: the installed strillix defaults it
 ///      to the shipped rices (`modules/dendrites/strillix/package.nix`,
@@ -338,7 +337,7 @@ mod tests {
     }
 
     #[test]
-    fn run_trees_hang_off_aoide_root_and_never_the_rice_stage() {
+    fn run_trees_hang_off_the_strillix_root_and_never_the_rice_stage() {
         let _guard = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let aoide = std::path::PathBuf::from(scratch("strillix-paths-run-aoide"));
         let strillix = std::path::PathBuf::from(scratch("strillix-paths-run-strillix"));
@@ -346,8 +345,8 @@ mod tests {
         std::env::set_var("AOIDE_ROOT", &aoide);
         std::env::set_var("STRILLIX_ROOT", &strillix);
         std::env::remove_var("AOIDE_STAGE_DIR");
-        assert_eq!(run_qml_dir(), aoide.join("run").join("qml"));
-        assert_eq!(run_elements_dir(), aoide.join("run").join("elements"));
+        assert_eq!(run_qml_dir(), strillix.join("run").join("qml"));
+        assert_eq!(run_elements_dir(), strillix.join("run").join("elements"));
         assert_eq!(stage_dir(), strillix.join("stage"));
     }
 
@@ -457,7 +456,7 @@ mod tests {
         let home = std::env::temp_dir().join(format!("aoide-strillix-default-home-{}", std::process::id()));
         std::env::set_var("HOME", &home);
 
-        assert_eq!(root(), home.join(".aoide"));
+        assert_eq!(aoide_storage::fs::root(), home.join(".aoide"));
         assert_eq!(strillix_root(), home.join(".strillix"));
         assert_eq!(strillix_root(), home.join(".strillix"));
     }

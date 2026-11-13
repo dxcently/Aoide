@@ -1403,10 +1403,12 @@ re-tightened.
 The boundary is against other users. A process running as the same user reads
 and writes all of `state/` whatever its mode, and nothing here stops it.
 
-**The runtime root (L-C2, strillix-carrier lane, task #107).** Every runtime
-tree below — `/stage/`, `state/` (and `state/stage/`), `run/qml/`,
-the composed `rices/` — hangs off ONE root: `$AOIDE_ROOT` when set to an
-**absolute** path, else `<home>/.aoide` derived from `$AOIDE_USER`/`$HOME`.
+**The runtime root (L-C2, strillix-carrier lane, task #107).** Every core
+runtime tree below — `state/` (and `state/stage/`) — hangs off ONE root:
+`$AOIDE_ROOT` when set to an **absolute** path, else `<home>/.aoide` derived
+from `$AOIDE_USER`/`$HOME`. The rice runtime (the rice stage, the declared
+twin, the composed `rices/`, `run/qml/` and `run/elements/`) hangs off
+`$STRILLIX_ROOT` instead (default `~/.strillix`).
 Nix-free — core code carries this default with no NixOS assumption.
 `~/Aoide` is no longer a runtime root on any host; it is purely the dev git
 checkout, reached through the separate `$AOIDE_FLAKE_ROOT` seam (default
@@ -1502,13 +1504,10 @@ the split.
 `~/Aoide/{state,log}` trees wholesale into the new root's equivalents — each
 piece gated independently on its OWN override (`$AOIDE_STATE_DIR`/
 `$AOIDE_AUDIT_LOG`) being unset, so a host that already relocated one tree
-never has a sibling moved out from under it. Its rice half (the pre-L-C2
-`~/Aoide/song/stage` and the rice tree) is the rice move above, not this one.
+never has a sibling moved out from under it. It never moves a rice path.
 Idempotent, and deliberately NOT wired into any path getter — the two core
 binaries (`aoide`, `aoided`) call it explicitly, once, at process start
-(`fs::migrate_root_once`; the rice half, `strillix_rice::migrate::migrate_rice_root`,
-runs in `strillix` when asked, and with an aoide binary installed it refuses while
-core's legacy `state/` is still in `~/Aoide`; see that function's own doc for why
+(`fs::migrate_root_once`; see that function's own doc for why
 a path getter is the wrong place to hang a process-wide side effect, the
 kind `with_stage_lock`'s pervasive fan-out makes unsafe there).
 
@@ -2353,37 +2352,16 @@ The rice tree lives under `$STRILLIX_ROOT/rices/` (`$STRILLIX_ROOT` defaults to
 `~/.strillix`); a rice's own `wallpaper/` picture folder and `history/` entry
 store sit beside its `theme.json`.
 
-**The rice-tree move and its marker.** The old `$AOIDE_ROOT/song/` tree moves
-into `$STRILLIX_ROOT` in one no-clobber pass: `stage/` (its `mode.json` `song`
-and `stagingSong` keys become `rice` and `stagingRice`), `declared/` (its
-`songbook/` becomes `rices/`), `covers/` to `wallpapers/`, `songbook/` to
-`rices/`, `songbook-aside/` to `rices-aside/` (old names inside it untouched),
-and every `takes/` to `history/`. A `covers` that is a link, or absent, while
-`covers.backup` is a real directory, with or without other rice state, is
-repaired first: any link is set aside, the backup takes the name `covers` and
-moves as the library, and the link is dropped. A failed repair puts the link
-back, leaves the backup where it was, and keeps `song/` (narrated, and retried
-by the next run). A `covers` directory moves as before, whatever sits beside it.
-The state files take the new names too: `song` keys become `rice`, a history
-entry's `take`, `livery` and `cover` become `entry`, `theme` and `wallpaper`,
-and each path a file holds that the move relocated is rewritten to where its
-file now sits. A rice's own files (`widgets/`, `design/`, `rice.nix`) are never
-rewritten. A move that leaves `$AOIDE_ROOT/song` empty replaces it with a
-regular FILE of that name, whose text names the strillix root. The file is the
-marker: an old binary that opens `song/stage` fails with ENOTDIR and recreates
-nothing, and a new binary reads the marker as already migrated. A leftover keeps
-`song/` a directory and is narrated. When `song/` and `$STRILLIX_ROOT` both hold
-rice state, nothing moves and the move is refused. Only the old tree's own
-folders (`stage`, `declared`, `covers`, `songbook`, `songbook-aside`) count as
-rice state; a stray file beside them neither blocks nor moves.
-
-The move runs only when asked: the strillix binary runs it under `STRILLIX_MIGRATE=1`
-(the home activation sets it on every switch) and `strx migrate` runs it by
-hand. `strx migrate --check` reports the state (`settled`, `due`, `held by
-both roots` or `held across homes`) and moves nothing. Until the state is
-`settled`, `strillix` refuses every verb except `migrate`, help and version,
-so nothing is written into the strillix root beside the old tree. Refusals
-exit nonzero. The core `aoide` and `aoided` binaries never run it.
+**Strillix's trees leave core's root.** `strx migrate` moves `run/qml`,
+`run/elements`, `state/skwd-wall`, `state/captures` and `state/pointer-pos.json`
+from `$AOIDE_ROOT` to the same places under `$STRILLIX_ROOT`, merging into a
+tree the strillix root already holds: an entry it lacks moves, one with the same
+bytes is deleted from the old root, and one with other bytes stays where it is,
+is named, and makes the verb exit nonzero. It deletes the `$AOIDE_ROOT/song`
+marker file the rice tree's earlier move left; a `song` directory stays where it
+is. The home activation runs it on every switch, `strx migrate --check` lists
+the old paths a run would move and moves nothing, and no other verb moves
+anything. The core `aoide` and `aoided` binaries never run it.
 
 No metadata file: the draft name is the directory name, the base rice is
 the directory it's nested under, and saved-at is `theme.json`'s mtime.
@@ -8109,9 +8087,9 @@ completely untouched, never partially overwritten; every other element in
 the same call still renders. `_`-prefixed element directories are skipped
 (the same shelving convention `_widgets/` gets everywhere else).
 
-**`run/elements/`:** `$AOIDE_ROOT/run/elements/<element>/`
-(`aoide_storage::fs::run_elements_dir`) — a sibling of `run/qml`, resolving
-off the exact same runtime root and the same `$AOIDE_STAGE_DIR` override.
+**`run/elements/`:** `$STRILLIX_ROOT/run/elements/<element>/`
+(`strillix_rice::paths::run_elements_dir`) — a sibling of `run/qml`, resolving
+off the same strillix root; `$AOIDE_STAGE_DIR` never relocates it.
 The ONLY place a running element reads its config from; nothing under
 `~/.config` is ever managed or symlinked. `element seed <rice>` (strillix-only,
 `crates/strillix`) is the shell-reachable bridge that renders one rice's whole

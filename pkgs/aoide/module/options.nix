@@ -20,7 +20,7 @@ in
       defaultText = literalExpression ''"/home/''${config.aoide.user}/.aoide"'';
       description = ''
         The AOIDE RUNTIME root: `state/` (conducting state + account/usage
-        state), `run/` (the live-deployed QML and element trees), `log` and the
+        state), `log` and the
         sessions all hang off this one directory. Rice state does not: it lives
         under the strillix runtime root. Exported as `AOIDE_ROOT` on every unit
         that runs an `aoide` or `aoided` binary, and into `aoide.user`'s own

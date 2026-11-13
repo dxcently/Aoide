@@ -5,16 +5,17 @@
 // Unlike the *Preview.qml files (which load a real widget body to eyeball on
 // screen), this loads nothing but a real `StagingEngine` and drives its
 // public functions (`has`/`source`/`resolveRice`) against whatever
-// rices/manifest.json sits under `$HOME/Aoide/run/qml/`. Run it against a
+// rices/manifest.json sits under `$STRILLIX_ROOT/run/qml/` (default
+// `$HOME/.strillix/run/qml/`). Run it against a
 // SCRATCH `$HOME` pointed at a real BUILT `aoide-quickshell-config`
 // derivation's manifest.json (never a hand-written fixture — the standing
 // lesson this harness exists to honour) with an offscreen QPA platform:
 //
-//   QT_QPA_PLATFORM=offscreen HOME=<scratch> \
+//   env -u STRILLIX_ROOT QT_QPA_PLATFORM=offscreen HOME=<scratch> \
 //     qs -p pkgs/strillix-shell/qml/StagingEngineHarness.qml
 //
 // Prints one PASS/FAIL line per assertion plus a final HARNESS RESULT line,
-// then exits. Never touches the live `$AOIDE_ROOT/run` tree or the live shell
+// then exits. Never touches the live `$STRILLIX_ROOT/run` tree or the live shell
 // instance — a distinct `-p` config path is a distinct quickshell instance,
 // same posture AOIDE-DEV.md's own `qs -p shell.qml` QML-load check already
 // takes.

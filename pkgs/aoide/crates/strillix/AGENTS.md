@@ -394,19 +394,12 @@
   A new thing `Resolver` reads belongs in `inputs`. `--run` is CLI-only,
   because over another door it would hold the call open forever.
 
-- **The rice tree moves only when asked, and `aoideMigrateRoots` is the
-  activation that asks.** The strillix binary runs
-  `strillix_rice::migrate::migrate_rice_root` from `rice_root_at_start` only under `STRILLIX_MIGRATE=1` or through
-  `strx migrate`; a plain run moves nothing. The move refuses, moving nothing,
-  while an aoide binary is installed (`aoide_protocol::bin::core_present`) and
-  core's legacy `~/Aoide/state` is still due to move (`legacy_state_pending`).
-  `aoideMigrateRoots` sets the flag
-  on `strillix --help` and runs before `writeBoundary`, so the move precedes
-  every seed. The nix side never writes under `$AOIDE_ROOT/song`: every seed
-  reads `$STRILLIX_ROOT` (`aoided.nix` and `shellbridge.nix` tmpfiles name
-  `strillix.root/stage` only). A file named `$AOIDE_ROOT/song` is the moved
-  marker (storage's `migrate_rice_tree`): never add a nix or Rust path that
-  creates `song/...` under `$AOIDE_ROOT`.
+- **Strillix's trees move only through `strx migrate`, and `aoideMigrateRoots`
+  is the activation that runs it.** No start-up hook moves anything: any other
+  verb leaves `$AOIDE_ROOT` as it found it. `aoideMigrateRoots` runs before
+  `writeBoundary`, so the move precedes the QML deploy and every seed. Never add
+  a nix or Rust path that writes Strillix's state under `$AOIDE_ROOT`: the run
+  trees and Strillix's `state/` trees live under `$STRILLIX_ROOT`.
 
 - **The RICE menu's verbs hold no rice rule, and the planner is the one place
   a mode changes the plan.** `ricedraft` is `RiceDraftAction::from_wire` (the

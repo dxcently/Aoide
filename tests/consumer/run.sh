@@ -21,8 +21,7 @@
 #      units) is there. `aoide-rices` performs Aoide's own `sonata` through the
 #      `ricesRoot` export, and its strillix lane is handed that same directory.
 #      `strillix-only` is the desktop with aoide off: it evaluates, defines no
-#      aoided unit, and neither its bridge nor its migration call carries
-#      AOIDE_CORE_BIN.
+#      aoided unit, and its bridge carries no AOIDE_CORE_BIN.
 set -uo pipefail
 cd "$(dirname "$0")" || exit 1
 root=$(cd ../.. && pwd)
@@ -221,12 +220,6 @@ expr="
       consumerBridgeCoreBin = builtins.length (
         builtins.filter (e: builtins.match \"AOIDE_CORE_BIN=.*\" e != null) (envOf cfg.systemd.user.services \"shellbridge\")
       );
-      migrateCoreBin = builtins.length (
-        flake.inputs.nixpkgs.lib.splitString \"AOIDE_CORE_BIN=\" onlyHome.home.activation.aoideMigrateRoots.data
-      ) - 1;
-      consumerMigrateCoreBin = builtins.length (
-        flake.inputs.nixpkgs.lib.splitString \"AOIDE_CORE_BIN=\" home.home.activation.aoideMigrateRoots.data
-      ) - 1;
     };
   }
 "
@@ -250,7 +243,7 @@ check "the available rice's theme is inert"  "#14161c" "$(o .bg)"
 check "the strillix lane is on"                   "true" "$(o .strillix)"
 check "the stylix lane is on"                 "true" "$(o .stylix)"
 check "the shell lane is on"                  "true" "$(o .quickshell)"
-check "the shell runs the deployed config"    "/home/fixture/.aoide/run/qml" "$(o .config)"
+check "the shell runs the deployed config"    "/home/fixture/.strillix/run/qml" "$(o .config)"
 check "the rice's seed activation is there"   "1" \
   "$(o '[.activation[] | select(test("^aoideSeedRices$"))] | length')"
 check "the shell's unit is there"             "1" \
@@ -407,8 +400,8 @@ check "greeter: login screen is the desktop picture"      "true" \
 
 # ── 4. Strillix with Aoide off ──────────────────────────────────────────────
 # The desktop aggregation alone, with no core under it: the strillix lane
-# evaluates, no aoided unit is defined, and the bridge and the migration call
-# carry no AOIDE_CORE_BIN.
+# evaluates, no aoided unit is defined, and the bridge carries no
+# AOIDE_CORE_BIN.
 check "strillix-only: aoide is off"                  "false" "$(o .strillixOnly.aoide)"
 check "strillix-only: the strillix lane is on"       "true" "$(o .strillixOnly.strillix)"
 check "strillix-only: no aoided unit is defined"     "false" "$(o .strillixOnly.aoided)"
@@ -419,8 +412,6 @@ check "strillix-only: the bridge's unit is there"    "1" "$(o .strillixOnly.brid
 check "strillix-only: the bridge carries no AOIDE_CORE_BIN" "0" "$(o .strillixOnly.bridgeCoreBin)"
 check "strillix-only: the host PATH carries one strillix" "1" "$(o .strillixOnlyPath)"
 check "control: the consumer's bridge carries AOIDE_CORE_BIN" "1" "$(o .strillixOnly.consumerBridgeCoreBin)"
-check "strillix-only: the migration call carries no AOIDE_CORE_BIN" "0" "$(o .strillixOnly.migrateCoreBin)"
-check "control: the consumer's migration call carries AOIDE_CORE_BIN" "1" "$(o .strillixOnly.consumerMigrateCoreBin)"
 printf '%-52s %s\n' "strillix-only toplevel drvPath" "$(o .strillixOnly.drv)"
 
 printf '%s\n' "--------------------------------------------------------------------"

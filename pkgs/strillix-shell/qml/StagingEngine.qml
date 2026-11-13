@@ -45,7 +45,7 @@ QtObject {
     id: root
 
     readonly property string manifestPath:
-        (Quickshell.env("AOIDE_ROOT") || (Quickshell.env("HOME") + "/.aoide")) + "/run/qml/rices/manifest.json"
+        (Quickshell.env("STRILLIX_ROOT") || (Quickshell.env("HOME") + "/.strillix")) + "/run/qml/rices/manifest.json"
 
     // The baseline-fallback floor (CONTRACTS.md §5): when the ACTIVE rice
     // doesn't dress a slot, resolution falls back to this rice before
@@ -78,7 +78,7 @@ QtObject {
     }
 
     readonly property string registryPath:
-        (Quickshell.env("AOIDE_ROOT") || (Quickshell.env("HOME") + "/.aoide")) + "/run/qml/rices/registry.json"
+        (Quickshell.env("STRILLIX_ROOT") || (Quickshell.env("HOME") + "/.strillix")) + "/run/qml/rices/registry.json"
 
     // { "<rice>": { "<slot>": {…declaration…} }, … } — empty until the first
     // successful parse.

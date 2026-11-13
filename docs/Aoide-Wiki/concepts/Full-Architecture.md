@@ -177,7 +177,7 @@ The baked side is carried by three paint dendrites, all real:
 - **quickshell** — declares nine surfaces with `owner = "quickshell"` (bar,
   notifications, launcher, osd, lockscreen, greeter, wallpaper, agentWidgets,
   sessionGraph); QML rsyncs from the store into
-  `$AOIDE_ROOT/run/qml/` (default `~/.aoide/run/qml/`) via home-manager
+  `$STRILLIX_ROOT/run/qml/` (default `~/.strillix/run/qml/`) via home-manager
   activation (source stays
   `pkgs/strillix-shell/qml/`; no `qml/` at the repo root);
   `ThemeState.qml` watches the stage file for the live fan-out. Eight of
@@ -477,12 +477,13 @@ for the layer anatomy, [[Codebase]] for file-level detail):
 ```
 
 The map above is the dev git checkout (`~/Aoide`, reached via
-`$AOIDE_FLAKE_ROOT`). Every runtime tree hangs off one root instead —
-`$AOIDE_ROOT` when set to an absolute path, else `~/.aoide` (the `aoide.root`
-option): `/stage/`, `/declared/`, `state/` (+ `state/stage/`),
-`run/qml/`, the composed
-host `rices/`, and the audit `log/`, created at runtime by
-systemd-tmpfiles, the quickshell lane's home-manager activation, and the
+`$AOIDE_FLAKE_ROOT`). Every runtime tree hangs off one of two roots instead.
+Core's is `$AOIDE_ROOT` when set to an absolute path, else `~/.aoide` (the
+`aoide.root` option): `state/` (+ `state/stage/`) and the audit `log/`.
+Strillix's is `$STRILLIX_ROOT`, else `~/.strillix` (the `strillix.root`
+option): `/stage/`, `/declared/`, the composed host `rices/`, `run/qml/`,
+`run/elements/` and its own `state/`. Both are created at runtime by
+systemd-tmpfiles, the strillix lane's home-manager activation, and the
 binaries themselves; on first run the core binaries migrate pre-existing
 `~/Aoide/{state,log}` into the root, each piece gated on its own
 override being unset. `rices/**` in the checkout is

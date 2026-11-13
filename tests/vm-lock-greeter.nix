@@ -179,7 +179,7 @@ pkgs.testers.runNixOSTest {
 
     # The shell's own word on its lock: the compositor has confirmed it.
     def lock_secure(m):
-        return as_khoa(m, "quickshell -p $HOME/.aoide/run/qml/shell.qml ipc call lock secure").strip()
+        return as_khoa(m, "quickshell -p $HOME/.strillix/run/qml/shell.qml ipc call lock secure").strip()
 
     # The compositor's own word, whoever holds the lock.
     def hypr_locked(m):
@@ -215,14 +215,14 @@ pkgs.testers.runNixOSTest {
 
     def wait_shell(m, secure="false"):
         m.wait_until_succeeds(
-            khoa_cmd(m, "quickshell -p $HOME/.aoide/run/qml/shell.qml ipc call lock secure") + f" | grep -qx {secure}",
+            khoa_cmd(m, "quickshell -p $HOME/.strillix/run/qml/shell.qml ipc call lock secure") + f" | grep -qx {secure}",
             timeout=90,
         )
 
     # Swap the aubade lock face for a fixture, restart the shell, lock.
     def lock_with_face(m, fixture):
         m.succeed(
-            "f=/home/khoa/.aoide/run/qml/rices/aubade/lockscreen.qml; "
+            "f=/home/khoa/.strillix/run/qml/rices/aubade/lockscreen.qml; "
             f"chmod u+w $(dirname $f); rm -f $f; cp {fixture} $f; chown khoa $f"
         )
         as_khoa(m, "systemctl --user restart aoide-quickshell.service")
@@ -388,7 +388,7 @@ pkgs.testers.runNixOSTest {
     with subtest("face: with no aoide-lock PAM service the lock is hyprlock's, never a lockout"):
         face.succeed("mv /etc/pam.d/aoide-lock /etc/pam.d/aoide-lock.off")
         # The shell refuses outright and locks nothing.
-        said = as_khoa(face, "quickshell -p $HOME/.aoide/run/qml/shell.qml ipc call lock lock").strip()
+        said = as_khoa(face, "quickshell -p $HOME/.strillix/run/qml/shell.qml ipc call lock lock").strip()
         assert said == "false", f"the shell answered {said!r} with no PAM service"
         assert not hypr_locked(face), "the shell locked with no way to unlock"
         o = strillix_lock(face)

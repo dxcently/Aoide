@@ -71,10 +71,8 @@ rec {
   # Strillix stands without Aoide. A host that selects the renderer and not
   # the core evaluates to a selection with the renderer on, `aoided` off, and the
   # renderer's own file importing as a module. The renderer gates on its own fact;
-  # `aoide.enable` puts AOIDE_CORE_BIN on the bridge, on the activation's migration
-  # call and in the focus wrapper, and makes the activation run `aoide --help` before
-  # its migration call. The core scalars (AOIDE_USER, AOIDE_ROOT, AOIDE_FLAKE_ROOT)
-  # are set either way.
+  # `aoide.enable` puts AOIDE_CORE_BIN on the bridge and in the focus wrapper. The
+  # core scalars (AOIDE_USER, AOIDE_ROOT, AOIDE_FLAKE_ROOT) are set either way.
   strillixWithoutAoide =
     let
       selection = selectionOf { dendrites.strillix.enable = true; };

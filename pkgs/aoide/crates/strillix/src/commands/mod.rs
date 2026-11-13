@@ -146,7 +146,7 @@ pub fn all() -> Registry {
     clipboard::register(&mut r); // clipboard delete/clear — remove cliphist history entries and their cached thumbnails
     lock::register(&mut r); // lock + lock.hint — the one lock entry (the shell's LockHost for a rice with a face, else hyprlock) and logind's LockedHint
     focus::register(&mut r); // focus session — the compositor jump AOIDE_FOCUS_CMD's wrapper runs
-    migrate::register(&mut r); // migrate + --check — the rice state's move, run by hand (the start-up hook runs it only under STRILLIX_MIGRATE=1)
+    migrate::register(&mut r); // migrate + --check — Strillix's trees out of core's root, run by the home activation on every switch
     component::register(&mut r); // component — a cross-component call: the slot's provider answers the verb (strillix shell, or its declared argv)
     window::register(&mut r); // window list + window watch — the compositor's windows, read off the request and event sockets
 

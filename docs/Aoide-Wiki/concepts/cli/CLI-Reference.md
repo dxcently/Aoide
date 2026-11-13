@@ -42,12 +42,13 @@ start at [[aoide-cli]] and the group pages linked below.
   absent — the connection PARKS until a separate `secrets approve`/
   `dismiss` call or a timeout, rather than carrying `gated: true`
   ([[Secrets-Broker]]).
-- **Runtime root:** the `state/`, `/stage/`, and `run/qml/` paths below
-  hang off one root — `$AOIDE_ROOT` when set to an absolute path, default
-  `<home>/.aoide` (`aoide_storage::fs::root`). Per-tree absolute overrides:
-  `state/` via `$AOIDE_STATE_DIR`; the two stage trees share
-  `$AOIDE_STAGE_DIR` and otherwise fall back separately — `state/stage/`
-  (conducting state) and `/stage/` (rice staging). `~/Aoide` is the dev
+- **Runtime roots:** core's `state/` and `state/stage/` (conducting state)
+  hang off `$AOIDE_ROOT` when set to an absolute path, default
+  `<home>/.aoide` (`aoide_storage::fs::root`), overridden per tree by
+  `$AOIDE_STATE_DIR` and `$AOIDE_STAGE_DIR`. The rice stage `/stage/`,
+  `run/qml/`, `run/elements/` and Strillix's own `state/` hang off
+  `$STRILLIX_ROOT` (default `<home>/.strillix`), which no core override
+  relocates. `~/Aoide` is the dev
   git checkout, reached via `$AOIDE_FLAKE_ROOT`, not a runtime path.
   Stage/state writes are atomic temp-then-rename.
 - **Two registries, one convention:** `aoide schema --json` and
@@ -82,7 +83,8 @@ start at [[aoide-cli]] and the group pages linked below.
   `$XDG_RUNTIME_DIR/aoide/session-<id>.sock`.
 - [[Screen-Commands|Screen-Commands]] — computer use: `screen info/
   shot/ocr/diff/send` and the nine `screen point` commands. Captures and sidecars
-  in `state/captures/`; pointer position in `state/pointer-pos.json`.
+  in `$STRILLIX_ROOT/state/captures/`; pointer position in
+  `$STRILLIX_ROOT/state/pointer-pos.json`.
 - [[Doors-and-Nodes|Doors-and-Nodes]] — the other doors:
   `mcp serve`, `daemon`, `events tail`, `shellbridge`, `adapter melete`,
   `conductor` (signature + pointer to [[Conductor-TUI]]), `a2a serve`,

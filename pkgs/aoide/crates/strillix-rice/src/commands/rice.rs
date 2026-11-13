@@ -2451,22 +2451,15 @@ mod tests {
 
     // ── rice stage: widget-body runtime sync (the widgets.rs module) ─────────
     //
-    // `run_qml_dir()` resolves ONE LEVEL ABOVE `strillix_root()`
-    // (crate::paths::run_qml_dir): `strillix_root()` is `stage_dir()`'s
-    // parent, and `run_qml_dir()` is `strillix_root()`'s parent joined with
-    // `run/qml`. Every OTHER test in this file uses a 2-level layout
-    // (`<root>/stage`, `<root>/rices/<name>`), under which `run/qml`
-    // would resolve OUTSIDE the test's own tmp root (a sibling of `<root>`
-    // itself) — fine for tests that never touch it, but wrong for these.
-    // `widget_sync_tmp` adds one more level (`<root>/aoide/…`) so
-    // `run_qml_dir()` lands under the SAME per-test root as `rice/stage`/
-    // `rices`, keeping these tests isolated from each other and
-    // from any stray `/tmp/run` a prior run might have left behind.
+    // `run_qml_dir()` is `strillix_root()/run/qml`, and `pin_stage` points
+    // `STRILLIX_ROOT` at the stage's parent, so the tree these tests sync
+    // into is `rice/run/qml`, beside `rice/stage` under the same per-test
+    // root: the tests stay isolated from each other and from the live tree.
 
-    /// Builds the 3-level tmp layout the widget-sync tests need. Returns
-    /// `(root, stage, run_qml)`; callers still
-    /// `std::env::set_var("AOIDE_STAGE_DIR", &stage)` themselves (matching
-    /// every other test here) and own `remove_dir_all(&root)` at the end.
+    /// Builds the tmp layout the widget-sync tests need. Returns
+    /// `(root, stage, run_qml)`; callers pin the stage themselves
+    /// (`aoide_test_support::pin_stage(&stage)`) and own
+    /// `remove_dir_all(&root)` at the end.
     fn widget_sync_tmp(tag: &str) -> (PathBuf, PathBuf, PathBuf) {
         let root = unique_tmp(tag);
         let aoide_root = root.join("aoide");

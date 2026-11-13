@@ -68,7 +68,7 @@ strillix/             the SURFACE. Builds the QML tree from `pkgs/strillix-shell
 ```
 
 They meet on one fact. `strillix` sets `strillix.quickshell.config` to its deployed
-runtime root (`$AOIDE_ROOT/run/qml`); the shell lane reads that fact, owns
+runtime root (`$STRILLIX_ROOT/run/qml`); the shell lane reads that fact, owns
 `strillix.quickshell.enable` and starts the service. `strillix` brings the shell with
 it by importing the shell lane's two plain halves by path, and names nothing
 else of it; the shell lane never names `strillix`, and keeps running the day a

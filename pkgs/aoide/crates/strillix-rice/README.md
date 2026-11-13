@@ -105,7 +105,7 @@ a config file). Paint-side — ships in `strillix`, not core.
   `surfaces_fall_short` against the declaration published to
   `run/qml/rices/surfaces.json` by the strillix lane's build
   (`CONTRACTS.md §5`, `strillix.layout.surfaces`), read through
-  `aoide_storage::fs::run_qml_dir` and folded by `asserted_expectation`: an
+  `paths::run_qml_dir` and folded by `asserted_expectation`: an
   absent, unreadable, or EMPTY declaration (the lane publishes the file on
   every host, so every non-declaring rice ships `{"surfaces": {}}`) means no
   expectation is declared and `shell_has_zero_layers` — the older total
@@ -140,9 +140,9 @@ a config file). Paint-side — ships in `strillix`, not core.
   list` reads the same two seams: `staged_diff` (the differing dress paths
   behind `staged_differs`) for each row's `pending` and `nixChanged`, and
   `declared_in_file` (the one live line, by the same lexer) for `nextRebuild`.
-- `paths` — the rice runtime's roots: `strillix_root()` (`$STRILLIX_ROOT`, default `<home>/.strillix`), the rice stage (`stage_dir()`), the declared twin, the rice tree (`rices_root`, `rice_dir`), the drafts, the link `rice_conf_link()` (the one link outside `$AOIDE_ROOT`) and the checkout-relative `STRILLIX_SHELL_SRC`. Every rice path derives from here; core never names one.
+- `paths` — the rice runtime's roots: `strillix_root()` (`$STRILLIX_ROOT`, default `<home>/.strillix`), the rice stage (`stage_dir()`), the declared twin, the rice tree (`rices_root`, `rice_dir`), the drafts, the live QML and element trees (`run_qml_dir`, `run_elements_dir`), the link `rice_conf_link()` (the one link outside `$AOIDE_ROOT`) and the checkout-relative `STRILLIX_SHELL_SRC`. Every rice path derives from here; core never names one.
 - `lock` — `with_stage_lock`, the rice stage's own lock on `stage/.stage.lock`. It is the rice domain's counterpart to core's conducting lock; the two never guard the same file.
-- `migrate` — the rice state's moves and status: `migrate_rice_root` (explicit; with an aoide binary installed it refuses, moving nothing, while core's legacy `~/Aoide/state` is still due; its last step rewrites the names and paths the moved state files store), `rice_status` (`Settled`, `Due`, `Both`, `Refused`), `rice_root_at_start` (the start-up hook: one notice, or the move under `STRILLIX_MIGRATE=1`) and `migrate_strillix_state` (the lyra link tree, moved in the same explicit run as the rice tree).
+- `migrate` — Strillix's one-shot move out of core's root: `migrate` (moves each of `TREES` from `$AOIDE_ROOT` into `$STRILLIX_ROOT`, merging and never clobbering, deletes the old `song` marker, and returns the old paths that stay) and `pending` (the read-only list `strx migrate --check` prints).
 - `mode` — `stage/mode.json`: which of staging, declarative or draft mode the rice system is in. Read and written only here.
 - `history` — the rice's entry store: `rices/<rice>/history/` when staged directly, `rices/<rice>/drafts/<draft>/history/` when routed into a draft. Backs `rice back` and `rice history`.
 - `commands` — this crate's CLI commands: `rice *`, `theme *`, `wallpaper set`,

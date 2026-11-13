@@ -41,10 +41,10 @@ Boundaries:
 - **Image decoding** for `screen diff` uses the `image` crate (`image::open`
   → RGBA8), not an external binary.
 
-Path resolution (`pkgs/aoide/crates/storage/src/fs.rs`): the state dir is
-`$AOIDE_STATE_DIR` when set to an **absolute** path, else `$AOIDE_ROOT/state/`
-(default `~/.aoide/state/`). Captures land in `state/captures/`, the saved
-pointer position in `state/pointer-pos.json`. The session store `screen shot
+Path resolution (`pkgs/aoide/crates/screen/src/paths.rs`): captures land in
+`$STRILLIX_ROOT/state/captures/` (default `~/.strillix/state/captures/`), the
+saved pointer position in `$STRILLIX_ROOT/state/pointer-pos.json`. The session
+store `screen shot
 --session`
 reads is `<stage>/sessions.json` where the stage dir is the conducting stage
 dir — `$AOIDE_STAGE_DIR` (absolute) else `$AOIDE_ROOT/state/stage/`. Every JSON
@@ -98,7 +98,7 @@ strx screen shot [--output <name> | --region "X,Y WxH" | --pick | --window <addr
   the field, never the capture.
 - **Writes:** the capture image via `grim` — auto-named
   `state/captures/screenshot-<unix_ts>-<pid>-<seq>.<ext>`
-  (`$AOIDE_ROOT/state/captures/` at runtime) unless `--out` is given — plus a
+  (`$STRILLIX_ROOT/state/captures/` at runtime) unless `--out` is given — plus a
   JSON sidecar at
   `<dest>.json` (same stem), written atomically (temp-then-rename). Sidecar
   shape per CONTRACTS.md §8: `schemaVersion: "0"`, `capturedAt`, `origin`,
@@ -233,7 +233,7 @@ strx screen point save [--json]
 ```
 
 - **Reads:** `hyprctl cursorpos`.
-- **Writes:** `state/pointer-pos.json` (`$AOIDE_ROOT/state/pointer-pos.json`
+- **Writes:** `state/pointer-pos.json` (`$STRILLIX_ROOT/state/pointer-pos.json`
   at runtime), body `{"x": …, "y": …}`, atomic temp-then-rename. One flat
   file, no history — each save overwrites.
 - **Output:** ok → `"saved <x>,<y> to <path>"`; data `{x, y, path}`;

@@ -2,8 +2,8 @@
 # the `wallpaper` capability.
 #
 # It installs the engine's three packages, runs one `skwd-walld` user unit of its
-# own, and keeps the engine's own config to what Aoide owns: theming off, its
-# library inside `aoide.root`, one post-processing hook. WHO PAINTS is the host's
+# own, and keeps the engine's own config to what Strillix owns: theming off, its
+# library inside `strillix.root`, one post-processing hook. WHO PAINTS is the host's
 # choice, so no rice is consulted — the seam is the fact
 # `strillix.wallpaper.provider = "skwd-wall"` (CONTRACTS.md §0), which this file SETS
 # `mkDefault` and guards on.
@@ -35,13 +35,13 @@ let
   # steamworks helper.
   skwd = aoideInputs.skwd-wall.packages.${pkgs.stdenv.hostPlatform.system};
 
-  # Everything the engine owns, under the runtime root: its config
+  # Everything the engine owns, under the strillix root: its config
   # directory, its cache and the two folders its library scans. Pointing
   # `paths.*` here is what keeps it from indexing `~/Pictures/Wallpapers`
   # (the upstream default), and pointing `SKWD_WALL_V2_CONFIG` here is what
   # makes the app's in-place rewrite of `config.json` land in a host-owned
   # file instead of fighting a store symlink.
-  stateDir = "${config.aoide.root}/state/skwd-wall";
+  stateDir = "${config.strillix.root}/state/skwd-wall";
   configDir = "${stateDir}/config";
   cacheDir = "${stateDir}/cache";
   staticDir = "${stateDir}/library/static";

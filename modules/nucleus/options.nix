@@ -452,7 +452,9 @@ in
       description = ''
         The RICE runtime root (`$STRILLIX_ROOT`): the stage (`stage/`, the
         live twin the paint reads), `declared/` (the declared twin), `rices/`
-        (the machine's own rices) and `wallpapers/`. Exported as
+        (the machine's own rices), `wallpapers/`, `run/` (the live-deployed
+        QML and element trees) and `state/` (the wallpaper engine's library,
+        screen captures and the saved pointer). Exported as
         `STRILLIX_ROOT` on every unit that runs a `strillix` binary, and into
         `aoide.user`'s login shells beside `AOIDE_ROOT`. Code default, matching
         this option's default exactly: `~/.strillix`.

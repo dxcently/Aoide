@@ -79,7 +79,7 @@ no fact.
 | `aoide.enable`                 | bool                         | core switch: set `true` by each nucleus member, not written by hand |
 | `strillix.rice`                   | nullOr str (default `null`)  | the rice this host performs, derived from `habit.rice.declared` by the rice hook; names a `rices/<name>/`. Null — no rice named — means a paint lane deploys nothing: no QML tree, no seeded stage, no rice restart |
 | `aoide.user`                   | str (default `"khoa"`)       | owner of the `~/Aoide` clone |
-| `aoide.root`                   | str (default `"~/.aoide"`)   | the RUNTIME root — `/stage/`, `/declared/`, `state/`, `run/qml/`, composed `rices/`; exported as `AOIDE_ROOT` (to `aoide.user`'s login shells). Core code default, nix-independent (L-C2, task #107) |
+| `aoide.root`                   | str (default `"~/.aoide"`)   | core's RUNTIME root — `state/` (+ `state/stage/`) and the audit `log`; the rice runtime is `strillix.root`'s; exported as `AOIDE_ROOT` (to `aoide.user`'s login shells). Core code default, nix-independent (L-C2, task #107) |
 | `aoide.checkout`               | str (default `"~/Aoide"`)    | the dev git checkout — `rice declare`'s commit-in target, `soundcheck`'s scan root, the rices `nix eval` registry regen; exported as `AOIDE_FLAKE_ROOT` (to `aoide.user`'s login shells) |
 | `strillix.hostConfig`             | str (default `"<checkout>/hosts/<hostName>/default.nix"`) | the host's own config file, whose one `habit.rice.declared` line `strx rice declare <rice> --host` rewrites; exported as `STRILLIX_HOST_CONFIG` (to `aoide.user`'s login shells) |
 | `strillix.theme.palette.{bg,fg,accent,urgent}` | hex        | v0 palette (base16) |

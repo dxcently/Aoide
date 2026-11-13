@@ -33,8 +33,7 @@ fn command(home: &Path, args: &[&str]) -> Command {
         .env("AOIDE_ROOT", home.join("aoide"))
         .env("STRILLIX_ROOT", home.join("strillix"))
         .env("XDG_RUNTIME_DIR", home.join("run"))
-        .env_remove("HYPRLAND_INSTANCE_SIGNATURE")
-        .env_remove("STRILLIX_MIGRATE");
+        .env_remove("HYPRLAND_INSTANCE_SIGNATURE");
     command
 }
 

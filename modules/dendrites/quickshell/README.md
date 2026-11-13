@@ -20,7 +20,7 @@ modules/dendrites/quickshell/
 - **`strillix.quickshell.config`** (read): the directory the shell runs.
   `null` is the bare shape — package installed, no service, no session anchor.
   A host sets it to its own config directory, or `strillix` sets it to
-  `$AOIDE_ROOT/run/qml`.
+  `$STRILLIX_ROOT/run/qml`.
 - **`strillix.quickshell.enable`** (set): the fact that a shell surface exists.
 - **`aoide.sessionTarget`** (set when a config is named):
   `graphical-session.target`, so `aoided` comes up with the session.

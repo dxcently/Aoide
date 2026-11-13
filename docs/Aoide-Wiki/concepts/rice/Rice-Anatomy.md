@@ -26,8 +26,9 @@ checkout's `rices/preferences.md` when absent). The checkout's
 runtime half hangs off `$STRILLIX_ROOT` (absolute-path-wins, default `~/.strillix`):
 the stage the desktop reads (`$STRILLIX_ROOT/stage/`), the composed host
 rices `strx rice compose` writes (`$STRILLIX_ROOT/rices/<name>/`),
-saved drafts (`$STRILLIX_ROOT/rices/<rice>/drafts/`). Core's `run/qml/`,
-`state/` and `log` hang off `$AOIDE_ROOT` (default `~/.aoide`). `strx rice declare <name>` is the seam between the two
+saved drafts (`$STRILLIX_ROOT/rices/<rice>/drafts/`), and the live `run/qml/`
+and `run/elements/` trees. Core's `state/` and `log` hang off `$AOIDE_ROOT`
+(default `~/.aoide`). `strx rice declare <name>` is the seam between the two
 roots: it copies a composed rice from the runtime rices into the checkout's
 `rices/<name>/`, less its top-level `history/` and `drafts/` (the
 machine's undo history and scratch, which stay behind) — no `git add`, no rebuild; the user gates those.
@@ -164,13 +165,17 @@ $AOIDE_FLAKE_ROOT/rices/  (dev git checkout — committed score, default ~/Aoide
 ├── wallpapers/              shared wallpaper library — yuki-sonata.png
 └── rice.md              repo-local map of this tree
 
-$AOIDE_ROOT/             (runtime root, default ~/.aoide — created on demand)
-├── rice/
-│   ├── stage/           live preview state — theme.json · wallpaper.json · mode.json · grimoire.json
-│   ├── declared/        the declared twin, the venue's slots and geometry, the declared terminal opacity — theme.json · venue.json · terminal-opacity.conf, written by the activation seed; rices/<rice>.json, each built-in rice's refresh record, written by `strx rice refresh`
-│   └── rices/        composed host rices (rice compose) · <rice>/drafts/ (rice draft save)
-├── state/               conducting state — state/stage/ holds sessions/hooks/projects/graph
+$STRILLIX_ROOT/          (rice runtime root, default ~/.strillix — created on demand)
+├── stage/               live preview state — theme.json · wallpaper.json · mode.json · grimoire.json
+├── declared/            the declared twin, the venue's slots and geometry, the declared terminal opacity — theme.json · venue.json · terminal-opacity.conf, written by the activation seed; rices/<rice>.json, each built-in rice's refresh record, written by `strx rice refresh`
+├── rices/               composed host rices (rice compose) · <rice>/drafts/ (rice draft save)
 ├── run/qml/             live-deployed QML tree the desktop shell reads
+├── run/elements/        element configs `strx element seed` renders
+├── state/               the wallpaper engine's library, screen captures, the saved pointer
+└── log                  Strillix's audit log
+
+$AOIDE_ROOT/             (core runtime root, default ~/.aoide)
+├── state/               conducting state — state/stage/ holds sessions/hooks/projects/graph
 └── log                  the audit log
 ```
 

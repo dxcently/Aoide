@@ -37,8 +37,9 @@ the checkout's `rice/`), runtime state under `$STRILLIX_ROOT/` (default
 | venue | host — its own specifics and enabled instruments | `hosts/<host>/` |
 | replay | perform an existing rice at a new venue | `habit.rice.declared = "<name>";` in host config |
 
-The runtime tree off `$AOIDE_ROOT` (`/stage/`, the composed `rices/`
-with its per-rice `drafts/`, `state/`, `run/qml/`, `log`) holds ephemera only.
+The runtime trees off `$STRILLIX_ROOT` (`/stage/`, the composed `rices/`
+with its per-rice `drafts/`, `run/qml/`, `state/`, `log`) and `$AOIDE_ROOT`
+(`state/`, `log`) hold ephemera only.
 Everything in the checkout's `rice/` is versioned score.
 
 ## Full-Orchestration Coverage

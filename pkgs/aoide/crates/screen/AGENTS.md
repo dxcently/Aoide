@@ -17,7 +17,7 @@
   `ocr`/`synth`/`diff`/`text` are plain module hygiene, not an abstraction
   to generalize prematurely.
 
-- **The screen state paths are this crate's.** `captures_dir` and `pointer_state_file` resolve here, under `state_dir()`, and nowhere in `aoide-storage`. A new durable screen artifact gets its path from `paths`, never from a literal path in a command.
+- **The screen state paths are this crate's.** `captures_dir` and `pointer_state_file` resolve here, under `strillix_rice::paths::strillix_root()`'s `state/`, and nowhere in `aoide-storage`. A new durable screen artifact gets its path from `paths`, never from a literal path in a command.
 
 ## Extension points
 

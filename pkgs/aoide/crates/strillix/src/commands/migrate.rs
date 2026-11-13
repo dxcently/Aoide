@@ -1,71 +1,44 @@
-//! `strx migrate` — the rice state's move, run by hand. The strillix binary
-//! moves it on its own only under `STRILLIX_MIGRATE=1` (the home activation
-//! sets it); this verb is the same move for an operator, and `--check` is the
-//! read-only report of what a run would do. Storage's `rice_status` and
-//! `migrate_rice_root` own the logic; this file only narrates it.
+//! `strx migrate` — Strillix's trees out of core's root into the strillix root.
+//! The home activation runs it on every switch; `--check` lists what a run
+//! would move and moves nothing. `strillix_rice::migrate` owns the move; this
+//! file only narrates it.
 
 use crate::dispatch::Invocation;
 use crate::output::Outcome;
 use crate::registry::{cmd, flag, Registry};
 use aoide_protocol::Door;
-use strillix_rice::migrate::{migrate_rice_root, rice_status, RiceStatus};
-use serde_json::{json, Value};
+use serde_json::json;
+use strillix_rice::migrate::{migrate, pending};
 
 pub fn register(r: &mut Registry) {
     r.insert(cmd!(
         path: ["migrate"],
-        summary: "Move the old rice state into the strillix root: the rice tree that sat under $AOIDE_ROOT/song, the ~/.local/state/strillix link tree, and the file renames inside it. Rice state held by both roots, or across homes, is refused: nothing moves and the verb exits nonzero. --check reports the state and moves nothing.",
+        summary: "Move Strillix's trees out of core's root ($AOIDE_ROOT) into the strillix root: run/qml, run/elements, state/skwd-wall, state/captures and state/pointer-pos.json, merged into a tree the strillix root already holds. The old song marker file is deleted. An entry the strillix root holds with other bytes stays where it is, and the verb exits nonzero. --check lists the old paths a run would move and moves nothing.",
         args: [],
-        flags: [flag!("check", "bool", "Report the rice state and what a run would move; move nothing.")],
+        flags: [flag!("check", "bool", "List the old paths a run would move; move nothing.")],
         gated: false,
         implemented: true,
         handler: handle_migrate,
         examples: ["migrate --check", "migrate --json"],
-        brief: "Move the old rice state into the strillix root.",
+        brief: "Move Strillix's trees out of core's root into the strillix root.",
         doors: &[Door::Cli],
     ));
 }
 
 fn handle_migrate(inv: &Invocation) -> Outcome {
-    let check = inv.flag_present("check");
-    let before = rice_status();
-    if !check && before != RiceStatus::Settled {
-        if let Err(e) = migrate_rice_root() {
-            return Outcome::error("migrate", format!("the rice state did not move: {e}"));
-        }
+    let names = |paths: Vec<std::path::PathBuf>| paths.iter().map(|p| p.display().to_string()).collect::<Vec<_>>();
+    if inv.flag_present("check") {
+        let due = names(pending());
+        let message = match due.len() {
+            0 => "nothing is left to move (--check: nothing moved)".to_string(),
+            n => format!("{n} old path(s) are due (--check: nothing moved)"),
+        };
+        return Outcome::ok("migrate", message).with_data(json!({ "check": true, "due": due }));
     }
-    let after = rice_status();
-    let data = json!({
-        "check": check,
-        "before": status(&before),
-        "after": status(&after),
-    });
-    if check {
-        return Outcome::ok("migrate", format!("rice state is {} (--check: nothing moved)", label(&before)))
-            .with_data(data);
+    let stayed = names(migrate());
+    let data = json!({ "check": false, "stayed": stayed });
+    if stayed.is_empty() {
+        return Outcome::ok("migrate", "Strillix's trees are in the strillix root").with_data(data);
     }
-    let message = format!("rice state was {}, is now {}", label(&before), label(&after));
-    if after != RiceStatus::Settled {
-        return Outcome::error("migrate", message).with_data(data);
-    }
-    Outcome::ok("migrate", message).with_data(data)
-}
-
-fn label(s: &RiceStatus) -> &'static str {
-    match s {
-        RiceStatus::Settled => "settled",
-        RiceStatus::Due(_) => "due",
-        RiceStatus::Both(_) => "held by both roots",
-        RiceStatus::Refused(_) => "held across homes",
-    }
-}
-
-fn status(s: &RiceStatus) -> Value {
-    let paths = |p: &[std::path::PathBuf]| p.iter().map(|x| x.display().to_string()).collect::<Vec<_>>();
-    match s {
-        RiceStatus::Settled => json!({ "state": "settled", "paths": [] }),
-        RiceStatus::Due(p) => json!({ "state": "due", "paths": paths(p) }),
-        RiceStatus::Both(p) => json!({ "state": "both", "paths": paths(p) }),
-        RiceStatus::Refused(p) => json!({ "state": "refused", "paths": paths(p) }),
-    }
+    Outcome::error("migrate", format!("{} old path(s) stay where they are", stayed.len())).with_data(data)
 }

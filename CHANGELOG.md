@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Strillix's trees leave core's root
+
+- `strx migrate` moves `run/qml`, `run/elements`, `state/skwd-wall`, `state/captures` and `state/pointer-pos.json` from `$AOIDE_ROOT` into `$STRILLIX_ROOT`, merged into a tree the strillix root already holds, and deletes the `$AOIDE_ROOT/song` marker file. The home activation runs it on every switch. An entry the strillix root holds with other bytes stays where it is, is named, and makes the verb exit nonzero; `strx migrate --check` lists what a run would move.
+- Everything that reads or writes those trees follows them: the shell unit's config path, `strx reload`, `strx lock`, `strx component`, the staged rice's sync into the live QML tree, `strx quickshell healthcheck`, `strx element seed`, the screen commands and skwd-wall's library. The healthcheck unit no longer carries `AOIDE_ROOT`, and the post-switch health check (`aoideVerifyRice`) follows a configured `strillix.root`.
+- The older one-shot moves are gone, with `STRILLIX_MIGRATE` and the start-up check: the rice tree out of `$AOIDE_ROOT/song` and `~/Aoide/song/stage`, `~/.local/state/lyra`, and the renames inside the rice tree (`livery.json`, `cover`, `covers`, `songbook`, `takes` and the stored `song` keys). `strillix` no longer refuses to write while that old state waits; a host that never ran those moves keeps its old files where they are.
+- skwd-wall's recorded pick names a path in its old library: on a host that uses skwd-wall, pick the wallpaper again once after the switch.
+
 ### Strillix's rice engine names itself
 
 - The warnings of the rice runtime's one-shot move (`strx migrate`, or a start with `STRILLIX_MIGRATE=1`) that began `aoide: ` now begin `strillix: `.
