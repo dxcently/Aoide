@@ -97,7 +97,7 @@ name strillix pkgs/aoide/crates/screen/src/paths.rs 7
 name strillix pkgs/aoide/crates/screen/src/point.rs 13
 name strillix pkgs/aoide/crates/screen/src/send.rs 22
 name strillix pkgs/aoide/crates/screen/src/text.rs 17
-name strillix pkgs/aoide/crates/strillix-rice/Cargo.toml 4
+name strillix pkgs/aoide/crates/strillix-rice/Cargo.toml 3
 name strillix pkgs/aoide/crates/strillix-rice/src/checkout_gate.rs 6
 name strillix pkgs/aoide/crates/strillix-rice/src/commands/draft.rs 86
 name strillix pkgs/aoide/crates/strillix-rice/src/commands/elements.rs 16
@@ -117,7 +117,7 @@ name strillix pkgs/aoide/crates/strillix-rice/src/host_declare.rs 8
 name strillix pkgs/aoide/crates/strillix-rice/src/ipc.rs 4
 name strillix pkgs/aoide/crates/strillix-rice/src/live.rs 10
 name strillix pkgs/aoide/crates/strillix-rice/src/lock.rs 7
-name strillix pkgs/aoide/crates/strillix-rice/src/migrate.rs 156
+name strillix pkgs/aoide/crates/strillix-rice/src/migrate.rs 144
 name strillix pkgs/aoide/crates/strillix-rice/src/mode.rs 21
 name strillix pkgs/aoide/crates/strillix-rice/src/paths.rs 28
 name strillix pkgs/aoide/crates/strillix-rice/src/theme/emit/hyprlock.rs 16

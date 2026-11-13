@@ -8,7 +8,7 @@ source: "[[references/AOIDE-HANDOFF]]"
 
 # Stylix
 
-Base16-driven whole-system theming; Aoide's "baked fan-out" engine. `rice.nix` feeds a single scheme into Stylix — `base16Scheme`, fonts, cursor, and wallpaper — and Stylix propagates it to every nix-manageable target: terminal, GTK/Qt, icons, cursor, editors, browser, and boot.
+Base16-driven whole-system theming; Strillix's "baked fan-out" engine. `rice.nix` feeds a single scheme into Stylix — `base16Scheme`, fonts, cursor, and wallpaper — and Stylix propagates it to every nix-manageable target: terminal, GTK/Qt, icons, cursor, editors, browser, and boot.
 
 Stylix is the recording side of the two-fan-out model. `stage/theme.json` is the rehearsal side. Both derive from the same theme source, so preview and adopted state cannot diverge.
 

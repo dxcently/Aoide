@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Strillix's rice engine names itself
+
+- The warnings of the rice runtime's one-shot move (`strx migrate`, or a start with `STRILLIX_MIGRATE=1`) that began `aoide: ` now begin `strillix: `.
+- strillix-rice's Cargo description, README and crate docs call it Strillix's ricing/design engine, and the wiki's Self-Ricing and Stylix pages name Strillix where they named Aoide.
+
 ### kitty runs a plain shell
 
 - kitty runs the user's shell itself, no longer under `aoide conduct`: the `aoide-shell` wrapper and its `AOIDE_NO_CONDUCT` escape hatch are gone. A terminal kitty opens is in Strillix's terminal list, and core keeps no session for it. An agent started there is tracked by its hooks and answers approvals, but `aoide send` refuses it: it has no control socket to type into. A session Aoide opens (`aoide spawn`, `aoide conduct`) is conductable as before.

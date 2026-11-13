@@ -242,7 +242,7 @@ fn migrate_stored_file(
     let parsed: Option<serde_json::Value> = serde_json::from_str(&raw).ok();
     let Some(mut value) = parsed.filter(serde_json::Value::is_object) else {
         eprintln!(
-            "aoide: {} is not a JSON object; its names are left as they are",
+            "strillix: {} is not a JSON object; its names are left as they are",
             path.display()
         );
         return;
@@ -264,14 +264,14 @@ fn migrate_stored_file(
     }
     let Ok(text) = serde_json::to_string_pretty(&value) else {
         eprintln!(
-            "aoide: could not serialize {}; its names are left as they are",
+            "strillix: could not serialize {}; its names are left as they are",
             path.display()
         );
         return;
     };
     if let Err(e) = atomic_write(path, &text) {
         eprintln!(
-            "aoide: could not rewrite the stored names in {} ({e})",
+            "strillix: could not rewrite the stored names in {} ({e})",
             path.display()
         );
     }
@@ -485,7 +485,7 @@ fn restore_backed_up_covers(old_song: &std::path::Path) -> bool {
     if link_present {
         if let Err(e) = std::fs::rename(&covers, &aside) {
             eprintln!(
-                "aoide: could not set the link {} aside ({e}); the images stay in {}",
+                "strillix: could not set the link {} aside ({e}); the images stay in {}",
                 covers.display(),
                 backup.display()
             );
@@ -494,7 +494,7 @@ fn restore_backed_up_covers(old_song: &std::path::Path) -> bool {
     }
     if let Err(e) = std::fs::rename(&backup, &covers) {
         eprintln!(
-            "aoide: could not rename {} to {} ({e}); the images stay in {}",
+            "strillix: could not rename {} to {} ({e}); the images stay in {}",
             backup.display(),
             covers.display(),
             backup.display()
@@ -502,7 +502,7 @@ fn restore_backed_up_covers(old_song: &std::path::Path) -> bool {
         if link_present {
             if let Err(back) = std::fs::rename(&aside, &covers) {
                 eprintln!(
-                    "aoide: could not put the link back at {} ({back}); it is at {}",
+                    "strillix: could not put the link back at {} ({back}); it is at {}",
                     covers.display(),
                     aside.display()
                 );
@@ -512,7 +512,7 @@ fn restore_backed_up_covers(old_song: &std::path::Path) -> bool {
     }
     if link_present {
         if let Err(e) = std::fs::remove_file(&aside) {
-            eprintln!("aoide: could not remove the set-aside link {} ({e})", aside.display());
+            eprintln!("strillix: could not remove the set-aside link {} ({e})", aside.display());
         }
     }
     true
@@ -575,7 +575,7 @@ fn held_by(dir: &std::path::Path) -> String {
 fn mark_rice_tree_moved(old_song: &std::path::Path, target: &std::path::Path) -> std::io::Result<()> {
     if !held_by(old_song).is_empty() {
         eprintln!(
-            "aoide: {} keeps {} that did not move; no marker is written",
+            "strillix: {} keeps {} that did not move; no marker is written",
             old_song.display(),
             held_by(old_song)
         );
@@ -586,7 +586,7 @@ fn mark_rice_tree_moved(old_song: &std::path::Path, target: &std::path::Path) ->
         target.display()
     );
     if let Err(e) = std::fs::remove_dir(old_song).and_then(|()| atomic_write(old_song, &marker)) {
-        eprintln!("aoide: could not replace {} with the moved-marker ({e})", old_song.display());
+        eprintln!("strillix: could not replace {} with the moved-marker ({e})", old_song.display());
     }
     Ok(())
 }
@@ -638,7 +638,7 @@ fn migrate_mode_song_key(stage: &std::path::Path) {
     };
     let Ok(mut value) = serde_json::from_str::<serde_json::Value>(&raw) else {
         eprintln!(
-            "aoide: {} is not JSON; its `song` and `stagingSong` keys are left as they are",
+            "strillix: {} is not JSON; its `song` and `stagingSong` keys are left as they are",
             path.display()
         );
         return;
@@ -650,14 +650,14 @@ fn migrate_mode_song_key(stage: &std::path::Path) {
     }
     let Ok(text) = serde_json::to_string_pretty(&value) else {
         eprintln!(
-            "aoide: could not serialize {}; its old keys stay",
+            "strillix: could not serialize {}; its old keys stay",
             path.display()
         );
         return;
     };
     if let Err(e) = atomic_write(&path, &text) {
         eprintln!(
-            "aoide: could not rewrite {} ({e}); its old keys stay",
+            "strillix: could not rewrite {} ({e}); its old keys stay",
             path.display()
         );
     }

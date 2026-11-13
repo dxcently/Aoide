@@ -1,6 +1,6 @@
 # strillix-rice
 
-Aoide's ricing/design engine: the native theme engine (schema validation,
+Strillix's ricing/design engine: the native theme engine (schema validation,
 `{group.key}` deref + component fallback, stage/hyprctl/osc/file/kitty/hyprlock
 emitters), `rice compose`'s scaffolding/rendering, wallpaper-art derivation, the
 Hyprland geometry keyword live-apply, the staged terminal colours, and the

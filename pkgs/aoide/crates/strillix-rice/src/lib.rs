@@ -1,4 +1,4 @@
-//! strillix-rice — Aoide's ricing/design engine.
+//! strillix-rice — Strillix's ricing/design engine.
 //!
 //! `theme` is the native design-token engine: schema validation, `{group.key}`
 //! deref + component fallback, and the stage/hyprctl/osc/file/kitty/hyprlock emitters.
