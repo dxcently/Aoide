@@ -87,7 +87,7 @@ in
               # Qt6's qtbase ships only jpeg/png/gif/ico imageformats plugins (plus
               # qtsvg); webp/tiff/etc. live in a SEPARATE qtimageformats plugin the
               # quickshell wrapper does not carry. A rice wallpaper may be any of those
-              # formats (sonata's is .webp), and AoideWallpaper renders it through a
+              # formats (sonata's is .webp), and StrillixWallpaper renders it through a
               # Qt Image — with no webp plugin the Image can't decode and the layer
               # falls back to the solid palette colour (the "wallpaper didn't run
               # after rebuild" symptom). The wrapper sets QT_PLUGIN_PATH via
@@ -117,11 +117,11 @@ in
                 "STRILLIX_ROOT=${config.strillix.root}"
               ]
               # Export the rice's baked wallpaper (immutable store path) so
-              # AoideWallpaper always has the right wallpaper on boot/rebuild — the live
+              # StrillixWallpaper always has the right wallpaper on boot/rebuild — the live
               # stage/wallpaper.json overrides it, but nothing re-seeded it from the
               # rice before, so a rebuild lost the background. Null → no env.
               ++ lib.optionals (config.strillix.theme.wallpaper != null) [
-                "AOIDE_WALLPAPER=${config.strillix.theme.wallpaper}"
+                "STRILLIX_WALLPAPER=${config.strillix.theme.wallpaper}"
               ];
               Restart = "always";
               RestartSec = 3;

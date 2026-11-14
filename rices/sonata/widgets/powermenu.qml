@@ -37,7 +37,7 @@
 // hue — structural verdigris here, the title rules, stays ≤0.35).
 //
 // ── The glass (the Grimoire recipe, verbatim) ──────────────────────────────
-// Full-screen transparent Overlay layer surface, namespace "aoide-powermenu".
+// Full-screen transparent Overlay layer surface, namespace "strillix-powermenu".
 // The compositor lane (modules/dendrites/compositor/hyprland/default.nix) gives that
 // namespace `layerrule blur` + `ignore_alpha 0.05` + hyprglass Liquid Glass,
 // so the desktop behind is visible, blurred, and gently refracted through the
@@ -49,7 +49,7 @@
 // to AoideBar (the loaded rice widget itself, not a declared-by-name
 // instance — SurfaceSlot's whole point); the bar's treble clef
 // (𝄞, "the powermenu key") calls `.toggle()` on that handle directly. A
-// Hyprland global shortcut (`aoide:powermenu`) is the second trigger — the
+// Hyprland global shortcut (`strillix:powermenu`) is the second trigger — the
 // launcher's in-process inbound idiom. A click on a stele sends `{ cmd: "power", action: "…" }` through
 // ShellBridge's socket — the strillix shellbridge process
 // (pkgs/aoide/crates/strillix/src/bridge/power.rs) parses it and spawns the
@@ -134,18 +134,18 @@ PanelWindow {
     color: "transparent"
     visible: root.shown || root.rise > 0.01
     WlrLayershell.layer: WlrLayer.Overlay
-    WlrLayershell.namespace: "aoide-powermenu"
+    WlrLayershell.namespace: "strillix-powermenu"
     WlrLayershell.keyboardFocus: root.shown ? WlrKeyboardFocus.Exclusive
                                             : WlrKeyboardFocus.None
 
-    // ── Second trigger: Hyprland global shortcut (aoide:powermenu) ─────────
+    // ── Second trigger: Hyprland global shortcut (strillix:powermenu) ─────────
     // The launcher's in-process inbound idiom (see AoideLauncher.qml's
     // rationale — no new socket, no aoided command). The bar's clef stays the
     // primary key; this gives the compositor a bindable hook and makes the
     // LIVE instance summonable programmatically
-    // (`hyprctl dispatch global aoide:powermenu`).
+    // (`hyprctl dispatch global strillix:powermenu`).
     GlobalShortcut {
-        appid: "aoide"
+        appid: "strillix"
         name: "powermenu"
         description: "Summon the Exodos powermenu"
         onPressed: root.toggle()

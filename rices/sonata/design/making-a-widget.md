@@ -537,8 +537,8 @@ magick /tmp/full.png -crop 800x600+1100+400 +repage /tmp/widget.png
 Then read the crop back and judge it yourself before showing anyone. For a
 popout you must trigger yourself (a hover popout, a summoned overlay), drive
 it and screenshot in one shell line, or force the state in the QML
-temporarily; `hyprctl dispatch global aoide:powermenu` and
-`aoide:launcher` summon those two directly.
+temporarily; `hyprctl dispatch global strillix:powermenu` and
+`strillix:launcher` summon those two directly.
 
 A parse error means the slot silently renders NOTHING — `WidgetSlot` logs
 `[strillix/widgetslot] failed to load slot <name> - <error>` and moves on. An

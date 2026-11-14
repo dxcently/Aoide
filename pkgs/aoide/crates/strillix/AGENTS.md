@@ -365,7 +365,7 @@
   message or `data`. Its tests run a builtins-only `cliphist` stand-in on a
   `PATH` holding nothing else, under a scratch `HOME`/`XDG_CACHE_HOME`, so the
   real binary and the real history are unreachable from them; keep it so.
-  The thumbnail path is `AoideClipboard.qml`'s `previewDir`, mirrored, not
+  The thumbnail path is `StrillixClipboard.qml`'s `previewDir`, mirrored, not
   shared: change both together.
 - **`strx lock` never reports a lock it did not get, and its tests never
   reach a real locker.** The shell counts only after `ipc call lock secure`
@@ -503,7 +503,7 @@
 - `docs/architecture/PACKAGE-LAYOUT.md`/`CONTRACTS.md §3` when the
   core/strillix split itself shifts.
 - `docs/Aoide-Wiki/concepts/cli/Clipboard-Commands.md` and
-  `AoideClipboard.qml`'s header when a `strx clipboard` output shape,
+  `StrillixClipboard.qml`'s header when a `strx clipboard` output shape,
   `data.reason` code or the thumbnail path changes.
 - `pkgs/strillix-shell/qml/LockHost.qml`'s header and `slots.md` when `strillix
   lock`'s IPC (`lock`/`secure`) or `lock hint` changes.

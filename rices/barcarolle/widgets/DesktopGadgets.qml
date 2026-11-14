@@ -30,7 +30,7 @@ PanelWindow {
     color: "transparent"
     visible: root.primary && implicitHeight > 0
     WlrLayershell.layer: WlrLayer.Bottom
-    WlrLayershell.namespace: "aoide-gadgets"
+    WlrLayershell.namespace: "strillix-gadgets"
 
     Loader {
         id: body

@@ -8,7 +8,7 @@
 //
 // Chrome: the same GadgetFrame ASCII box the dock gadgets wear (╔═[ TITLE ]═╗,
 // glass over compositor blur — the compositor shell's blur_popups layerrule
-// extends the aoide-bar blur to these popups). All colors from theme.
+// extends the strillix-bar blur to these popups). All colors from theme.
 //
 // Usage (children land in the frame body, GadgetFrame-style):
 //   BarPopout {

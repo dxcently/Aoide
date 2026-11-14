@@ -58,7 +58,7 @@ pub fn dirty_lines(checkout: &Path, folder: &str) -> Vec<String> {
     }
 }
 
-/// True when a staged `rice.nix` is NOT a rice shape v1 body (CONTRACTS.md
+/// True when a staged `rice.nix` is NOT a rice body (CONTRACTS.md
 /// §5): the body is a plain attrset, its first code character is `{`, and that
 /// brace's match ends the file. The old shape opens with a function header,
 /// `{ lib, config, ... }:`, whose first brace is followed by `:`; that is what

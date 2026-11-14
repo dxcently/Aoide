@@ -381,7 +381,7 @@ One 28px line in the tmux/termui idiom, left to right:
   over published facts, never a new fact (coverage.md records the bend).
   No edge is ever invented: no window, no jack; no edge, no tie.
 
-### 3.3 Dock → the board (`dock`, `aoide-dock`)
+### 3.3 Dock → the board (`dock`, `strillix-dock`)
 A right-edge pane, full height under the bar, tabbed. The dock is cadenza's
 own board; it mounts none of sonata's gadget slots.
 
@@ -483,7 +483,7 @@ own board; it mounts none of sonata's gadget slots.
   (dim at rest, `title` on hover); Escape; `SUPER+G`; the bar cell of the
   tab already showing (a cell toggles: on another tab it switches); a click
   anywhere off the board. The last is a transparent full-screen catcher
-  (`aoide-dock-scrim`), one layer under the board and clear of the bar's
+  (`strillix-dock-scrim`), one layer under the board and clear of the bar's
   reserved zone, mapped only while the board is up. It draws nothing and
   consumes the click that closes: that click does not reach the window
   under it. The bar is outside it and stays clickable.
@@ -519,7 +519,7 @@ a `btop` row at the bottom launches the real one. Until S5/S6: the session
 list is real (Hyprland + `sessions.json`), the numbers read `no usage data
 — bridge not wired`.
 
-### 3.5 Launcher (`launcher`, `aoide-launcher`)
+### 3.5 Launcher (`launcher`, `strillix-launcher`)
 A centred command pane: `> ` prompt, fuzzy list with `[n]` indices, modes as
 tabs in the rule (`apps │ clip │ ledger`) — clipboard and the grimoire ledger
 stay the lane data seams they are.
@@ -532,7 +532,7 @@ stay the lane data seams they are.
   and Enter fires row n. Any real match always wins; a number past the list
   is a plain "no match".
 
-### 3.6 Power menu (`powermenu`, `aoide-powermenu`)
+### 3.6 Power menu (`powermenu`, `strillix-powermenu`)
 A centred pane like a shell prompt: `┌─ SHUTDOWN ─┐` with `[l] lock
 [s] suspend [r] reboot [p] poweroff [o] logout`, keyboard-first (the letter
 fires); the chosen row goes amber; a destructive row asks `y/N` inline.
@@ -629,7 +629,7 @@ reads a fixture path.
   whether the desktop booted into it or staged it, and a rice with no opinion
   keeps the lane's baked default (both on). The plugin stays LOADED either way
   (live never unloads it); what the lane still fixes for every rice is its own
-  set — the `light` preset override's glass opacity and the `aoide-*`
+  set — the `light` preset override's glass opacity and the `strillix-*`
   namespace list — which no rice gates.
 - **Bar height** 28px vs sonata's 36; the lane reads it back, so it is the
   rice's call.

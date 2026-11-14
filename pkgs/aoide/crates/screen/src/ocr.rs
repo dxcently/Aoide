@@ -682,7 +682,7 @@ mod tests {
             layers: vec![hypr::Layer {
                 monitor: "DP-1".to_string(),
                 level: 2,
-                namespace: "aoide-bar".to_string(),
+                namespace: "strillix-bar".to_string(),
                 at: hypr::Point { x: 0, y: 0 },
                 size: hypr::Size { w: 1920, h: 36 },
             }],

@@ -224,7 +224,7 @@ let
   # what the ACTIVE rice should have mapped right now — and
   # `config.strillix.layout.surfaces` already IS that (only the performed
   # rice's body is imported). `rice` names which rice's declaration
-  # this is; the keys are the RESOLVED layer-shell namespaces (`aoide-<slot>`
+  # this is; the keys are the RESOLVED layer-shell namespaces (`strillix-<slot>`
   # — the same derivation `widgetType.namespace` applies when null), so the
   # consumer compares them directly against the compositor's layer list and
   # derives nothing of its own. A rice that declares none gets an empty
@@ -235,7 +235,7 @@ let
     builtins.toJSON {
       rice = config.strillix.rice;
       surfaces = lib.mapAttrs' (
-        slot: entry: lib.nameValuePair "aoide-${slot}" entry
+        slot: entry: lib.nameValuePair "strillix-${slot}" entry
       ) config.strillix.layout.surfaces;
     }
   );

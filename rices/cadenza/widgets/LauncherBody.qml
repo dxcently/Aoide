@@ -18,7 +18,7 @@
 // ── MODES — the tabs cut into the top rule ───────────────────────────────
 //   apps    every installed desktop entry (Quickshell's DesktopEntries),
 //           alphabetical at rest, fuzzy-ranked under a query.
-//   clip    clipboard history — the shell's `AoideClipboard` extra
+//   clip    clipboard history — the shell's `StrillixClipboard` extra
 //           (`parsedEntries`, `refresh()`, `copyById(id)`), text only: an
 //           image entry shows its metadata line, never a thumbnail.
 //   ledger  the shell's `GrimoireLedger` extra (`rice/stage/grimoire.json`,
@@ -61,7 +61,7 @@ Item {
 
     required property var theme
     property var bridge: null
-    property var clipboard: null        // AoideClipboard (the slot extra)
+    property var clipboard: null        // StrillixClipboard (the slot extra)
     property var ledger: null           // GrimoireLedger (the slot extra)
 
     // The shell drives these; the canvas leaves the defaults (drawn open).

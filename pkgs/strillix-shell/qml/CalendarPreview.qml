@@ -27,7 +27,7 @@ ShellRoot {
         color: "transparent"             // real StelePopout hosts are transparent too
         exclusionMode: ExclusionMode.Ignore
         WlrLayershell.layer: WlrLayer.Overlay
-        WlrLayershell.namespace: "aoide-calendar-preview"
+        WlrLayershell.namespace: "strillix-calendar-preview"
         anchors { top: true; left: true }
         implicitWidth: 460
         implicitHeight: 640

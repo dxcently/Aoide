@@ -135,7 +135,7 @@ fn handle_rice_declare(inv: &Invocation) -> Outcome {
         return blocked.into_outcome("rice.declare", &checkout, &folder);
     }
 
-    // The staged body must be a rice shape v1 body: habit reads it as data, so
+    // The staged body must be a rice body: habit reads it as data, so
     // an old function-module `rice.nix` copied into the checkout breaks the build
     // (CONTRACTS.md §5). A file that cannot be read is left to the copy's own error.
     let rice = src.join("rice.nix");
@@ -144,7 +144,7 @@ fn handle_rice_declare(inv: &Invocation) -> Outcome {
             "rice.declare",
             Kind::Refused,
             format!(
-                "`{}` is the old rice shape (a function module), not a v1 body; run `strillix rice refresh {name}` to bring the repo's rice.nix in",
+                "`{}` is the old rice shape (a function module), not a body; run `strillix rice refresh {name}` to bring the repo's rice.nix in",
                 rice.display()
             ),
             "habit reads a rice body as data, so copying this file into the checkout would break the build; if the machine edited the file, rewrite it as a body (CONTRACTS.md §5)".to_string(),
@@ -394,9 +394,9 @@ mod tests {
         let _ = std::fs::remove_dir_all(&checkout);
     }
 
-    /// A v1 body copies like any rice.
+    /// A body copies like any rice.
     #[test]
-    fn a_v1_body_passes_the_shape_check_and_is_copied() {
+    fn a_body_passes_the_shape_check_and_is_copied() {
         let _g = env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT", "AOIDE_FLAKE_ROOT"]);
         let stage_root = unique_tmp("declare-v1-body");

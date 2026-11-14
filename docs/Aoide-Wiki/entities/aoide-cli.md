@@ -277,7 +277,7 @@ The compositor keybind `SUPER+ESCAPE` (lock) runs `strx lock`, a real leaf.
 `SUPER+G` (dock
 toggle) is not a CLI command either: like the launcher's `SUPER+SPACE` and the
 wallpaper picker's `SUPER+W`, it triggers an in-process Hyprland global
-shortcut the panel itself registers (`aoide:dock`), not a CLI command (see
+shortcut the panel itself registers (`strillix:dock`), not a CLI command (see
 [[Quickshell]]).
 
 ## Contract-level conventions

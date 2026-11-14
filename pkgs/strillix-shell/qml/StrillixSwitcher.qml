@@ -3,7 +3,7 @@
 // shell.qml hosts it as the lane-side `fallback` of `SurfaceSlot { slot:
 // "switcher" }`: a rice that ships `widgets/switcher.qml` dresses the slot and
 // this file is never created; every other rice gets this one. The lane owns the
-// one `aoide:switcher` GlobalShortcut (shell.qml) and calls `.toggle()` on
+// one `strillix:switcher` GlobalShortcut (shell.qml) and calls `.toggle()` on
 // whichever body the slot holds, so this file registers no shortcut of its own.
 //
 // Rows are the Hyprland clients (Quickshell.Hyprland's toplevels, read only):
@@ -90,7 +90,7 @@ PanelWindow {
     color: "transparent"
     visible: root.shown
     WlrLayershell.layer: WlrLayer.Overlay
-    WlrLayershell.namespace: "aoide-switcher"
+    WlrLayershell.namespace: "strillix-switcher"
     WlrLayershell.keyboardFocus: root.shown ? WlrKeyboardFocus.Exclusive : WlrKeyboardFocus.None
 
     MouseArea { anchors.fill: parent; onClicked: root.hide() }

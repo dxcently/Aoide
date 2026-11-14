@@ -1,7 +1,7 @@
 //! The wallpaper provider's bridge — who paints a rice's wallpaper here, and
 //! what that provider should be showing right now.
 //!
-//! The shell's own `aoide-wallpaper` layer is the DEFAULT provider and needs no
+//! The shell's own `strillix-wallpaper` layer is the DEFAULT provider and needs no
 //! call: it watches `stage/wallpaper.json` itself. An external provider does, so
 //! this module is the one place Aoide asks — and tells — it. Posture copied from
 //! `live.rs`, the sibling seam: best-effort, never fatal, never a `Result` the

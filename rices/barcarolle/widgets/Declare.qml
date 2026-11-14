@@ -92,7 +92,7 @@ Item {
         exclusionMode: ExclusionMode.Ignore
         color: Kit.withA("#000000", 0.18)
         WlrLayershell.layer: WlrLayer.Overlay
-        WlrLayershell.namespace: "aoide-declare"
+        WlrLayershell.namespace: "strillix-declare"
         WlrLayershell.keyboardFocus: WlrKeyboardFocus.Exclusive
 
         MouseArea { anchors.fill: parent; acceptedButtons: Qt.AllButtons }

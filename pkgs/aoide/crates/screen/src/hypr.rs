@@ -687,10 +687,10 @@ mod tests {
 
     const LAYERS_JSON: &str = r#"{
         "DP-1": { "levels": {
-            "0": [ {"address":"0x1","x":0,"y":0,"w":1920,"h":1080,"alpha":1,"namespace":"aoide-wallpaper","pid":1} ],
+            "0": [ {"address":"0x1","x":0,"y":0,"w":1920,"h":1080,"alpha":1,"namespace":"strillix-wallpaper","pid":1} ],
             "1": [],
-            "2": [ {"address":"0x2","x":0,"y":0,"w":1920,"h":36,"alpha":1,"namespace":"aoide-bar","pid":1} ],
-            "3": [ {"address":"0x3","x":0,"y":78,"w":442,"h":960,"alpha":1,"namespace":"aoide-dock","pid":1} ]
+            "2": [ {"address":"0x2","x":0,"y":0,"w":1920,"h":36,"alpha":1,"namespace":"strillix-bar","pid":1} ],
+            "3": [ {"address":"0x3","x":0,"y":78,"w":442,"h":960,"alpha":1,"namespace":"strillix-dock","pid":1} ]
         } }
     }"#;
 
@@ -715,7 +715,7 @@ mod tests {
     // ── Transform 3 (270°, portrait) — real reading, yomi-strix HDMI-A-1,
     // 2026-08-31: panel mode 1920x1080 scale 1, but the logical layout is
     // 1080x1920 (proven independently by `hyprctl layers`' own
-    // `aoide-launcher` geometry, which reports usable as `0,36 1080x1884`
+    // `strillix-launcher` geometry, which reports usable as `0,36 1080x1884`
     // for this exact reserved zone). `screen shot`'s whole-layout capture
     // used the raw 1920x1080 mode dimensions before this fix.
     const MONITOR_TRANSFORM_3_JSON: &str = r#"[{
@@ -816,7 +816,7 @@ mod tests {
         namespaces.sort();
         assert_eq!(
             namespaces,
-            vec!["DP-1:aoide-bar", "DP-1:aoide-dock", "DP-1:aoide-wallpaper"]
+            vec!["DP-1:strillix-bar", "DP-1:strillix-dock", "DP-1:strillix-wallpaper"]
         );
     }
 
@@ -964,7 +964,7 @@ mod tests {
     fn info_delta_no_change_is_all_empty() {
         let snap = InfoSnapshot {
             clients: vec![client_fixture("0x1", "a")],
-            layers: vec![layer_fixture("aoide-bar")],
+            layers: vec![layer_fixture("strillix-bar")],
         };
         let delta = info_delta(&snap.clone(), &snap);
         assert_eq!(delta, InfoDelta::default());
@@ -972,10 +972,10 @@ mod tests {
 
     #[test]
     fn info_delta_detects_appeared_layers_and_clients() {
-        let before = InfoSnapshot { clients: vec![], layers: vec![layer_fixture("aoide-bar")] };
+        let before = InfoSnapshot { clients: vec![], layers: vec![layer_fixture("strillix-bar")] };
         let after = InfoSnapshot {
             clients: vec![client_fixture("0x2", "new window")],
-            layers: vec![layer_fixture("aoide-bar"), layer_fixture("tooltip")],
+            layers: vec![layer_fixture("strillix-bar"), layer_fixture("tooltip")],
         };
         let delta = info_delta(&before, &after);
         assert_eq!(delta.appeared, vec!["layer:DP-1:tooltip".to_string(), "window:0x2".to_string()]);
@@ -987,9 +987,9 @@ mod tests {
     fn info_delta_detects_disappeared_layers_and_clients() {
         let before = InfoSnapshot {
             clients: vec![client_fixture("0x1", "a")],
-            layers: vec![layer_fixture("aoide-bar"), layer_fixture("tooltip")],
+            layers: vec![layer_fixture("strillix-bar"), layer_fixture("tooltip")],
         };
-        let after = InfoSnapshot { clients: vec![], layers: vec![layer_fixture("aoide-bar")] };
+        let after = InfoSnapshot { clients: vec![], layers: vec![layer_fixture("strillix-bar")] };
         let delta = info_delta(&before, &after);
         assert!(delta.appeared.is_empty());
         assert_eq!(delta.disappeared, vec!["layer:DP-1:tooltip".to_string(), "window:0x1".to_string()]);
@@ -999,7 +999,7 @@ mod tests {
     #[test]
     fn info_delta_keys_layers_by_monitor_and_namespace_not_namespace_alone() {
         // Two monitors can each carry a layer surface with the same
-        // namespace (e.g. a per-monitor bar/dock, "aoide-dock") — keying by
+        // namespace (e.g. a per-monitor bar/dock, "strillix-dock") — keying by
         // namespace alone would collapse them into one identity and hide an
         // appear/disappear on one monitor while the other still holds that
         // namespace (Opus's Phase B review, F3).
@@ -1014,16 +1014,16 @@ mod tests {
         }
         let before = InfoSnapshot {
             clients: vec![],
-            layers: vec![layer_on("DP-1", "aoide-dock"), layer_on("HDMI-A-1", "aoide-dock")],
+            layers: vec![layer_on("DP-1", "strillix-dock"), layer_on("HDMI-A-1", "strillix-dock")],
         };
         let after = InfoSnapshot {
             // DP-1's dock closed; HDMI-A-1's is untouched and must not mask
             // the disappearance via a shared namespace-only key.
             clients: vec![],
-            layers: vec![layer_on("HDMI-A-1", "aoide-dock")],
+            layers: vec![layer_on("HDMI-A-1", "strillix-dock")],
         };
         let delta = info_delta(&before, &after);
-        assert_eq!(delta.disappeared, vec!["layer:DP-1:aoide-dock".to_string()]);
+        assert_eq!(delta.disappeared, vec!["layer:DP-1:strillix-dock".to_string()]);
         assert!(delta.appeared.is_empty(), "HDMI-A-1's dock is present in both — not appeared");
     }
 

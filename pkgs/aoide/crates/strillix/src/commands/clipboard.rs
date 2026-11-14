@@ -6,7 +6,7 @@
 //!
 //! Both drive the `cliphist` on `PATH` (the `clipboard` dendrite installs it;
 //! a host running its own watcher brings its own). The launcher's clipboard
-//! backend (`pkgs/strillix-shell/qml/AoideClipboard.qml`) runs these commands
+//! backend (`pkgs/strillix-shell/qml/StrillixClipboard.qml`) runs these commands
 //! rather than `cliphist delete`/`wipe` itself, so removing history stays
 //! reachable from a terminal with every `.qml` deleted.
 //!
@@ -14,7 +14,7 @@
 //! delete`'s stdin, the shape it parses from a `cliphist list` line. The
 //! history's text is read only to learn which ids exist and never reaches
 //! output. Thumbnails live in `$XDG_CACHE_HOME/strillix-clipboard/previews/<id>`
-//! (`~/.cache` when unset), the directory `AoideClipboard.qml` decodes into.
+//! (`~/.cache` when unset), the directory `StrillixClipboard.qml` decodes into.
 
 use crate::dispatch::Invocation;
 use crate::output::{io_cause, Fix, Kind, Outcome};

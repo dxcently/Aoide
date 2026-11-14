@@ -234,8 +234,9 @@ versioned score (not a runtime dir), so reading it does not violate
 `checks.rice-runtime-untracked`. `checks.rice-shape` asserts the body's shape,
 that each rice carries `rice.nix`, `theme.json` and `hyprland.conf`, that
 `hyprland.conf` holds no theme-owned key, that no stray `.nix` sits outside a
-rice's `rice.nix`/`_widgets/`, and that no `../` path literal appears in a
-rice's `.nix` text.
+rice's `rice.nix`/`_widgets/`, that no `../` path literal appears in a
+rice's `.nix` text, and that no file a rice runs spells a namespace, a
+shortcut or a variable it shares with the shell the old `aoide` way.
 
 ---
 

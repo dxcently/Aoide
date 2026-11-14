@@ -32,7 +32,7 @@ PanelWindow {
     visible: shown
     color: "transparent"
     WlrLayershell.layer: WlrLayer.Overlay
-    WlrLayershell.namespace: "aoide-calendar"
+    WlrLayershell.namespace: "strillix-calendar"
     exclusionMode: ExclusionMode.Ignore
     anchors { top: true; left: true }
     margins.left: root.shared ? Math.round(root.shared.calendarAnchor.x) : 0

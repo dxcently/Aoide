@@ -92,7 +92,7 @@ fn handle_wallpaper_set_entry(inv: &Invocation) -> Outcome {
 /// Resolves `<path>` (absolute, or a bare name under `rice/wallpapers/`) and stages
 /// it as a pick for the rice staged right now (CONTRACTS.md §4): what the user
 /// chose shows, the rice's own board does not draw over it, and re-staging that
-/// rice leaves it alone. Nothing is committed; the baked `AOIDE_WALLPAPER`
+/// rice leaves it alone. Nothing is committed; the baked `STRILLIX_WALLPAPER`
 /// remains the boot fallback.
 fn handle_wallpaper_set(inv: &Invocation) -> Outcome {
     // Opposite intents, refused together rather than silently picking one (and
@@ -146,7 +146,7 @@ fn handle_wallpaper_set(inv: &Invocation) -> Outcome {
                 "pick": true,
                 "rice": rice,
                 "wallpaper": crate::wallpaper_provider::sync(),
-                "seam": "AoideWallpaper.qml FileView-watches stage/wallpaper.json and hot-swaps live",
+                "seam": "StrillixWallpaper.qml FileView-watches stage/wallpaper.json and hot-swaps live",
             })),
             Err(e) => Outcome::error("wallpaper.set", format!("failed to stage wallpaper.json: {e}"))
                 .with_data(json!({
@@ -211,7 +211,7 @@ fn handle_wallpaper_set(inv: &Invocation) -> Outcome {
         "pick": true,
         "rice": rice,
         "wallpaper": crate::wallpaper_provider::sync(),
-        "seam": "AoideWallpaper.qml FileView-watches stage/wallpaper.json and hot-swaps live",
+        "seam": "StrillixWallpaper.qml FileView-watches stage/wallpaper.json and hot-swaps live",
     }))
 }
 

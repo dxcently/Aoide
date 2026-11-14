@@ -85,7 +85,7 @@ pub const STRILLIX_SLOTS: &[&str] = &[
 ];
 
 /// Render one `rice.nix` for `rice compose`: a rice body (CONTRACTS.md §5,
-/// rice shape v1) — the `system` half selects the ten `strillix` providers and
+/// rice shape v2) — the `system` half selects the ten `strillix` providers and
 /// sets the theme copied from `notes` (palette, polarity, window, geometry),
 /// the `home` half selects the `strillix` renderer and names this rice's
 /// `hyprland.conf`. `from` is named in each block's comment, so a reader

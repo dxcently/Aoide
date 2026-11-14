@@ -9,7 +9,7 @@
 # nothing names a provider file but this line — one place each.
 #
 # WHO PAINTS A RICE'S WALLPAPER is a host's choice, the way its compositor is.
-# `strillix` is the default: the shell's own `aoide-wallpaper` layer draws the
+# `strillix` is the default: the shell's own `strillix-wallpaper` layer draws the
 # rice's default AND the user's picks. `skwd-wall` hands picks to the external
 # engine of that name, which paints them on its own surface while the shell's
 # layer stays mapped and paints nothing. Both bring the strillix runtime by path

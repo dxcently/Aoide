@@ -31,11 +31,11 @@
 // SurfaceSlot itself injects only `theme` + `bridge` into the loaded
 // widget body. Nothing here adds extras.
 //
-// Optional shortcut (options.nix `widgetType.shortcut`, e.g. "aoide:grimoire"):
+// Optional shortcut (options.nix `widgetType.shortcut`, e.g. "strillix:grimoire"):
 // one Hyprland GlobalShortcut per entry that declares a non-null shortcut,
 // split on ":" into appid/name (the same "appid, name" pair every other
-// GlobalShortcut in this codebase declares — shell.qml's own aoide:dock,
-// AoideWallpaperPicker's aoide:wallpaper), calling `.toggle()` on the
+// GlobalShortcut in this codebase declares — shell.qml's own strillix:dock,
+// StrillixWallpaperPicker's strillix:wallpaper), calling `.toggle()` on the
 // loaded item IF it exposes one — same pattern CONTRACTS.md documents for
 // "the bar's clef calling `.item.toggle()`" on the powermenu slot, guarded
 // here since a declared widget isn't required to expose `toggle()`. A

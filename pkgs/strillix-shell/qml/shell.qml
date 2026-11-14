@@ -39,7 +39,7 @@ ShellRoot {
     // scope — `theme: theme` inside one silently binds to undefined rather
     // than failing loudly, and the first symptom is a TypeError deep inside the
     // delegate's own child (observed live: "Cannot read property 'paletteBg' of
-    // undefined" from AoideWallpaper). This handle is the delegate-safe way to
+    // undefined" from StrillixWallpaper). This handle is the delegate-safe way to
     // reach the shared ThemeState: it is resolved HERE, in root scope, and
     // read through the root id from inside the delegate.
     //
@@ -200,8 +200,8 @@ ShellRoot {
     // output. The delegate needs `required property var modelData` for Variants
     // to inject the row at all.
     //
-    // Every instance draws the SAME wallpaper — AoideWallpaper resolves one path
-    // (AOIDE_WALLPAPER, or stage/wallpaper.json when staged), and the wallpaper note is
+    // Every instance draws the SAME wallpaper — StrillixWallpaper resolves one path
+    // (STRILLIX_WALLPAPER, or stage/wallpaper.json when staged), and the wallpaper note is
     // a single value on the rice. Per-output DIFFERENT wallpapers would need a
     // per-screen wallpaper map in the theme schema; deliberately not invented here.
     Variants {
@@ -220,10 +220,10 @@ ShellRoot {
             exclusiveZone: -1
             color: "transparent"
             WlrLayershell.layer: WlrLayer.Background
-            WlrLayershell.namespace: "aoide-wallpaper"
+            WlrLayershell.namespace: "strillix-wallpaper"
             mask: Region { width: 0; height: 0 }
 
-            AoideWallpaper {
+            StrillixWallpaper {
                 anchors.fill: parent
                 // Root-qualified on purpose — see shellRoot.themeRef above.
                 theme: shellRoot.themeRef
@@ -263,8 +263,8 @@ ShellRoot {
             WlrLayershell.layer: WlrLayer.Top
             // Distinct namespace → target of the compositor lane's glass
             // layerrule (blur behind the translucent barBg — dxflake's
-            // "namespace waybar" posture, aoide-native name).
-            WlrLayershell.namespace: "aoide-bar"
+            // "namespace waybar" posture, strillix-native name).
+            WlrLayershell.namespace: "strillix-bar"
 
             WidgetSlot {
                 id: barSlot
@@ -299,7 +299,7 @@ ShellRoot {
     // notifications already carry (slots.md); it replaced the lane's own
     // `AoidePanel.qml`, retired once this slot anchor landed. The toggle
     // keybind stays a lane contract on purpose (so a rice's dock body can
-    // never forget to bind it): `aoide:dock` (SUPER+G) is a Hyprland global
+    // never forget to bind it): `strillix:dock` (SUPER+G) is a Hyprland global
     // shortcut registered here, dispatching into whatever `.item` the slot
     // resolves — the same pattern RiceSurfaces uses for a declared widget's
     // own shortcut.
@@ -330,9 +330,9 @@ ShellRoot {
                 extraProps: ({ shared: shared, stagingEngine: shellRoot.stagingRef })
             }
             GlobalShortcut {
-                appid: "aoide"
+                appid: "strillix"
                 name: "dock"
-                description: "Summon the Aoide center-left codex dock"
+                description: "Summon the Strillix center-left codex dock"
                 onPressed: {
                     var item = dockSlot.item
                     if (item && item.toggle) item.toggle()
@@ -349,9 +349,9 @@ ShellRoot {
     //                              rices/sonata/widgets/launcher.qml
     //   - powermenu (SurfaceSlot): the powermenu (bar clef 𝄞 → powermenu.toggle()),
     //                              rices/sonata/widgets/powermenu.qml
-    //   - AoideWallpaperPicker   : aoide:wallpaper — the launcher's openPictures(),
+    //   - StrillixWallpaperPicker   : strillix:wallpaper — the launcher's openPictures(),
     //                              else the plain wallpaper picker (global-shortcut)
-    //   - switcher (SurfaceSlot) : aoide:switcher window switcher, the rice's
+    //   - switcher (SurfaceSlot) : strillix:switcher window switcher, the rice's
     //                              widgets/switcher.qml or the plain StrillixSwitcher
     //   - notifications (SurfaceSlot)   : the notification popup,
     //                              rices/sonata/widgets/notifications.qml
@@ -362,7 +362,7 @@ ShellRoot {
     // inside the frame, and real hit-tested approve/deny buttons on a
     // permission summons, none of which dunst could draw itself. The dock's
     // `notifications-center` slot reads the same file as a ledger.)
-    AoideClipboard { id: clipboard }
+    StrillixClipboard { id: clipboard }
     // The Grimoire's usage ledger — stays in the lane (a data seam, not
     // chrome, CONTRACTS.md §4), injected into the launcher slot as an extra.
     GrimoireLedger { id: ledger }
@@ -416,9 +416,9 @@ ShellRoot {
                 extraProps: ({ shared: shared })
             }
             GlobalShortcut {
-                appid: "aoide"
+                appid: "strillix"
                 name: "calendar"
-                description: "Summon the Aoide calendar"
+                description: "Summon the Strillix calendar"
                 onPressed: {
                     var item = calendarSlot.item
                     if (item && item.toggle) item.toggle()
@@ -446,13 +446,13 @@ ShellRoot {
         bridge: bridge
         stagingEngine: stagingEngine
     }
-    // aoide:wallpaper: the launcher's own Desktop Pictures when its body has
+    // strillix:wallpaper: the launcher's own Desktop Pictures when its body has
     // `openPictures()` (null while `launcher` is not selected), else the plain
-    // picker (AoideWallpaperPicker.qml). Part of the `wallpaper` component.
+    // picker (StrillixWallpaperPicker.qml). Part of the `wallpaper` component.
     LazyLoader {
         active: shellRoot.has("wallpaper")
 
-        AoideWallpaperPicker {
+        StrillixWallpaperPicker {
             theme: shellRoot.themeRef
             bridge: shellRoot.bridgeRef
             launcherHasPictures: shellRoot.launcherHasPictures
@@ -472,7 +472,7 @@ ShellRoot {
         }
     }
 
-    // aoide:switcher: the one registration; it toggles whichever body the
+    // strillix:switcher: the one registration; it toggles whichever body the
     // `switcher` slot holds — the active rice's widgets/switcher.qml, else
     // sonata's, else the plain StrillixSwitcher below (the floor). Not bound
     // here: the venue binds a combo to it.
@@ -492,9 +492,9 @@ ShellRoot {
                 fallback: Component { StrillixSwitcher {} }
             }
             GlobalShortcut {
-                appid: "aoide"
+                appid: "strillix"
                 name: "switcher"
-                description: "Summon the Aoide window switcher"
+                description: "Summon the Strillix window switcher"
                 onPressed: {
                     var item = switcherSlot.item
                     if (item && item.toggle) item.toggle()

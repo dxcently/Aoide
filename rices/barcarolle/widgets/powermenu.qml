@@ -44,11 +44,11 @@ PanelWindow {
     color: "transparent"
     visible: root.shown || root.rise > 0.01
     WlrLayershell.layer: WlrLayer.Overlay
-    WlrLayershell.namespace: "aoide-powermenu"
+    WlrLayershell.namespace: "strillix-powermenu"
     WlrLayershell.keyboardFocus: root.shown ? WlrKeyboardFocus.Exclusive : WlrKeyboardFocus.None
 
     GlobalShortcut {
-        appid: "aoide"
+        appid: "strillix"
         name: "powermenu"
         description: "Summon the Shut Down dialog"
         onPressed: root.toggle()

@@ -276,8 +276,8 @@ resetting to zero.
   parses.** `{ cmd: "powermenu" }` went nowhere — shellbridge's parser never
   knew that command — so the bar's clef calls `.toggle()` on the injected
   powermenu instance directly instead. Inbound triggers are Hyprland
-  `GlobalShortcut`s registered in-process (`aoide:launcher`,
-  `aoide:powermenu`, `aoide:clipboard`); no new socket, no new CLI command.
+  `GlobalShortcut`s registered in-process (`strillix:launcher`,
+  `strillix:powermenu`, `strillix:clipboard`); no new socket, no new CLI command.
 - **Pipewire's `.audio` sub-object never binds unless the node is tracked.**
   `PwObjectTracker` must carry BOTH `defaultAudioSink` and
   `defaultAudioSource`.

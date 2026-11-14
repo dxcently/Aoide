@@ -12,6 +12,12 @@
 #   wallpaper-name/  a declared picture under wallpaper/<rice>-desktop.<ext> passes;
 #                    any other name fails (the seed and `rice stage` must agree).
 #
+#   old-api/  every run file of `stale` but its rice.nix spells one shared name
+#             the old way, each in a form of its own, and each is named, the
+#             whole list and nothing after it; its `.md` note and its `design/`
+#             capture are not read. `fresh` spells the same names the strillix
+#             way and passes.
+#
 #   ./tests/rice-shape/run.sh
 set -uo pipefail
 cd "$(dirname "$0")" || exit 1
@@ -25,11 +31,13 @@ check() {
     let
       lib = $lib;
       checks = import $root/lib/checks.nix { inherit lib; pkgs = { runCommand = _: _: _: \"ok\"; }; };
+      rices = import $root/lib/rices.nix { inherit lib; discovered.$rice = $PWD/$dir/$rice; };
     in checks.riceShape {
       ricesRoot = $PWD/$dir;
       discoveredNames = [ \"$rice\" ];
       strayNixFiles = [ ];
       escapingNixFiles = [ ];
+      inherit (rices) runFiles;
       borrow = _: throw \"the fixtures borrow nothing\";
     }" 2>&1
 }
@@ -52,4 +60,9 @@ out=$(check wallpaper-name named)
 if [[ $out == *"ok"* && $out != *FAILED* ]]; then echo "ok    named: wallpaper/<rice>-desktop picture passes"; else echo "FAIL  named: $out"; fail=1; fi
 out=$(check wallpaper-name stray)
 if [[ $out == *"sets strillix.theme.wallpaper to"*"dusk.jpg"*"wallpaper/stray-desktop"* ]]; then echo "ok    stray: other-named picture refused"; else echo "FAIL  stray: $out"; fail=1; fi
+out=$(check old-api stale)
+msg=$(grep -F "spells a name it shares with the shell the old way" <<<"$out" | tail -n 1)
+if [[ $msg == *"in: stale/_widgets/demo.nix stale/glass.conf stale/hyprland.conf stale/layers.conf stale/theme.json stale/widgets/bar.qml stale/widgets/launcher.qml stale/widgets/rig.js stale/widgets/wallpaper.qml" ]]; then echo "ok    stale: each old spelling refused, the note and the capture unread"; else echo "FAIL  stale: $out"; fail=1; fi
+out=$(check old-api fresh)
+if [[ $out == *"ok"* && $out != *FAILED* ]]; then echo "ok    fresh: the strillix spellings pass"; else echo "FAIL  fresh: $out"; fail=1; fi
 exit $fail

@@ -9,7 +9,7 @@ Item {
     required property var theme
     required property var bridge
 
-    readonly property var rig: (Quickshell.env("AOIDE_RIG_BATTERY") || "").split(":")
+    readonly property var rig: (Quickshell.env("STRILLIX_RIG_BATTERY") || "").split(":")
     readonly property bool forced: rig[0] !== ""
     readonly property var dev: UPower.displayDevice
 

@@ -15,7 +15,7 @@ ShellRoot {
         color: "#cfc6b1"                 // a mid-marble backdrop (screenshot only)
         exclusionMode: ExclusionMode.Ignore
         WlrLayershell.layer: WlrLayer.Overlay
-        WlrLayershell.namespace: "aoide-audio-preview"
+        WlrLayershell.namespace: "strillix-audio-preview"
         anchors { top: true; left: true }
         implicitWidth: 800        // two 352-wide tristyle steles + the gap
         implicitHeight: 440

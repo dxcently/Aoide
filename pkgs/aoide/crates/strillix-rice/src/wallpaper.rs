@@ -487,7 +487,7 @@ mod tests {
     }
 
     /// A pick is marked; the rice's own default is NOT. This is the whole
-    /// discriminator AoideWallpaper.qml's board gate rides.
+    /// discriminator StrillixWallpaper.qml's board gate rides.
     #[test]
     fn a_pick_is_marked_and_a_default_is_not() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());

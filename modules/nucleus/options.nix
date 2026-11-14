@@ -358,7 +358,7 @@ let
         default = null;
         description = ''
           The window/layer-shell namespace this widget registers under.
-          null derives to "aoide-<slot>" — the consumer (the compositor
+          null derives to "strillix-<slot>" — the consumer (the compositor
           lane) computes this from the attribute key, since a plain option
           default can't see its own key.
         '';
@@ -375,7 +375,7 @@ let
         type = types.nullOr types.str;
         default = null;
         description = ''
-          A GlobalShortcut name (e.g. "aoide:<slot>") a venue's compositor
+          A GlobalShortcut name (e.g. "strillix:<slot>") a venue's compositor
           config may bind a key to. Naming a shortcut is not binding it —
           the venue owns the actual keybind, keeping the rice/venue split
           intact.
@@ -410,7 +410,7 @@ let
   # ── Expected-paint entry (v1 `layout.surfaces`) ──────────────────────
   # One flag per declared surface. Keyed by slot name in
   # `layout.surfaces` below — the attribute name IS the slot name,
-  # resolving to the layer-shell namespace `aoide-<slot>` exactly as
+  # resolving to the layer-shell namespace `strillix-<slot>` exactly as
   # `widgetType.namespace` derives one when null. This declares an
   # EXPECTATION and instantiates nothing: no surface is stood up by naming
   # one here.
@@ -714,7 +714,7 @@ in
               Which painted surfaces this rice EXPECTS to be mapped, declared
               so a health consumer can assert what SHOULD be painted instead
               of only counting whatever is. Keyed by slot name; each key
-              resolves to the layer-shell namespace `aoide-<slot>` (the same
+              resolves to the layer-shell namespace `strillix-<slot>` (the same
               derivation `widgetType.namespace` applies when null), so the
               consumer compares declarations directly against the
               compositor's live layer list and derives nothing of its own.
@@ -871,7 +871,7 @@ in
       description = ''
         Which provider paints a rice's wallpaper on this host, by the name the
         host selected in the `wallpaper` capability's registry: `"quickshell"`
-        (the default — the shell's own `aoide-wallpaper` layer draws the rice's
+        (the default — the shell's own `strillix-wallpaper` layer draws the rice's
         default AND the user's picks) or `"skwd-wall"` (the external engine
         paints picks on its own surface while the shell's layer stays mapped
         and paints nothing).

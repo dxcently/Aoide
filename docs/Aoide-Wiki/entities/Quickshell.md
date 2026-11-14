@@ -36,7 +36,7 @@ floating-gadget model, the hover-trace link).
 
 Two surfaces are lane-owned `Item`s wrapped in their own `PanelWindow`, one
 per output (a `Variants` delegate over `Quickshell.screens`, so each re-homes
-itself after an output blip): **`AoideWallpaper`** (the background layer,
+itself after an output blip): **`StrillixWallpaper`** (the background layer,
 `WlrLayer.Background`) and the **bar** (`WlrLayer.Top`, exclusive height), whose content is a per-rice
 widget loaded through `WidgetSlot` (`slot: "bar"`) rather than a lane
 component — the rice owns its own footprint. **`AoidePanel`** (the
@@ -51,9 +51,9 @@ non-visual `QtObject` sibling instead of
 a sized `Item`, since each slot's root IS its own `PanelWindow` rather than
 content parented into an existing layout. `RiceSurfaces` hosts one more
 `SurfaceSlot` per surface-kind entry the active rice's `strillix.layout`
-declares (empty for sonata today, so a no-op). `AoideClipboard` and
+declares (empty for sonata today, so a no-op). `StrillixClipboard` and
 `GrimoireLedger` are lane-owned utility singletons injected into the
-launcher slot as extras; `AoideWallpaperPicker` answers `aoide:wallpaper`
+launcher slot as extras; `StrillixWallpaperPicker` answers `strillix:wallpaper`
 (`SUPER+W`), handing it to the launcher body's `openPictures()` when it has
 one and opening its own plain wallpaper picker otherwise.
 
@@ -157,14 +157,14 @@ lockscreen, greeter, wallpaper, agentWidgets, sessionGraph). Five have a
 live QML body today: **bar** (rice `bar.qml` via `WidgetSlot`),
 **notifications** (dunst as daemon, the `notifications`/`notifications-center` popup and
 ledger as the drawn surface), **launcher** (rice
-`launcher.qml` via `SurfaceSlot`, below), **wallpaper** (`AoideWallpaper.qml`),
+`launcher.qml` via `SurfaceSlot`, below), **wallpaper** (`StrillixWallpaper.qml`),
 and **agentWidgets** (the [[Gadget-Dock]], `AoidePanel.qml`: a left-edge
 panel holding four core self-framed gadgets — Conductor, Terminals, Meters,
 Power — plus an opt-in claude.ai Usage stele; its fore-edge peeks past the
 screen edge at rest, further when a session is `awaiting` and
 unacknowledged, and slides fully in on a 6 px hot-edge hover or on `SUPER+G`,
 an in-process Hyprland global shortcut the panel itself registers
-(`aoide:dock`), not a CLI command).
+(`strillix:dock`), not a CLI command).
 
 The rest are registry-only or painted only by a rice that ships the face:
 
@@ -189,7 +189,7 @@ The rest are registry-only or painted only by a rice that ships the face:
 `rices/sonata/widgets/launcher.qml` is a working, keyboard-driven
 app launcher (the rofi replacement), loaded through the `launcher`
 `SurfaceSlot`. It is a summoned `PanelWindow` on `WlrLayer.Overlay`
-(namespace `aoide-launcher`) that takes an exclusive keyboard grab only
+(namespace `strillix-launcher`) that takes an exclusive keyboard grab only
 while shown and is an inert zero-cost layer at rest. It enumerates apps
 from Quickshell's built-in `DesktopEntries`, filters on a prefix-ranked
 case-insensitive substring as you type, navigates with Up/Down + Ctrl+J/K,
@@ -199,9 +199,9 @@ Pantheon pane (`GadgetFrame`, cream Aero glass, `♪` prompt, lowercase
 
 Two design decisions worth carrying forward:
 
-- **Trigger is a Hyprland `GlobalShortcut` (`aoide:launcher`), registered
+- **Trigger is a Hyprland `GlobalShortcut` (`strillix:launcher`), registered
   in-process** — the compositor binds `SUPER+SPACE` to it via `bind = …,
-  global, aoide:launcher`. `ShellBridge` is outbound-only, so an in-process
+  global, strillix:launcher`. `ShellBridge` is outbound-only, so an in-process
   global shortcut is the cleanest inbound trigger — no new `aoided` command, no
   inbound socket.
 - **Launch is `DesktopEntry.execute()`** — the same Quickshell-native side-effect
@@ -210,7 +210,7 @@ Two design decisions worth carrying forward:
   no such command today; flagged, not silently baked. See
   [[DEV]].
 
-The compositor lane also adds `aoide-launcher` to the blur / `ignore_alpha` /
+The compositor lane also adds `strillix-launcher` to the blur / `ignore_alpha` /
 hyprglass namespaces so the pane frosts like the bar and dock. Both the keybind
 and the blur rules are baked into `hyprland.conf`, so the launcher needs a gated
 `switch` to land live (the QML rsyncs into `$STRILLIX_ROOT/run/qml/` the same way).
@@ -277,7 +277,7 @@ The check asks two independent signals, in order, and they answer different
 questions. `hyprctl layers -j` is compared against what the active rice
 DECLARED should be painted — `strillix.layout.surfaces`, published by the
 lane's build as `run/qml/rices/surfaces.json` (CONTRACTS.md §5): each
-declared `aoide-<slot>` namespace must be mapped on every enabled output
+declared `strillix-<slot>` namespace must be mapped on every enabled output
 when it is `perMonitor`, and at least once otherwise. A declared surface
 that is missing is the user-visible failure, true right now, and it decides
 health on its own. The journal (`There are no outputs - creating placeholder
@@ -293,10 +293,10 @@ in the `QApplication` constructor — emitting no QPA line at all — once sat
 unreported for 22 minutes on two hosts.
 
 The expectation is declared, never hardcoded, because the same watchdog
-runs on a host where waybar owns the bar: expecting `aoide-bar` there would
+runs on a host where waybar owns the bar: expecting `strillix-bar` there would
 restart a healthy desktop every fifteen minutes forever. A host whose rice
 declares nothing, or whose lane has not yet published the file, falls back
-to the bare total — zero `aoide-*` surfaces anywhere is the blank desktop —
+to the bare total — zero `strillix-*` surfaces anywhere is the blank desktop —
 which is what the check was before surfaces went per-output. A total cannot
 see a partial loss: the per-screen wallpaper (a `Variants` delegate over
 `Quickshell.screens`) re-homes itself after an output blip while a singleton
@@ -328,7 +328,7 @@ breadcrumb — the screen list collapsing at the moment of the lockup, not a
 fix; no QML-side fix is possible for the reason above.
 
 **The wallpaper engine *is* this shell.** The wallpaper is a
-`wlr-layer-shell` `Background` surface (`AoideWallpaper.qml` inside `shell.qml`),
+`wlr-layer-shell` `Background` surface (`StrillixWallpaper.qml` inside `shell.qml`),
 the sole live painter (Stylix's `hyprpaper` is force-disabled via the
 `strillix.surfaces.wallpaper` owner registry; no `swww`/`swaybg`/`mpvpaper`
 elsewhere). So a shell crash takes the wallpaper *and* the bar/dock/gadgets with
@@ -338,7 +338,7 @@ stage` when the rice's wallpaper derives or, for a direct hot-swap, `strx wallpa
 <path-or-name>`; it carries the rice it was staged for, so a wallpaper for another
 rice is ignored, and its `"pick": true` marks the user's own choice, which the
 shell refuses to draw the rice's live board over, and its `"tile": true` repeats
-a picked still at 1:1 instead of cropping it), falling back to the baked `AOIDE_WALLPAPER` env store path so the
+a picked still at 1:1 instead of cropping it), falling back to the baked `STRILLIX_WALLPAPER` env store path so the
 background survives reboots/rebuilds even though `stage/` is ephemeral. Swap is a
 hard cut — no crossfade.
 

@@ -647,9 +647,9 @@ mod tests {
         v["widgets"] = serde_json::json!({
             "grimoire": {
                 "kind": "surface",
-                "namespace": "aoide-grimoire",
+                "namespace": "strillix-grimoire",
                 "layer": "top",
-                "shortcut": "aoide:grimoire",
+                "shortcut": "strillix:grimoire",
                 "blur": false
             }
         });
@@ -792,7 +792,7 @@ mod tests {
     fn widgets_dock_kind_with_namespace_is_rejected_and_named() {
         let mut v = load("valid.json");
         v["widgets"] =
-            serde_json::json!({ "dockwidget": { "kind": "dock", "namespace": "aoide-dock" } });
+            serde_json::json!({ "dockwidget": { "kind": "dock", "namespace": "strillix-dock" } });
         let r = validate(&v);
         check("dock + namespace is rejected", !r.ok);
         check(
@@ -825,7 +825,7 @@ mod tests {
     fn widgets_dock_kind_with_shortcut_is_rejected_and_named() {
         let mut v = load("valid.json");
         v["widgets"] = serde_json::json!({
-            "dockwidget": { "kind": "dock", "shortcut": "aoide:dockwidget" }
+            "dockwidget": { "kind": "dock", "shortcut": "strillix:dockwidget" }
         });
         let r = validate(&v);
         check("dock + shortcut is rejected", !r.ok);

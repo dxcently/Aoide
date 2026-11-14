@@ -254,7 +254,7 @@ PanelWindow {
     implicitWidth: root.cardW + root.shadowR + 1
     implicitHeight: Math.max(1, stack.implicitHeight)
     WlrLayershell.layer: WlrLayer.Overlay
-    WlrLayershell.namespace: "aoide-notifications"
+    WlrLayershell.namespace: "strillix-notifications"
 
     // ── The stack — newest card nearest the corner, growing upward ─────────
     // Bottom-anchored, so the LAST child sits at the corner and the column

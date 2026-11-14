@@ -7,7 +7,7 @@
 //
 // The canvas hands every widget `clipboard: null, ledger: null` (both extras
 // reach the system), so this harness builds two inert stand-ins with the
-// SAME API the shell's AoideClipboard / GrimoireLedger expose
+// SAME API the shell's StrillixClipboard / GrimoireLedger expose
 // (`parsedEntries`/`loading`/`loadError`/`refresh()`/`copyById()` and
 // `launches`/`count()`/`rankedIds()`/`record()`), holding sample data inline.
 // Neither touches cliphist, the ledger file or anything outside this item;

@@ -305,7 +305,7 @@ strx quickshell healthcheck [--json]
   rice's declared surfaces (`run/qml/rices/surfaces.json`, per-output where
   declared `perMonitor`; a host whose declaration is absent or empty — every
   rice that declares nothing publishes an empty one — falls back to "zero
-  `aoide-*` surfaces anywhere"), and a shortfall decides `healthy` on
+  `strillix-*` surfaces anywhere"), and a shortfall decides `healthy` on
   its own; the journal's placeholder-screen line (scoped to the unit's own
   `ActiveEnterTimestamp`, so a recovered occurrence can never re-trigger)
   then decides whether the watchdog may act. A shortfall with that line is

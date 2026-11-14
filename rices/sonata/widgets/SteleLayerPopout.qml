@@ -4,11 +4,11 @@
 //
 // WHY THIS EXISTS (khoa, 2026-08-13): Hyprland's `blur_popups` layerrule
 // frosts EVERY xdg_popup of the matched layer — and an xdg_popup has no
-// namespace of its own, so a single popout cannot opt out of the aoide-bar
+// namespace of its own, so a single popout cannot opt out of the strillix-bar
 // rule while its siblings stay frosted. The sonata calendar's papyrus sheet
 // cuts a transparent window over its day grid that must show the desktop
 // CRISPLY ("no blur" — owner directive); hosted here on its own namespace
-// (default "aoide-calendar", matched by no blur layerrule and pinned
+// (default "strillix-calendar", matched by no blur layerrule and pinned
 // blur-off compositor-side) it escapes the frost the other bar popouts
 // keep. Every other stele popout stays on StelePopout/xdg_popup — this
 // host is for a stele that must diverge from the bar layer's compositor
@@ -38,7 +38,7 @@ PanelWindow {
     property point anchor: Qt.point(0, 0)
     property bool shown: false
     // Own namespace = own compositor identity (the whole point — see header).
-    property string layerNamespace: "aoide-calendar"
+    property string layerNamespace: "strillix-calendar"
     default property alias content: host.data
 
     visible: shown

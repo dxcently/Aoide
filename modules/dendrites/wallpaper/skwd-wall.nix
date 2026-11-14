@@ -97,7 +97,7 @@ let
   '';
 in
 {
-  # The shell's picker and its `aoide-wallpaper` layer stay: this provider
+  # The shell's picker and its `strillix-wallpaper` layer stay: this provider
   # brings the strillix runtime by path, as the `strillix` one does.
   imports = [ ../strillix/runtime.nix ];
 

@@ -24,7 +24,7 @@ modules/dendrites/compositor/
   hyprland` config, `package = null` so the binary is installed once, and
   `hyprland` as the display manager's default session, since the package also
   registers a uwsm session this lane does not enable), applies
-  compositor-side theme (gaps/radius/borders/blur, the `aoide-*` layerrules,
+  compositor-side theme (gaps/radius/borders/blur, the `strillix-*` layerrules,
   hyprglass, kitty rounding) at build time, and exposes the Hyprland IPC
   socket for shellbridge to consume. Selecting it is the switch; it sets no fact.
   The hyprglass block's two enable keys are the rice's own

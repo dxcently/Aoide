@@ -13,7 +13,7 @@ modules/dendrites/wallpaper/
 ```
 
 Both providers bring the strillix runtime by path (`../strillix/README.md`): the
-shell's picker and its `aoide-wallpaper` layer stay mapped under either, so
+shell's picker and its `strillix-wallpaper` layer stay mapped under either, so
 each declares `strillix.surfaces.wallpaper` and writes its own
 `strillix.components.wallpaper` entry (`strillix` or `skwd-wall`).
 
@@ -35,7 +35,7 @@ each declares `strillix.surfaces.wallpaper` and writes its own
   slot's, and the fact it writes stays `"quickshell"`, the word the runtime,
   the CLI, the QML and the stage file already speak.
 - **`strillix.nix` — the shell's own layer.** Configures nothing: the
-  `aoide-wallpaper` layer is the strillix runtime's, and this provider is the
+  `strillix-wallpaper` layer is the strillix runtime's, and this provider is the
   NAME of that layout. Its fact value is also the option's default, so a
   host with no provider selected at all behaves exactly as it always did.
 - **`skwd-wall.nix` — the external engine.** The picker, the control daemon and

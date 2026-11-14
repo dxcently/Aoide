@@ -7,7 +7,7 @@
 // refuses a PanelWindow root, so the body is what gets previewed.
 //
 // Contract (the one sonata's notifications keeps):
-//   · namespace `aoide-notifications`, layer Overlay, no exclusive zone.
+//   · namespace `strillix-notifications`, layer Overlay, no exclusive zone.
 //   · Anchored top-right (intent §3.7): the bar's exclusive zone pushes the
 //     surface under it; the body supplies the margins in cells.
 //   · Mapped only while the body has something to show; sized to the stack.
@@ -35,7 +35,7 @@ PanelWindow {
     implicitWidth: Math.max(1, body.item ? body.item.implicitWidth : 1)
     implicitHeight: Math.max(1, body.item ? body.item.implicitHeight : 1)
     WlrLayershell.layer: WlrLayer.Overlay
-    WlrLayershell.namespace: "aoide-notifications"
+    WlrLayershell.namespace: "strillix-notifications"
     WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
 
     Loader {

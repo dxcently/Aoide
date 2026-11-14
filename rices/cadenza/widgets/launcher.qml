@@ -7,13 +7,13 @@
 // body is what gets previewed.
 //
 // Contract (slots.md, the same one sonata's launcher keeps):
-//   · namespace `aoide-launcher`, layer Overlay, full-screen, no exclusive
+//   · namespace `strillix-launcher`, layer Overlay, full-screen, no exclusive
 //     zone; keyboard focus Exclusive while shown.
-//   · extras `clipboard` (the shell's AoideClipboard) and `ledger` (the
+//   · extras `clipboard` (the shell's StrillixClipboard) and `ledger` (the
 //     shell's GrimoireLedger), handed through to the body untouched.
 //   · `toggle()` / `show()` / `hide()` / `openClipboard()`.
-//   · GlobalShortcut `aoide:launcher` toggles (the compositor binds
-//     SUPER+SPACE to it); `aoide:clipboard` opens straight on the clip tab.
+//   · GlobalShortcut `strillix:launcher` toggles (the compositor binds
+//     SUPER+SPACE to it); `strillix:clipboard` opens straight on the clip tab.
 //   · Launch and copy live in the body, by sonata's mechanism
 //     (`systemd-run --scope` via execDetached, `clipboard.copyById`).
 import QtQuick
@@ -58,18 +58,18 @@ PanelWindow {
     color: "transparent"
     visible: root.shown || lingerTimer.running
     WlrLayershell.layer: WlrLayer.Overlay
-    WlrLayershell.namespace: "aoide-launcher"
+    WlrLayershell.namespace: "strillix-launcher"
     WlrLayershell.keyboardFocus: root.shown ? WlrKeyboardFocus.Exclusive
                                             : WlrKeyboardFocus.None
 
     GlobalShortcut {
-        appid: "aoide"
+        appid: "strillix"
         name: "launcher"
-        description: "Summon the Aoide app launcher"
+        description: "Summon the Strillix app launcher"
         onPressed: root.toggle()
     }
     GlobalShortcut {
-        appid: "aoide"
+        appid: "strillix"
         name: "clipboard"
         description: "Open clipboard history in the launcher"
         onPressed: root.openClipboard()

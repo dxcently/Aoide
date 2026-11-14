@@ -18,7 +18,7 @@
 // spread, no rotation — just a horizontal slide.
 //
 // ── Why GlobalShortcut stays OUT of this file ───────────────────────────────
-// `shell.qml` registers the `aoide:dock` Hyprland global shortcut itself,
+// `shell.qml` registers the `strillix:dock` Hyprland global shortcut itself,
 // dispatching into `dockSlot.item.toggle()` — ShellBridge is OUTBOUND-only
 // and there is no inbound CLI command to toggle a surface, same rationale as
 // AoideLauncher's. That keybind is a FACET contract on purpose, kept out of
@@ -239,7 +239,7 @@ PanelWindow {
     visible: true
 
     WlrLayershell.layer: WlrLayer.Overlay
-    WlrLayershell.namespace: "aoide-dock"
+    WlrLayershell.namespace: "strillix-dock"
     // OnDemand while pinned so a click can take focus; None otherwise so a mere
     // hover-peek never holds the keyboard.
     WlrLayershell.keyboardFocus: root.shown ? WlrKeyboardFocus.OnDemand

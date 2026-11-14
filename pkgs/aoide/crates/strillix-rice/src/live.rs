@@ -92,7 +92,7 @@ pub fn geometry_keywords(notes: &Value) -> Vec<String> {
     // enable keys are read per frame (static config pointers), so a keyword
     // turns the glass off live without unloading the plugin: `enabled` is the
     // global window-glass switch, `layers:enabled` the layer-surface one the
-    // compositor lane resolves for the aoide-* namespaces — the BAKE takes
+    // compositor lane resolves for the strillix-* namespaces — the BAKE takes
     // both from that same `blurEnabled`, so a staged rice agrees with a
     // desktop that booted straight into it. A rice with no opinion sends
     // neither: the reload put the host's glass back. [`apply_live`] partitions

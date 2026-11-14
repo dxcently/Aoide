@@ -236,7 +236,7 @@ never touches `wallpaper.json`) — unaffected by which of
 
 **Who PAINTS a pick is the host's choice, not a rice's.** The wallpaper PROVIDER
 is a provider capability (`modules/dendrites/wallpaper/`) with two alternatives
-today — `quickshell`, the shell's own `aoide-wallpaper` layer, which draws the
+today — `quickshell`, the shell's own `strillix-wallpaper` layer, which draws the
 rice's own default and the user's picks, and `skwd-wall`, an external provider
 that draws picks on its own surface. A host picks one with
 `habit.dendrites.wallpaper.provider`, and the chosen provider file names

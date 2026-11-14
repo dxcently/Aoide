@@ -137,7 +137,7 @@ holds CONDUCTING state. The files:
 
 Which files are present is runtime-dependent (e.g. `wallpaper.json` appears once a
 wallpaper is staged — the rice's own wallpaper as its default, or the user's pick
-on top of it, CONTRACTS.md §4; `AOIDE_WALLPAPER` on the Quickshell unit is the
+on top of it, CONTRACTS.md §4; `STRILLIX_WALLPAPER` on the Quickshell unit is the
 baked fallback the layer reads when no wallpaper is staged, see
 [[Quickshell]]). Who paints that pick is the host's choice, not the rice's: the
 word in `wallpaper-provider` names the provider — `quickshell`, the shell's own

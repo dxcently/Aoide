@@ -32,7 +32,7 @@ rice/
 │                                  (../../wallpapers/<file>), not a per-rice assets/ dir
 ├── stage/                      LIVE runtime state — gitignored, atomic write-temp-then-rename only
 │   ├── theme.json                fully-resolved theme (no nulls) — hot-reloaded by ThemeState.qml
-│   ├── wallpaper.json                 live wallpaper seed { "path": ... } — read by AoideWallpaper.qml
+│   ├── wallpaper.json                 live wallpaper seed { "path": ... } — read by StrillixWallpaper.qml
 │   └── sessions.json / hooks.json / projects.json / graph.json   session-graph state (shellbridge, aoide graph)
 └── auditions/                  (planned) the propose gate for generated-but-unadopted rices — gitignored
 ```
@@ -67,13 +67,13 @@ wallpapers/<name>                              stage/wallpaper.json
    the shared wallpaper library     ──►     { "path": "/abs/path" }
    rice.nix's wallpaper note          seeded from the rice's baked wallpaper;
    points here by literal path        shellbridge/quickshell re-seeds it
-        │                             live (AOIDE_WALLPAPER env re-seeds
+        │                             live (STRILLIX_WALLPAPER env re-seeds
         │                             across rebuilds)
         └──────────────┬──────────────────────┘
                         ▼
-              qml/AoideWallpaper.qml
+              qml/StrillixWallpaper.qml
    FileView on wallpaper.json; falls back to the BAKED rice wallpaper
-   (immutable store path via AOIDE_WALLPAPER) if wallpaper.json is absent/garbage
+   (immutable store path via STRILLIX_WALLPAPER) if wallpaper.json is absent/garbage
 ```
 
 The `rice-runtime-untracked` flake check fails the tree if a `rice/` runtime

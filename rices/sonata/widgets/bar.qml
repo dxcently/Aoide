@@ -96,7 +96,7 @@
 //     double-frames (live-confirmed on the calendar). It is the precedent for
 //     the BEHAVIOUR of a small hover readout, not for its chrome.
 //   · `[ mixer ]` in the colonnade's ledger launches pavucontrol through
-//     `Quickshell.execDetached` (AoideClipboard's argv-only idiom). The
+//     `Quickshell.execDetached` (StrillixClipboard's argv-only idiom). The
 //     package is added by the quickshell shell — it is that shell's widget
 //     that needs it.
 //
@@ -779,7 +779,7 @@ component WorkspaceRow: Item {
     // module, and Quickshell.Services.Pipewire's own qmltypes expose only
     // nodes/links/linkGroups — no card and no profile object. So the A2DP ↔
     // headset switch CANNOT be driven natively; the write is the one place
-    // this seam leaves QML (`Quickshell.execDetached`, the AoideClipboard
+    // this seam leaves QML (`Quickshell.execDetached`, the StrillixClipboard
     // idiom), while the READ stays native off the PipeWire node's own
     // properties. Reads from services, side effects through a process — the
     // files-not-processes rule kept intact.
@@ -905,7 +905,7 @@ component WorkspaceRow: Item {
     }
 
     // The mixer button in the colonnade's ledger. Detached, argv form — never
-    // a constructed shell string (AoideClipboard.copyById's rule).
+    // a constructed shell string (StrillixClipboard.copyById's rule).
     function openMixer() {
         Quickshell.execDetached(["pavucontrol"])
     }

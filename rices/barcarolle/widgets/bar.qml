@@ -41,7 +41,7 @@ Item {
     }
     Timer { id: settle; interval: 60; onTriggered: root.tick++ }
 
-    readonly property int rigPeek: parseInt(Quickshell.env("AOIDE_RIG_PEEK") || "-1")
+    readonly property int rigPeek: parseInt(Quickshell.env("STRILLIX_RIG_PEEK") || "-1")
     readonly property string bust: "?v=" + Date.now()
     readonly property string appGlyph: (Quickshell.env("STRILLIX_ROOT") || (Quickshell.env("HOME") + "/.strillix")) + "/rices/barcarolle/icons/launcher/finder-app.svg" + root.bust
     readonly property string iconDir: (Quickshell.env("STRILLIX_ROOT") || (Quickshell.env("HOME") + "/.strillix")) + "/rices/barcarolle/icons/"
@@ -51,7 +51,7 @@ Item {
     property int awaitingCount: 0
     property int workingCount: 0
 
-    property string wallpaperPath: Quickshell.env("AOIDE_WALLPAPER") || ""
+    property string wallpaperPath: Quickshell.env("STRILLIX_WALLPAPER") || ""
     property bool wallpaperTile: false
     FileView {
         path: (Quickshell.env("STRILLIX_ROOT") || (Quickshell.env("HOME") + "/.strillix")) + "/stage/wallpaper.json"
@@ -60,7 +60,7 @@ Item {
         printErrors: false
         onFileChanged: reload()
         onLoaded: {
-            var baked = Quickshell.env("AOIDE_WALLPAPER") || ""
+            var baked = Quickshell.env("STRILLIX_WALLPAPER") || ""
             try {
                 var d = JSON.parse(text())
                 var applies = !!(d && d.path && (!d.rice || d.rice === root.theme.riceName))
@@ -68,7 +68,7 @@ Item {
                 root.wallpaperTile = applies && d.pick === true && d.tile === true
             } catch (e) { root.wallpaperPath = baked; root.wallpaperTile = false }
         }
-        onLoadFailed: { root.wallpaperPath = Quickshell.env("AOIDE_WALLPAPER") || ""; root.wallpaperTile = false }
+        onLoadFailed: { root.wallpaperPath = Quickshell.env("STRILLIX_WALLPAPER") || ""; root.wallpaperTile = false }
     }
     FileView {
         id: stage
@@ -285,7 +285,7 @@ Item {
             exclusiveZone: 0
             color: "transparent"
             WlrLayershell.layer: WlrLayer.Top
-            WlrLayershell.namespace: "aoide-catch"
+            WlrLayershell.namespace: "strillix-catch"
             WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
             MouseArea {
                 anchors.fill: parent
@@ -1364,7 +1364,7 @@ Item {
         exclusiveZone: Kit.barHeight
         color: "transparent"
         WlrLayershell.layer: WlrLayer.Top
-        WlrLayershell.namespace: "aoide-bar"
+        WlrLayershell.namespace: "strillix-bar"
 
         Declare { id: declare; bridge: root.bridge; screen: win.screen; anchorItem: orb }
 
@@ -1851,7 +1851,7 @@ Item {
         Cell {
             id: bat
             width: 38
-            readonly property var rig: (Quickshell.env("AOIDE_RIG_BATTERY") || "").split(":")
+            readonly property var rig: (Quickshell.env("STRILLIX_RIG_BATTERY") || "").split(":")
             readonly property bool forced: rig[0] !== ""
             readonly property var dev: UPower.displayDevice
             readonly property bool present: forced || (!!dev && dev.isLaptopBattery && dev.isPresent)

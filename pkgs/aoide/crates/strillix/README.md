@@ -138,7 +138,7 @@ are core `aoide` identity, root `AGENTS.md`).
 - `commands::stubs` — `rice declare`'s handler (and the `rice transpose`
   stub): `rice declare <name>` copies the composed rice into the checkout,
   once `strillix_rice::checkout_gate` finds git clean under that rice folder and
-  the staged `rice.nix` is a v1 body (a refusal names the folder, or the file
+  the staged `rice.nix` is a body (a refusal names the folder, or the file
   with `reason: old-rice-shape`); `rice declare <name> --host` (CLI door only)
   hands the name to `strillix_rice::host_declare`, which rewrites the host
   config's declared-rice line for the next rebuild and warns, never refuses,
@@ -413,7 +413,7 @@ are core `aoide` identity, root `AGENTS.md`).
 - `commands::clipboard` — `clipboard delete <id>`/`clipboard clear`: one
   cliphist history entry or all of them, plus the launcher's cached
   thumbnails under `$XDG_CACHE_HOME/strillix-clipboard/previews`, over the
-  `cliphist` on `PATH`. The bridge `AoideClipboard.qml`'s `deleteById`/`clear`
+  `cliphist` on `PATH`. The bridge `StrillixClipboard.qml`'s `deleteById`/`clear`
   run. docs/Aoide-Wiki/concepts/cli/Clipboard-Commands.md has the commands
   and their `data.reason` codes.
 - `commands::component` — `component <slot> <verb> [arg]`, the one door for a

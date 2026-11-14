@@ -354,7 +354,7 @@ QtObject {
     }
 
     // Factory for one-shot action connections — each instance carries exactly
-    // one action and self-destructs, the same shape AoideClipboard.qml's
+    // one action and self-destructs, the same shape StrillixClipboard.qml's
     // previewFactory uses for its one-shot Process.
     property Component actionFactory: Component {
         Socket {

@@ -1,10 +1,10 @@
 // wallpaper-picker.qml — sonata's "wallpaper-picker" slot: the wallpaper
 // switcher (surface: "wallpaper").
 //
-// Ported from the shell's AoideWallpaperPicker.qml (per-rice widget-slot
+// Ported from the shell's StrillixWallpaperPicker.qml (per-rice widget-slot
 // expansion, CONTRACTS.md §5) — ownership moves from the shell to sonata's
 // score; the shell original stays in place until a later phase (Phase 6)
-// retires it, so this file and AoideWallpaperPicker.qml are momentarily
+// retires it, so this file and StrillixWallpaperPicker.qml are momentarily
 // twins. This slot is hosted by `SurfaceSlot`, not `WidgetSlot` — the root
 // below is a `PanelWindow`, not an `Item`, so it owns its own layer,
 // namespace and keyboard focus, the same contract powermenu.qml, launcher.qml
@@ -12,7 +12,7 @@
 // itself lands with Phase 6, not here.
 //
 // ── Why GlobalShortcut stays OUT of this file ───────────────────────────────
-// The shell's AoideWallpaperPicker.qml registers its own `aoide:wallpaper`
+// The shell's StrillixWallpaperPicker.qml registers its own `strillix:wallpaper`
 // Hyprland global shortcut in-process — the launcher's in-process inbound
 // idiom (ShellBridge is OUTBOUND-only, no inbound CLI command to toggle a
 // surface). That keybind stays a FACET contract on purpose, same rationale
@@ -41,7 +41,7 @@
 // strillix's own droppable output, pkgs.aoide.strillix, on systemPackages whenever
 // strillix.enable is on — P-A8 — which defaults to true here since this
 // widget only exists under the quickshell shell).
-// AoideWallpaper.qml FileView-watches that file and hot-swaps the live
+// StrillixWallpaper.qml FileView-watches that file and hot-swaps the live
 // wallpaper, and a pick suppresses the active rice's own board. No new socket,
 // no QML file write.
 //
@@ -82,17 +82,17 @@ PanelWindow {
     color: "transparent"
     visible: root.shown
     WlrLayershell.layer: WlrLayer.Overlay
-    // NOT "aoide-wallpaper" — that string belongs to the Background surface
+    // NOT "strillix-wallpaper" — that string belongs to the Background surface
     // the desktop wallpaper is painted on (shell.qml), and the shell original
     // this file was ported from shared it. Two surfaces under one namespace
     // are indistinguishable to the compositor's layerrules, so glassing this
-    // summon pane the way aoide-launcher/aoide-powermenu are glassed would
+    // summon pane the way strillix-launcher/strillix-powermenu are glassed would
     // have blurred the desktop background along with it. Renamed here, while
     // the slot is still unanchored and the string is nobody's contract yet:
     // once a host wires this slot the namespace becomes documented contract
     // (slots.md, "Window-owning slot namespaces") and is no longer a rice
     // widget's to rename.
-    WlrLayershell.namespace: "aoide-wallpaper-picker"
+    WlrLayershell.namespace: "strillix-wallpaper-picker"
     WlrLayershell.keyboardFocus: root.shown ? WlrKeyboardFocus.Exclusive
                                             : WlrKeyboardFocus.None
 

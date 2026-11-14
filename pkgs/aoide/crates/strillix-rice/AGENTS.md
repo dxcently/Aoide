@@ -113,7 +113,7 @@
   rice".** Every writer of `stage/wallpaper.json` stamps the staged rice into it
   (`wallpaper::stage_pick`/`stage_default`), and the ONE rule is read-side: a
   wallpaper applies while its `rice` equals the rice staged now, and is ignored
-  otherwise (`AoideWallpaper.qml`; CONTRACTS.md §4). `wallpaper::stage_for_rice`
+  otherwise (`StrillixWallpaper.qml`; CONTRACTS.md §4). `wallpaper::stage_for_rice`
   keeps a standing pick iff `pick.rice == <rice being staged>` and otherwise
   writes that rice's own default, so `rice stage`, the `rice mode` re-pins,
   `wallpaper set --clear` and the lane's activation seed never need to know what
@@ -232,7 +232,7 @@
   produces byte-identical output with and without it. `rice compose` copies the
   field into a scaffolded `rice.nix` (`strillix.theme.polarity`), defaulting to
   `schema::POLARITY_DEFAULT` when the source notes carry none.
-- **`compose::render_rice_nix` emits a rice body (CONTRACTS §5, v1).** The
+- **`compose::render_rice_nix` emits a rice body (CONTRACTS §5, v2).** The
   scaffold is an attrset with a `system` half (the ten `strillix` providers,
   `STRILLIX_SLOTS`, and a `module` of theme) and a `home` half (`strillix`, and
   `rice.hyprland.conf = ./hyprland.conf`). `rice compose` writes the

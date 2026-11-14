@@ -92,7 +92,7 @@ Extras are per-slot, not universal (`slots.md` has the authoritative table):
 |---|---|
 | `bar` | `stagingEngine`, `powermenu` (the powermenu slot's live `.item`), `shared` |
 | `notifications` | `notification` (the tracked `Notification` model item) |
-| `launcher` | `clipboard` (`AoideClipboard`), `ledger` (`GrimoireLedger`) |
+| `launcher` | `clipboard` (`StrillixClipboard`), `ledger` (`GrimoireLedger`) |
 | `calendar`, `powermenu`, `ricemode` | none beyond the universal pair |
 
 `required` vs optional is a design choice about failure: `bar.qml` declares
@@ -149,7 +149,7 @@ function withA(cstr, a) {
   `GlobalShortcut`.
 
 A `PanelWindow`-rooted widget's namespace is **not a free choice**:
-`aoide-powermenu` and `aoide-launcher` are what the compositor lane's
+`strillix-powermenu` and `strillix-launcher` are what the compositor lane's
 layerrules match on for glass, so the string travels with the slot as part of
 its contract (catalogued in `slots.md`).
 
@@ -167,7 +167,7 @@ The `bar` slot is the odd one: a `WidgetSlot`-hosted whole-content slot whose
 | host | you get for free | you must supply |
 |---|---|---|
 | **`StelePopout`** (bar cell popout, the default) | a real `PopupWindow` (xdg_popup of the bar) anchored under `cell`, a 4px gap under the strip, sizing from your `width` + `implicitHeight` (+6 / +8 for shadow overhang), optional `anchorEdges`/`anchorGravity` left-pinning | **all** chrome: cast shadow, body fill, 2px border, inset keyline, crown/name/tag, frieze, frames, ledger. You set `width` and `implicitHeight` |
-| **`SteleLayerPopout`** | everything `StelePopout` gives, but on its OWN wlr-layershell surface + namespace (default `aoide-calendar`), left-pinned by construction, re-anchored from the cell's scene position at each open | same as `StelePopout` |
+| **`SteleLayerPopout`** | everything `StelePopout` gives, but on its OWN wlr-layershell surface + namespace (default `strillix-calendar`), left-pinned by construction, re-anchored from the cell's scene position at each open | same as `StelePopout` |
 | **`BarPopout`** | a `PopupWindow` PLUS `GadgetFrame` chrome — pediment with the Greek order-mark, cornice, `║` column rails, `▔▁` stylobate, the `title` inscribed on the architrave, glass fill at `paletteBg` 0.72, an opt-in `reveal` unroll | only the body content (`width: parent.width`), and its colours |
 | **`WidgetSlot` in a host layout** (notification stack, bar's calendar popout, bar's rice-mode cell) | parenting, sizing from your implicit size, prop injection | root `Item`, your own footprint, all chrome |
 | **`SurfaceSlot`** | object creation with props; `.item` for the host to call | your own `PanelWindow`, layer, namespace, `keyboardFocus`, `visible` gating, scrim, dismissal, shortcuts |
@@ -457,16 +457,16 @@ the contract:
 The frosted depth that makes a popout read as a framed stele is NOT drawable
 in QML (`modules/dendrites/compositor/hyprland/default.nix`):
 
-- `layerrule = blur on` + `ignore_alpha 0.05` per namespace (`aoide-dock`,
-  `aoide-launcher`, `aoide-powermenu`).
-- `layerrule = blur_popups on, match:namespace aoide-bar` extends the blur to
+- `layerrule = blur on` + `ignore_alpha 0.05` per namespace (`strillix-dock`,
+  `strillix-launcher`, `strillix-powermenu`).
+- `layerrule = blur_popups on, match:namespace strillix-bar` extends the blur to
   the bar's `xdg_popup` children — this is what frosts every `BarPopout`- and
   `StelePopout`-hosted card without either widget touching a compositor
   option.
 - `plugin:hyprglass` layers refraction/fresnel over the flat blur for the same
   namespace set.
 - A widget opts OUT only by taking its own layer namespace
-  (`SteleLayerPopout` → `aoide-calendar`, matched by `blur off`).
+  (`SteleLayerPopout` → `strillix-calendar`, matched by `blur off`).
 
 A widget earns the frosted read by which host anchor and namespace it hangs
 under, not by anything it paints. Changing how glassy a popout feels is a

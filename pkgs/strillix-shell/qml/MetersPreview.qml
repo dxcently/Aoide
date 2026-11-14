@@ -29,7 +29,7 @@ ShellRoot {
         color: "transparent"
         exclusionMode: ExclusionMode.Ignore
         WlrLayershell.layer: WlrLayer.Overlay
-        WlrLayershell.namespace: "aoide-meters-preview"
+        WlrLayershell.namespace: "strillix-meters-preview"
         implicitWidth: 360
         implicitHeight: 300
 

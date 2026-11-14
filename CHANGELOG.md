@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### A rice's layer namespaces, shortcuts and variables are named strillix
+
+- The layer-shell surfaces are `strillix-<slot>`: `strillix-bar`, `strillix-dock`, `strillix-launcher`, `strillix-powermenu`, `strillix-wallpaper` and the rest, and a declared widget with no `namespace` gets `strillix-<slot>`. The compositor's blur and glass rules, `surfaces.json` and the healthcheck match the new names.
+- Global shortcuts register under the appid `strillix`: `strillix:launcher`, `strillix:clipboard`, `strillix:powermenu`, `strillix:dock`, `strillix:calendar`, `strillix:switcher` and `strillix:wallpaper`. A bind calls `global, strillix:<name>`, and a rice's declared `shortcut` is `strillix:<name>`.
+- The shell reads the baked wallpaper from `STRILLIX_WALLPAPER`, and barcarolle's rig variables are `STRILLIX_RIG_PEEK` and `STRILLIX_RIG_BATTERY`; nothing sets them, so a hand-set export takes the new names too. The shell's `StrillixClipboard`, `StrillixWallpaper` and `StrillixWallpaperPicker` types follow; no rice creates them, and the launcher's `clipboard` extra is the same object.
+- CONTRACTS.md §5 is v2. `checks.rice-shape` refuses a rice whose `.qml`, `.js`, `.nix`, `.json` or `.conf` files, outside any `design/` folder, spell one of these namespaces, shortcuts or variables the old way, where a surface sets a namespace, a layer rule matches one or hyprglass lists one. An old type name is left to QML, which refuses it when the widget loads. `rices/update-playbook.md` has the migration.
+- Nothing answers to the old names. After the switch, a machine copy of a rice still spelled `aoide` loses its keys and its glass, and a widget of it that reads the baked wallpaper gets none: no bind calls its shortcuts, no rule matches its surfaces, and `AOIDE_WALLPAPER` is unset; a rig variable set by its new name does not reach it either. The healthcheck may call that desktop `blank`, and does not restart the shell for it. The switch's `rice refresh` updates a built-in rice's files where the machine has not changed them since refresh last wrote them; any other file of it, and every file of a rice that is not built in, takes the new names by hand, then `strx rice mode stage <rice>` stages it again.
+- A venue that binds the shortcuts or lists the namespaces itself, as dxflake's keybinds and glass do, changes them in the same update that brings this in.
+
 ### Strillix's log prefixes, internal names and messages are named strillix
 
 - Strillix's log lines begin `[strillix/<part>]`: the shell's `greeter`, `lockhost`, `ricegadgets`, `ricesurfaces`, `shell`, `stagingengine`, `surfaceslot`, `theme`, `widgetpreview` and `widgetslot`, the healthcheck's `quickshell-health`, and `strillix shellbridge --run`'s `shellbridge`. The shell's IPC handler logs `[strillix-ipc]`. A journal search for `[aoide/…]` finds core's lines alone, core's own bridge among them as `[aoide/shellbridge]`.

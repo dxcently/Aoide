@@ -20,9 +20,11 @@
 #   3. rice-shape — a committed rice under rices/<name>/ carries its
 #      body (`rice.nix`), its `theme.json` and its `hyprland.conf`, the body
 #      is the aggregation shape, the `hyprland.conf` keeps the theme's keys
-#      out, and a rice's module values sit under lib.mkDefault. No `.nix`
-#      anywhere else: an extra module in a rice folder would join the merge
-#      silently and could set arbitrary host options.
+#      out, a rice's module values sit under lib.mkDefault, and no file it
+#      runs spells a namespace, a shortcut or a variable it shares with the
+#      shell the old way. No `.nix` anywhere else: an extra module in a rice
+#      folder would join the merge silently and could set arbitrary host
+#      options.
 #
 #   4. fmt — `nixfmt --check` over every `.nix` file in the flake's own
 #      COMMITTED source (flake.nix's declared `formatter`, run by nothing
@@ -172,9 +174,9 @@ let
       present == [ ]
     ) "the source tree holds gitignored rice runtime state: ${builtins.toString present}";
 
-  # ── Check 3: rice shape (CONTRACTS.md §5, rice shape v1) ───────────────────
+  # ── Check 3: rice shape (CONTRACTS.md §5, rice shape v2) ───────────────────
   # A committed rice under rices/<name>/ is a folder of notes and one
-  # body. Four things are checked, each because a failure is silent elsewhere:
+  # body. These are checked, each because a failure is silent elsewhere:
   #
   #   - `rice.nix` is an attrset of `system` and/or `home` halves, and a half
   #     takes only `members`, `providers` and `module` (habit's readBody refuses
@@ -192,16 +194,22 @@ let
   #     its own folder (`strayNixFiles`, `escapingNixFiles`).
   #   - a declared `strillix.theme.wallpaper` is the rice's own `wallpaper/<rice>-desktop.<ext>`,
   #     the one name the activation seed and `rice stage` both resolve.
+  #   - no file a rice runs (`lib/rices.nix`'s `runFiles`) spells a namespace, a
+  #     shortcut or a variable it shares with the shell the old way
+  #     (`oldApiFiles`): an old spelling matches nothing, and a machine copy
+  #     brought back by `strx rice declare` is where one would come from.
   #
-  # The body, the hyprland.conf and the rice modules are the reads here that look
-  # inside a file. A module is CALLED, and its values are walked for their
-  # priority only: attrset shape and `_type` tags are forced, a leaf value is not.
+  # The body, the hyprland.conf, the rice modules and the run files are the reads
+  # here that look inside a file. A module is CALLED, and its values are walked
+  # for their priority only: attrset shape and `_type` tags are forced, a leaf
+  # value is not.
   riceShape =
     {
       ricesRoot,
       discoveredNames,
       strayNixFiles,
       escapingNixFiles,
+      runFiles,
       borrow,
     }:
     let
@@ -277,6 +285,18 @@ let
       leaking = builtins.filter (
         name: builtins.pathExists (ricesRoot + "/${name}/hyprland.conf") && themeLeaks name != [ ]
       ) discoveredNames;
+
+      # `appid: "aoide"`; a declared `"aoide:<name>"` shortcut (a `$` there
+      # starts a Nix `${name}`) or a bind `global, aoide:<name>`; an `aoide-`
+      # layer namespace where a surface sets it (`namespace:`, `layerNamespace:`,
+      # `"namespace":`, `namespace =`), a layer rule matches it
+      # (`match:namespace`) or hyprglass lists it, first or later
+      # (`namespaces = strillix-dock, aoide-launcher`); and the two variables.
+      # A type name is not read: QML refuses an old one when the widget loads.
+      oldApi = ''appid[[:space:]]*:[[:space:]]*"aoide"|"aoide:[[:alnum:]_$]|global,[[:space:]]*aoide:|[Nn]amespaces?"?[[:space:]]*[:=]?[[:space:]]*"?aoide-|namespaces[[:space:]]*=[[:space:]]*([a-z0-9-]+[[:space:]]*,[[:space:]]*)*aoide-|AOIDE_WALLPAPER|AOIDE_RIG_'';
+      oldApiFiles = builtins.filter (
+        rel: builtins.length (builtins.split oldApi (builtins.readFile (ricesRoot + "/${rel}"))) > 1
+      ) runFiles;
 
       # ── A rice module sets its values under lib.mkDefault ─────────────────────
       # CONTRACTS.md §5, "The body". A rice is a default for its slots and its
@@ -410,6 +430,7 @@ let
         && badBodies == [ ]
         && leaking == [ ]
         && moduleProblemList == [ ]
+        && oldApiFiles == [ ]
       )
       "rices shape is wrong — ${
         if strayNixFiles != [ ] then
@@ -422,6 +443,8 @@ let
           "hyprland.conf sets a theme-owned key (gaps, rounding, borders, blur, colours) in: ${builtins.toString leaking}"
         else if moduleProblemList != [ ] then
           builtins.head moduleProblemList
+        else if oldApiFiles != [ ] then
+          "a rice spells a name it shares with the shell the old way (appid \"aoide\", an aoide: shortcut, an aoide- layer namespace, AOIDE_WALLPAPER or AOIDE_RIG_*), which CONTRACTS.md §5 spells strillix, in: ${builtins.toString oldApiFiles}"
         else
           "no rice.nix, theme.json or hyprland.conf in: ${builtins.toString incomplete}"
       }";

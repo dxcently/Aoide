@@ -390,7 +390,7 @@ strx wallpaper set --from-skwd --kind <static|video|we> <path|id> [--json]
   wallpaper, wallpaperJson, wallpaperStage, wallpaper}`; with `--from-skwd`, `{recorded,
   kind, identity, provider, rice, …}` and `recorded: false` with `ignored` or
   `unchanged` for the no-op shapes. The Quickshell wallpaper surface
-  (`AoideWallpaper.qml`) FileView-watches `stage/wallpaper.json` and hot-swaps live
+  (`StrillixWallpaper.qml`) FileView-watches `stage/wallpaper.json` and hot-swaps live
   — no IPC call — and both the rice's live `wallpaper` board and the layer's
   own image stand down while a pick applies.
 - **Notes:** refuses while declarative-locked (`declarative-mode-locked`) —
@@ -408,7 +408,7 @@ strx wallpaper set --from-skwd --kind <static|video|we> <path|id> [--json]
   another rice is ignored, which is why a pick survives re-staging its own
   rice (a bare `strx rice stage`, the bar's RICE control, a declarative re-seed, a
   rebuild) and never shows over a different one. Nothing is committed; the
-  baked `AOIDE_WALLPAPER` remains the boot/rebuild fallback. When the host's
+  baked `STRILLIX_WALLPAPER` remains the boot/rebuild fallback. When the host's
   wallpaper provider is not the shell's own layer (a page of its own:
   [[skwd-wall]]), the pick is the provider's to draw — this layer paints nothing
   while one applies — and every write here reconciles the provider with the stage

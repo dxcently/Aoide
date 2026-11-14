@@ -84,19 +84,19 @@ PanelWindow {
     color: "transparent"
     visible: root.shown || gs.g3o > 0
     WlrLayershell.layer: WlrLayer.Overlay
-    WlrLayershell.namespace: "aoide-launcher"
+    WlrLayershell.namespace: "strillix-launcher"
     WlrLayershell.keyboardFocus: root.shown ? WlrKeyboardFocus.Exclusive : WlrKeyboardFocus.None
     mask: Region { item: hit }
     Item { id: hit; x: root.bleed; y: root.bleed; width: 504; height: 456 }
 
     GlobalShortcut {
-        appid: "aoide"
+        appid: "strillix"
         name: "launcher"
-        description: "Summon the Aoide app launcher"
+        description: "Summon the Strillix app launcher"
         onPressed: root.toggle()
     }
     GlobalShortcut {
-        appid: "aoide"
+        appid: "strillix"
         name: "clipboard"
         description: "Open clipboard history in the Grimoire"
         onPressed: root.openClipboard()
@@ -537,7 +537,7 @@ PanelWindow {
         case "togglefloating": return "Toggle floating"
         case "fullscreen": return "Toggle fullscreen"
         case "layoutmsg": return ({ "promote": "Promote window to master", "fit visible": "Fit visible windows", "fit active": "Fit active window" })[a] || "layoutmsg " + a
-        case "global": return "Aoide " + a.replace(/^aoide:/, "")
+        case "global": return "Strillix " + a.replace(/^strillix:/, "")
         case "mouse": return a === "movewindow" ? "Move window (drag)" : (a === "resizewindow" ? "Resize window (drag)" : "mouse " + a)
         }
         return (b.dispatcher + " " + a).trim()
@@ -829,7 +829,7 @@ PanelWindow {
     }
 
     // ── wallpaper for the little desktop ──
-    property string wallpaperPath: Quickshell.env("AOIDE_WALLPAPER") || ""
+    property string wallpaperPath: Quickshell.env("STRILLIX_WALLPAPER") || ""
     property bool wallpaperPick: false
     property bool wallpaperTile: false
     property bool wallpaperStill: false
@@ -859,7 +859,7 @@ PanelWindow {
         printErrors: false
         onFileChanged: reload()
         onLoaded: {
-            var baked = Quickshell.env("AOIDE_WALLPAPER") || ""
+            var baked = Quickshell.env("STRILLIX_WALLPAPER") || ""
             try {
                 var d = JSON.parse(text())
                 var mine = !!d && (!d.rice || d.rice === root.theme.riceName)
@@ -870,7 +870,7 @@ PanelWindow {
                 root.wallpaperPosition = mine && d.position ? "" + d.position : "auto"
             } catch (e) { root.wallpaperPath = baked; root.wallpaperPick = false; root.wallpaperTile = false; root.wallpaperStill = false; root.wallpaperPosition = "auto" }
         }
-        onLoadFailed: { root.wallpaperPath = Quickshell.env("AOIDE_WALLPAPER") || ""; root.wallpaperPick = false; root.wallpaperTile = false; root.wallpaperStill = false; root.wallpaperPosition = "auto" }
+        onLoadFailed: { root.wallpaperPath = Quickshell.env("STRILLIX_WALLPAPER") || ""; root.wallpaperPick = false; root.wallpaperTile = false; root.wallpaperStill = false; root.wallpaperPosition = "auto" }
     }
     function removePicture() {
         if (root.canRemove) Quickshell.execDetached(["strillix", "wallpaper", "set", "--clear"])

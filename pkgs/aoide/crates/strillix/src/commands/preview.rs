@@ -1298,7 +1298,7 @@ fn write_mode_json(root: &Path, rice: &str) -> Result<(), String> {
 
 /// Every OTHER lane-read stage file a preview root needs merely to EXIST
 /// so its QML doesn't start with a parse warning on a missing file:
-/// `stage/wallpaper.json` (`ThemeState.qml`/`AoideWallpaper.qml:32`),
+/// `stage/wallpaper.json` (`ThemeState.qml`/`StrillixWallpaper.qml:32`),
 /// `stage/grimoire.json` (`GrimoireLedger`), and `state/usage.json`.
 /// Seeded once, on the initial build, and never overwritten again by this
 /// command -- unlike `mode.json` these aren't part of what a preview
@@ -2175,7 +2175,7 @@ mod tests {
         assert_eq!(hooks, json!({}));
 
         // the four other lane-read stage files exist -- ThemeState.qml
-        // (mode.json/wallpaper.json), AoideWallpaper.qml (wallpaper.json),
+        // (mode.json/wallpaper.json), StrillixWallpaper.qml (wallpaper.json),
         // GrimoireLedger (grimoire.json), and state/usage.json -- so none
         // of those components starts with a parse warning.
         let mode: Value = serde_json::from_str(

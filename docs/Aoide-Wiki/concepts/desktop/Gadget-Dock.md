@@ -99,7 +99,7 @@ The dock rests off-screen past the LEFT edge with its fore-edge always
 peeking, and slides fully in on either trigger:
 
 - **Hot edge** — a 6px hover strip on the left screen edge.
-- **SUPER+G** — an in-process Hyprland global shortcut (`aoide:dock`) the
+- **SUPER+G** — an in-process Hyprland global shortcut (`strillix:dock`) the
   panel registers itself, not a CLI command: it pins the dock open, and a second
   press dismisses it.
 

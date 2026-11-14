@@ -1980,10 +1980,10 @@ user picked it, and whether a picked still tiles.
 Every write stamps `schemaVersion` (`"1"`); no reader gates on it.
 
 `path` is what the wallpaper layer renders; absent or empty, the layer falls
-back to the baked `AOIDE_WALLPAPER` store path (a rice whose `wallpaper` note
+back to the baked `STRILLIX_WALLPAPER` store path (a rice whose `wallpaper` note
 is `null` bakes a deterministic solid from `palette.bg` — §1's wallpaper-art
 tier), and the active rice's own `wallpaper` board — if it authors one — may
-draw over either. The file is what `AoideWallpaper.qml` FileView-watches: any
+draw over either. The file is what `StrillixWallpaper.qml` FileView-watches: any
 writer hot-swaps the wallpaper live, with no IPC call. Writes are atomic
 (write-temp-then-rename), and this file is NEVER symlink-routed — not even in
 `Draft` mode, where the routing symlink carries `theme.json` alone.
@@ -2016,7 +2016,7 @@ is the one rule). Readers take `tile` under the same rule as `path`: only while
 a pick applies (its `rice` matches the staged rice and `pick` is `true`), and
 only for the pick's own `path`, never for a fallback. The pattern is anchored
 with one tile centred on the screen (Qt's `Image.Tile` with its default centred
-alignment): the shell's layer (`AoideWallpaper.qml`) paints it at 1:1, and a
+alignment): the shell's layer (`StrillixWallpaper.qml`) paints it at 1:1, and a
 preview of the desktop paints it shrunk the way it shrinks the screen it stands
 for, anchored the same way. A reader that shows FILES rather than the pick (a
 picture browser's thumbnails) may mirror the name rule for display. Only
@@ -2045,7 +2045,7 @@ is staged once more.
 `pick: true` additionally stops the wallpaper layer instantiating the rice's
 `wallpaper` board at all — the pick is what shows, and the board, with its
 repaint timer, is DESTROYED rather than hidden (`pkgs/strillix-shell/qml/
-slots.md`, `AoideWallpaper.qml`). An unauthored `wallpaper` board has NO
+slots.md`, `StrillixWallpaper.qml`). An unauthored `wallpaper` board has NO
 baseline floor: that slot draws for a rice that authors its own
 `widgets/wallpaper.qml` and for nothing else (§5; slots.md's wired-slot row).
 
@@ -2082,7 +2082,7 @@ One word: the name of the provider that paints a rice's wallpaper on this host.
 It is the fact `strillix.wallpaper.provider` (nucleus, §0's enable-facts table)
 written into the runtime root by the `strillix` lane's activation seed, beside the
 staged theme that seed already publishes. `quickshell` — the shell's own
-`aoide-wallpaper` layer — is the default and the answer when the file is absent
+`strillix-wallpaper` layer — is the default and the answer when the file is absent
 (a host that never activated the lane); any other word is a provider of the
 `wallpaper` registry (`dendrites/wallpaper/`) that paints picks itself.
 
@@ -7477,7 +7477,7 @@ about "broker-owned" is permanent, only "not yet a cross-crate contract".
 
 ---
 
-## 5. Rice shape — **v1**
+## 5. Rice shape — **v2**
 
 A **rice** (rice) is a committed, **host-agnostic** score. The design thesis:
 a rice is host-agnostic; ANY host in the fleet performs it by naming it, and
@@ -7665,7 +7665,7 @@ never refuses for git: it declares, and adds a `warning` field and an
 committed rices.
 
 **Old shape, no copy.** The copy also refuses when the staged `rice.nix` is
-not a v1 body: a body is a plain attrset, so its first code character is `{`
+not a body: a body is a plain attrset, so its first code character is `{`
 and that brace closes the file. A `{ lib, config, … }:` function header (the
 old shape, which `checks.rice-shape` rejects as "not an attrset") is refused
 with `reason: old-rice-shape`, naming the file. The fix is
@@ -7675,7 +7675,7 @@ does not read the body.
 
 ### Enforcement
 
-`checks.rice-shape` asserts six things about every discovered rice:
+`checks.rice-shape` asserts seven things about every discovered rice:
 
 - it carries its body (`rice.nix`), its `theme.json` and its `hyprland.conf`
   (which may be empty);
@@ -7691,7 +7691,16 @@ does not read the body.
   any `wayland.windowManager.hyprland.*` key. The check calls each module with the
   arguments a rice is handed and reads each value's priority from its override
   wrapper. It refuses a module that declares `imports` or `options`, so the walk
-  sees every value the module can set.
+  sees every value the module can set;
+- no file a rice runs (`.qml`, `.js`, `.nix`, `.json`, `.conf`, outside any
+  `design/` folder: `runFiles`) spells a name it shares with the shell and the
+  compositor the old way (`oldApiFiles`): `appid: "aoide"`, an `aoide:<name>`
+  shortcut, an `aoide-` layer namespace where a surface sets it, a layer rule
+  matches it or hyprglass lists it, `AOIDE_WALLPAPER` or `AOIDE_RIG_*`. They
+  are `strillix`, `strillix:<name>`, `strillix-<slot>`, `STRILLIX_WALLPAPER`
+  and `STRILLIX_RIG_*`; an old spelling matches nothing and fails without an
+  error. An old type name (`AoideWallpaper`) is not scanned, since QML refuses
+  it when the widget loads.
 
 The **full** "only sets `strillix.theme`" invariant is a documented convention:
 the priority half above is checked, the option set is not. Per-module
@@ -7710,6 +7719,10 @@ a documented convention backed by code review.
 **Migration to v1:** `rices/update-playbook.md` ("Rice bodies (v0 to
 v1)") is the step list: rewrite each `rice.nix` as a body, add its
 `hyprland.conf`, and drop the self-gate.
+
+**Migration to v2:** `rices/update-playbook.md` ("Rice shape v1 to v2")
+has the steps: rename each shared name, then run `checks.rice-shape`. A
+machine copy is renamed the same way, then staged again.
 
 ### The lock picture
 
@@ -7821,7 +7834,7 @@ props)` mechanism `WidgetSlot` uses, exposing the live instance as `.item`
 for the host to call directly (e.g. the bar's clef calling
 `.item.toggle()`). Its floor is the same chain's: sonata's body, else an
 optional lane-side `fallback` Component. Only `switcher` gives one, the plain
-`StrillixSwitcher.qml`, so the lane's one `aoide:switcher` shortcut toggles a
+`StrillixSwitcher.qml`, so the lane's one `strillix:switcher` shortcut toggles a
 rice's `widgets/switcher.qml` when the rice ships it and the plain switcher in
 every other rice. A shortcut that toggles a slot is registered once, by the
 lane, never also by the body it toggles: two registrations of one name
@@ -7862,7 +7875,7 @@ the slot name), with one required field, `kind`:
 
 - **`kind = "surface"`** — owns its own `PanelWindow`/layer-shell surface
   (powermenu/launcher-style overlays). Extra fields: `namespace` (nullOr
-  str; derives `aoide-<slot>` when null, since a plain nix default can't see
+  str; derives `strillix-<slot>` when null, since a plain nix default can't see
   its own attribute key), `layer` (`overlay` | `top`, default `overlay`),
   `shortcut` (nullOr str — a `GlobalShortcut` name a venue's compositor
   config may bind; naming one is not binding it, keeping the rice/venue
@@ -7983,15 +7996,15 @@ rices because `strx rice stage` can switch rices at runtime, whereas an
 expectation is about what the **active rice** should have mapped right now —
 and the option it comes from already is that, since the active rice is the
 one body the host selected. So one object, whose keys are the
-**resolved layer-shell namespaces** (`aoide-<slot>`, the same derivation
+**resolved layer-shell namespaces** (`strillix-<slot>`, the same derivation
 `widgetType.namespace` applies when null), so a consumer compares them
 directly against the compositor's layer list and derives nothing of its own:
 
 ```json
 { "rice": "sonata",
-  "surfaces": { "aoide-bar": { "perMonitor": true },
-                "aoide-wallpaper": { "perMonitor": true },
-                "aoide-dock": { "perMonitor": false } } }
+  "surfaces": { "strillix-bar": { "perMonitor": true },
+                "strillix-wallpaper": { "perMonitor": true },
+                "strillix-dock": { "perMonitor": false } } }
 ```
 
 `rice` is `config.strillix.rice`. The file is published on every host, so a
@@ -8006,7 +8019,7 @@ is the bad state the journal gate then classifies. A total count of painted
 surfaces cannot see a PARTIAL loss (the wallpaper mapped while the bar and
 dock are not), which is why the declaration exists. An **absent, unreadable,
 or empty declaration means "no expectation declared"**, and the reader falls
-back to its previous behaviour — zero `aoide-*` surfaces anywhere — rather
+back to its previous behaviour — zero `strillix-*` surfaces anywhere — rather
 than inventing one, the same tolerate-missing stance `registry.json` and the
 stage files hold. The empty case is the common one, since every
 non-declaring rice publishes it: a check with nothing to assert would read a

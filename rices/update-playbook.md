@@ -148,6 +148,43 @@ rice state from the older places (a `song` directory under `$AOIDE_ROOT`
 or `~/Aoide`, and `~/.local/state/lyra`); it stays where it is. The
 change record is in CHANGELOG.md.
 
+## Rice shape v1 to v2: the names a rice shares say strillix
+
+v2 renames the names a rice shares with the shell and the compositor. No
+shape changes, and nothing answers to the old names:
+
+| v1 | v2 |
+|---|---|
+| layer namespace `aoide-<slot>` (`aoide-bar`, `aoide-dock-scrim`, …) | `strillix-<slot>` |
+| `appid: "aoide"`, a declared `shortcut = "aoide:<name>"`, a bind `global, aoide:<name>` | `appid: "strillix"`, `"strillix:<name>"`, `global, strillix:<name>` |
+| `AOIDE_WALLPAPER` | `STRILLIX_WALLPAPER` |
+| `AOIDE_RIG_PEEK`, `AOIDE_RIG_BATTERY` | `STRILLIX_RIG_PEEK`, `STRILLIX_RIG_BATTERY` |
+| the shell's `AoideClipboard`, `AoideWallpaper`, `AoideWallpaperPicker` | `StrillixClipboard`, `StrillixWallpaper`, `StrillixWallpaperPicker` |
+
+To migrate a rice:
+
+1. Rename every v1 name in the files it runs, comments included: each `.qml`,
+   `.js`, `.nix`, `.json` and `.conf` outside any `design/` folder, its
+   `rice.nix`, `theme.json`, `hyprland.conf` and `_widgets/` among them.
+2. Run `checks.rice-shape`: it names each of those files that still spells a
+   namespace, a shortcut or a variable the v1 way. An old type name is not
+   scanned; QML refuses it when the widget loads.
+
+A machine copy under `$STRILLIX_ROOT/rices` is renamed the same way, but
+`checks.rice-shape` reads only the checkout's `rices/`: it sees a machine copy
+once `strx rice declare` has copied it there. At the switch, `strx rice
+refresh` brings a built-in rice's files up to the shipped ones where the
+machine has not changed them since refresh last wrote them. The rest is
+renamed by hand: a file the machine edited, a file refresh has no record of,
+and every file of a rice that is not built in. `strx rice mode stage <rice>`
+then stages the renamed copy. Until then no bind calls the rice's own
+shortcuts, its surfaces lose their glass, a widget that reads the baked
+wallpaper gets none, a rig variable set by its v2 name does not reach it, and
+the healthcheck may call the desktop `blank`.
+
+A venue that binds the shortcuts or lists the namespaces itself (keybinds,
+layerrules, hyprglass) renames them in the same update that brings v2 in.
+
 ## What this playbook does NOT cover
 
 The other four surfaces named in early per-rice-widget sketches — `greeter`,

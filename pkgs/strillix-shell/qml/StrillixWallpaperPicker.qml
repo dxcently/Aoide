@@ -1,12 +1,12 @@
-// AoideWallpaperPicker.qml — the wallpaper switcher (surface: "wallpaper").
+// StrillixWallpaperPicker.qml — the wallpaper switcher (surface: "wallpaper").
 //
 // Quickshell-native wallpaper picker over the shared wallpaper library
 // rice/wallpapers/. A summoned overlay: hidden by default, it drops onto the
 // OVERLAY layer with an EXCLUSIVE keyboard grab, shows a GridView of wallpaper
 // thumbnails, and on pick switches the LIVE wallpaper. Trigger is a Hyprland
-// GLOBAL shortcut (aoide:wallpaper) registered in-process — the compositor
+// GLOBAL shortcut (strillix:wallpaper) registered in-process — the compositor
 // binds a combo to it (modules/dendrites/compositor/hyprland/behaviour.nix:
-// `bind = SUPER, W, global, aoide:wallpaper`). Escape / a scrim click / a pick
+// `bind = SUPER, W, global, strillix:wallpaper`). Escape / a scrim click / a pick
 // dismisses it.
 //
 // The rice's picker comes first: when the launcher exposes `openPictures()`
@@ -25,7 +25,7 @@
 // strillix's own droppable output, pkgs.aoide.strillix, on systemPackages whenever
 // strillix.enable is on — P-A8 — which defaults to true here since this
 // widget only exists under the strillix lane).
-// AoideWallpaper.qml
+// StrillixWallpaper.qml
 // FileView-watches that file and hot-swaps the live wallpaper. No new socket,
 // no QML file write.
 //
@@ -73,15 +73,15 @@ PanelWindow {
     color: "transparent"
     visible: root.shown
     WlrLayershell.layer: WlrLayer.Overlay
-    WlrLayershell.namespace: "aoide-wallpaper"
+    WlrLayershell.namespace: "strillix-wallpaper"
     WlrLayershell.keyboardFocus: root.shown ? WlrKeyboardFocus.Exclusive
                                             : WlrKeyboardFocus.None
 
-    // ── Trigger: Hyprland global shortcut (aoide:wallpaper) ────────────────
+    // ── Trigger: Hyprland global shortcut (strillix:wallpaper) ────────────────
     GlobalShortcut {
-        appid: "aoide"
+        appid: "strillix"
         name: "wallpaper"
-        description: "Summon the Aoide wallpaper switcher"
+        description: "Summon the Strillix wallpaper switcher"
         onPressed: root.summon()
     }
 

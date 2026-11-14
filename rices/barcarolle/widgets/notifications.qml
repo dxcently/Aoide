@@ -138,7 +138,7 @@ PanelWindow {
     visible: root.head !== null && !root.yielded
     mask: Region { item: hit }
     WlrLayershell.layer: WlrLayer.Overlay
-    WlrLayershell.namespace: "aoide-notifications"
+    WlrLayershell.namespace: "strillix-notifications"
 
     onHeadKeyChanged: if (root.headKey !== "") fade.restart()
 

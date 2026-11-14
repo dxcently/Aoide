@@ -35,7 +35,7 @@ ShellRoot {
         color: "transparent"
         exclusionMode: ExclusionMode.Ignore
         WlrLayershell.layer: WlrLayer.Overlay
-        WlrLayershell.namespace: "aoide-conductor-preview"
+        WlrLayershell.namespace: "strillix-conductor-preview"
         implicitWidth: 360
         implicitHeight: 520
 

@@ -78,7 +78,7 @@ PanelWindow {
     implicitHeight: 713
     color: "transparent"
     WlrLayershell.layer: WlrLayer.Overlay
-    WlrLayershell.namespace: "aoide-dock"
+    WlrLayershell.namespace: "strillix-dock"
     WlrLayershell.keyboardFocus: root.shown ? WlrKeyboardFocus.OnDemand : WlrKeyboardFocus.None
 
     HyprlandFocusGrab { windows: [root]; active: root.shown; onCleared: root.hide() }

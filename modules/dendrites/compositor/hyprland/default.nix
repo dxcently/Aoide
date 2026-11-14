@@ -83,11 +83,11 @@ let
   # no-op, not an accident of which rice happens to be active.
   #
   # Each entry's namespace is its declared `namespace` field, or else
-  # "aoide-<slot>" from the attribute key (the option doc's contract — a
+  # "strillix-<slot>" from the attribute key (the option doc's contract — a
   # plain nix default can't see its own key, so the consumer derives it).
-  # The layerrule idiom matches the aoide-dock/launcher/powermenu/calendar
+  # The layerrule idiom matches the strillix-dock/launcher/powermenu/calendar
   # rules above exactly: blur on + ignore_alpha when blurred, blur off
-  # (pinned, same as aoide-calendar) when not — never an unmatched
+  # (pinned, same as strillix-calendar) when not — never an unmatched
   # namespace left to a future blanket rule's mercy.
   #
   # NOTE on `layer` (overlay/top): checked against the built Hyprland
@@ -98,10 +98,10 @@ let
   # it's the QML runtime's WlrLayershell.layer choice (Phase 4), not
   # this file's business.
   # Filter to kind == "surface" first: a `dock` entry has no layer surface
-  # of its own (it mounts as an Item inside aoide-dock's PanelWindow), so
+  # of its own (it mounts as an Item inside strillix-dock's PanelWindow), so
   # it must never generate a layerrule/hyprglass namespace here.
   declaredWidgets = lib.mapAttrsToList (slot: w: {
-    namespace = if w.namespace != null then w.namespace else "aoide-${slot}";
+    namespace = if w.namespace != null then w.namespace else "strillix-${slot}";
     inherit (w) blur;
   }) (lib.filterAttrs (_: w: w.kind == "surface") arr.widgets);
 
@@ -116,9 +116,9 @@ let
       "layerrule = blur off, match:namespace ${e.namespace}\n"
   ) declaredWidgets;
 
-  # Same glass-namespace idiom as aoide-dock/launcher/powermenu: only
+  # Same glass-namespace idiom as strillix-dock/launcher/powermenu: only
   # blurred widgets join the hyprglass namespace list (an unblurred entry
-  # stays deliberately absent, same reasoning as aoide-calendar above).
+  # stays deliberately absent, same reasoning as strillix-calendar above).
   widgetGlassNamespaces = lib.concatStringsSep ", " (
     map (e: e.namespace) (lib.filter (e: e.blur) declaredWidgets)
   );
@@ -150,33 +150,33 @@ let
     }
 
     # Glass for the quickshell surfaces — the lane's fixed namespace set,
-    # not a per-rice choice: the bar (aoide-bar) is never glassed (opaque
-    # marble), the center-left dock (aoide-dock) layer IS blurred/glassed
+    # not a per-rice choice: the bar (strillix-bar) is never glassed (opaque
+    # marble), the center-left dock (strillix-dock) layer IS blurred/glassed
     # (its panels are mostly opaque marble — only the TERMINALS temple is
     # translucent, so the blur + hyprglass
     # frost THROUGH it while the opaque Conductor/Meters/Power panels hide it),
     # the launcher stays frosted glass, and the wallpaper is never blurred.
     # blur_popups frosts the bar's popouts. ignore_alpha keeps transparent
     # regions from rendering as a grey blur stripe.
-    # aoide-launcher: the summoned launcher pane rides the same frosted glass as
+    # strillix-launcher: the summoned launcher pane rides the same frosted glass as
     # the dock (it is a Pantheon pane too). Blur + ignore_alpha so its cream
     # glass frosts over whatever window it covers and its transparent scrim/edges
     # don't render as a grey blur stripe.
-    # aoide-powermenu: the Exodos powermenu (AoideExodos.qml) — the same
+    # strillix-powermenu: the Exodos powermenu (AoideExodos.qml) — the same
     # summoned-overlay glass recipe as the launcher: its full-screen ink scrim
     # and translucent steles frost over the desktop behind.
-    layerrule = blur on, match:namespace aoide-dock
-    layerrule = blur on, match:namespace aoide-launcher
-    layerrule = blur on, match:namespace aoide-powermenu
-    layerrule = ignore_alpha 0.05, match:namespace aoide-dock
-    layerrule = ignore_alpha 0.05, match:namespace aoide-launcher
-    layerrule = ignore_alpha 0.05, match:namespace aoide-powermenu
+    layerrule = blur on, match:namespace strillix-dock
+    layerrule = blur on, match:namespace strillix-launcher
+    layerrule = blur on, match:namespace strillix-powermenu
+    layerrule = ignore_alpha 0.05, match:namespace strillix-dock
+    layerrule = ignore_alpha 0.05, match:namespace strillix-launcher
+    layerrule = ignore_alpha 0.05, match:namespace strillix-powermenu
     # blur_popups extends the glass to the bar's PopupWindow children (the
     # gadget popouts) — same 0.5x snake_case rework spelling as ignore_alpha.
-    layerrule = blur_popups on, match:namespace aoide-bar
-    layerrule = ignore_alpha 0.05, match:namespace aoide-bar
-    # aoide-calendar: the calendar popout rides its OWN layer surface
-    # (SteleLayerPopout — not an xdg_popup of aoide-bar) precisely so
+    layerrule = blur_popups on, match:namespace strillix-bar
+    layerrule = ignore_alpha 0.05, match:namespace strillix-bar
+    # strillix-calendar: the calendar popout rides its OWN layer surface
+    # (SteleLayerPopout — not an xdg_popup of strillix-bar) precisely so
     # blur_popups above cannot reach it: its papyrus sheet keeps an opaque
     # marble frame but cuts a transparent window over the day grid, and that
     # window must show the desktop CRISPLY (the User, 2026-08-13: "no blur").
@@ -184,11 +184,11 @@ let
     # the exclusion EXPLICITLY so a future blanket layer rule can't silently
     # frost it. Deliberately absent from the hyprglass namespaces below for
     # the same reason.
-    layerrule = blur off, match:namespace aoide-calendar
+    layerrule = blur off, match:namespace strillix-calendar
 
     # strillix.layout.widgets (declared widget-type registry, v1): one
     # layerrule pair (or a pinned blur-off) per registered slot, same idiom
-    # as the aoide-* rules above. Empty today for every rice — expands only
+    # as the strillix-* rules above. Empty today for every rice — expands only
     # once a rice's rice.nix actually populates .widgets (Phase 3/4/6).
     ${widgetLayerRules}
     # hyprglass (pkgs/hyprglass, loaded via the HM plugins list below):
@@ -229,7 +229,7 @@ let
         }
         layers {
             enabled = ${if blurEnabled then "1" else "0"}
-            namespaces = aoide-dock, aoide-launcher, aoide-powermenu${
+            namespaces = strillix-dock, strillix-launcher, strillix-powermenu${
               lib.optionalString (widgetGlassNamespaces != "") ", ${widgetGlassNamespaces}"
             }
             preset = glass
@@ -250,7 +250,7 @@ let
   # rules are NOT here — they live in behaviour.nix beside this file, which
   # owns everything that must survive a re-rice untouched. This file keeps
   # only the theme-derived look above plus the session plumbing below. The
-  # appearance rules (kitty rounding, the aoide-* layerrules) stay
+  # appearance rules (kitty rounding, the strillix-* layerrules) stay
   # here on purpose: they are theme's business, not behaviour.
 in
 {

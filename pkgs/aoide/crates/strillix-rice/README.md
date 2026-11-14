@@ -37,13 +37,13 @@ a config file). Paint-side — ships in `strillix`, not core.
   The declarative arm of `strx reload` (`reload.rs`) reloads the compositor's
   config through `live::reload_config`, and no rice file otherwise.
 - `compose` — the pure `rice compose` scaffolding engine: the rice body
-  (`rice.nix`, CONTRACTS §5 v1) and the `hyprland.conf` header it starts from.
+  (`rice.nix`, CONTRACTS §5 v2) and the `hyprland.conf` header it starts from.
 - `wallpaper` — wallpaper-art derivation + resolution, and `stage/wallpaper.json`'s
   writers, which stamp the staged rice into every file they write
   (`stage_for_rice`, `stage_rice_default`, `stage_pick`, `staged_rice`;
   CONTRACTS.md §4's wallpaper.json entry). The rule that a wallpaper applies only
   while its `rice` matches the staged rice is read-side — one rule, in
-  `AoideWallpaper.qml`. `pick_tiles` decides whether a still pick tiles
+  `StrillixWallpaper.qml`. `pick_tiles` decides whether a still pick tiles
   (`wallpaper set --position`, else a `_tile` file name); `stage_pick` writes the
   answer as `tile`/`position`, and the reader paints `tile` under that same
   read-side rule.
@@ -109,7 +109,7 @@ a config file). Paint-side — ships in `strillix`, not core.
   absent, unreadable, or EMPTY declaration (the lane publishes the file on
   every host, so every non-declaring rice ships `{"surfaces": {}}`) means no
   expectation is declared and `shell_has_zero_layers` — the older total
-  `aoide-*` count — decides exactly as before. A declared set is first
+  `strillix-*` count — decides exactly as before. A declared set is first
   intersected with the slots of `run/qml/components.json` (`CONTRACTS.md
   §4`), because the shell instantiates only the selected components: a rice
   that declares a `dock` surface on a host without the dock component does

@@ -75,7 +75,7 @@ one whole unit. `switcher` is the one that gives one — the plain
 shortcut must open something in every rice.
 
 **`wallpaper` is the one exception: it has NO baseline floor.** Its anchor
-(`AoideWallpaper.qml`) does not use `resolveRice` at all — it gates on
+(`StrillixWallpaper.qml`) does not use `resolveRice` at all — it gates on
 `stagingEngine.has(<active rice>, "wallpaper")`, so the board draws for a rice
 that authors its OWN `widgets/wallpaper.qml` and for nothing else, and sonata
 ships no body for this slot, so no other rice's version can be resolved into
@@ -155,18 +155,18 @@ is instantiated only when it holds:
 
 | component | what the gate holds back |
 | --- | --- |
-| `wallpaper` | the per-screen Background `Variants` (its model is empty) and `AoideWallpaperPicker` |
+| `wallpaper` | the per-screen Background `Variants` (its model is empty) and `StrillixWallpaperPicker` |
 | `bar` | the per-screen bar `Variants` (its model is empty) |
-| `dock` | the `dock` `SurfaceSlot` and its `aoide:dock` `GlobalShortcut` |
+| `dock` | the `dock` `SurfaceSlot` and its `strillix:dock` `GlobalShortcut` |
 | `powermenu`, `launcher` | their `SurfaceSlot` |
-| `calendar` | the `calendar` `SurfaceSlot` and its `aoide:calendar` `GlobalShortcut` |
-| `switcher` | the `switcher` `SurfaceSlot` and its `aoide:switcher` `GlobalShortcut` |
+| `calendar` | the `calendar` `SurfaceSlot` and its `strillix:calendar` `GlobalShortcut` |
+| `switcher` | the `switcher` `SurfaceSlot` and its `strillix:switcher` `GlobalShortcut` |
 | `notifications` | the `notifications` `SurfaceSlot` |
 | `lock` | `LockHost`, so the `lock` IPC target too |
 
 An absent or unreadable `components.json` is the empty set: nothing above is
 instantiated (fail closed). The infrastructure is never gated: `ThemeState`,
-`ShellBridge`, `StagingEngine`, `StrillixIpc`, `AoideClipboard`,
+`ShellBridge`, `StagingEngine`, `StrillixIpc`, `StrillixClipboard`,
 `GrimoireLedger` and `RiceSurfaces` exist in every session. The `component` IPC target
 (`ipc call component act <slot> <verb> <arg>`, run by `strx component` through
 the bridge) reaches a slot's live item by name, and only for the closed verbs
@@ -183,10 +183,10 @@ declared surface only when its component is selected.
 
 | slot | anchor kind | host anchor | extras | fallback |
 | --- | --- | --- | --- | --- |
-| `calendar` | `SurfaceSlot` | `shell.qml` (lane) — `SurfaceSlot { slot: "calendar" }`, behind the `calendar` component; the bar's clock measures its cell into `shared.calendarAnchor` and asks the bridge to toggle it on the bar's screen; the lane's `aoide:calendar` `GlobalShortcut` calls `.item.toggle()` | `shared` (session-state QtObject: the anchor in, `calendarOpen` out) | none — an unauthored `calendar` slot renders nothing (the surface has no body to show) |
+| `calendar` | `SurfaceSlot` | `shell.qml` (lane) — `SurfaceSlot { slot: "calendar" }`, behind the `calendar` component; the bar's clock measures its cell into `shared.calendarAnchor` and asks the bridge to toggle it on the bar's screen; the lane's `strillix:calendar` `GlobalShortcut` calls `.item.toggle()` | `shared` (session-state QtObject: the anchor in, `calendarOpen` out) | none — an unauthored `calendar` slot renders nothing (the surface has no body to show) |
 | `notifications` | retired 2026-08-16 — the Quickshell `NotificationServer` surface (AoideNotifications.qml) is gone; dunst owns `org.freedesktop.Notifications`. Superseded by `notifications` below, which draws the popup WITHOUT owning the bus name | — | — |
 | `notifications` | `SurfaceSlot` | `shell.qml` (lane) — `SurfaceSlot { slot: "notifications" }`, behind the `notifications` component; the notification popup, drawn from `state/stage/notifications.json` (dunst draws nothing — see `modules/dendrites/dunst.nix`) | none | none — sonata's `widgets/notifications.qml` is the floor |
-| `dock` | `SurfaceSlot` | `shell.qml` (lane) — `SurfaceSlot { slot: "dock" }`, behind the `dock` component; the bar's cells ask the bridge (`bridge.component("dock", "toggle")`), and the `aoide:dock` (SUPER+G) `GlobalShortcut` calls `.item.toggle()` | `shared` (session-state QtObject; a dock that publishes `dockShown`/`dockScreen` lights the bar's cell), `stagingEngine` (so the dock's own embedded gadget `WidgetSlot`s can resolve) | none — sonata's `widgets/dock.qml` is the floor |
+| `dock` | `SurfaceSlot` | `shell.qml` (lane) — `SurfaceSlot { slot: "dock" }`, behind the `dock` component; the bar's cells ask the bridge (`bridge.component("dock", "toggle")`), and the `strillix:dock` (SUPER+G) `GlobalShortcut` calls `.item.toggle()` | `shared` (session-state QtObject; a dock that publishes `dockShown`/`dockScreen` lights the bar's cell), `stagingEngine` (so the dock's own embedded gadget `WidgetSlot`s can resolve) | none — sonata's `widgets/dock.qml` is the floor |
 | `conductor` | `WidgetSlot` | `dock.qml` (sonata) — the dock's gadget column (`WidgetSlot { slot: "conductor" }`) | `shared` | none — sonata's own `widgets/conductor.qml` IS the baseline floor |
 | `terminals` | `WidgetSlot` | `dock.qml` (sonata) — the dock's gadget column (`WidgetSlot { slot: "terminals" }`) | `shared` | none — sonata's own `widgets/terminals.qml` IS the baseline floor |
 | `usage` | `WidgetSlot` | `dock.qml` (sonata) — the dock's gadget column (`WidgetSlot { slot: "usage" }`), visible only once it reports nonzero `implicitHeight` | none | none — sonata's own `widgets/usage.qml` IS the baseline floor |
@@ -194,23 +194,23 @@ declared surface only when its component is selected.
 | `power` | `WidgetSlot` | `dock.qml` (sonata) — the dock's gadget column (`WidgetSlot { slot: "power" }`) | none | none — sonata's own `widgets/power.qml` IS the baseline floor |
 | `notifications-center` | `WidgetSlot` | `dock.qml` (sonata) — the dock's gadget column (`WidgetSlot { slot: "notifications-center" }`), the column's last shipped gadget | none | none — sonata's own `widgets/notifications-center.qml` IS the baseline floor; no lane-side Component fallback is wired |
 | `powermenu` | `SurfaceSlot` | `shell.qml` (lane) — `SurfaceSlot { slot: "powermenu" }`, behind the `powermenu` component; the bar's clef asks the bridge (`bridge.component("powermenu", "toggle")`) | none | none — sonata's `widgets/powermenu.qml` is the floor |
-| `launcher` | `SurfaceSlot` | `shell.qml` (lane) — `SurfaceSlot { slot: "launcher" }`, behind the `launcher` component; `AoideWallpaperPicker`'s `aoide:wallpaper` shortcut asks the bridge for `openPictures` when the launcher reports that verb (`launcherHasPictures`), else the plain wallpaper picker opens | `clipboard` (the `AoideClipboard` instance), `ledger` (`GrimoireLedger` — stays in the lane, a data seam not chrome) | none — sonata's `widgets/launcher.qml` is the floor |
-| `switcher` | `SurfaceSlot` | `shell.qml` (lane) — `SurfaceSlot { slot: "switcher" }`, behind the `switcher` component; the lane's one `aoide:switcher` `GlobalShortcut` calls `.item.toggle()` (the venue binds the combo; a body registers no shortcut of its own) | none | the lane-side `fallback` `StrillixSwitcher.qml`: the plain window switcher (Hyprland clients, icon + title, the focused workspace first; ←/→/Tab/Shift+Tab move, Enter or the modifier's release focuses through `bridge.focusWindow`, Esc cancels). A rice dresses it by shipping `widgets/switcher.qml`, whose `PanelWindow` exposes `toggle()` |
+| `launcher` | `SurfaceSlot` | `shell.qml` (lane) — `SurfaceSlot { slot: "launcher" }`, behind the `launcher` component; `StrillixWallpaperPicker`'s `strillix:wallpaper` shortcut asks the bridge for `openPictures` when the launcher reports that verb (`launcherHasPictures`), else the plain wallpaper picker opens | `clipboard` (the `StrillixClipboard` instance), `ledger` (`GrimoireLedger` — stays in the lane, a data seam not chrome) | none — sonata's `widgets/launcher.qml` is the floor |
+| `switcher` | `SurfaceSlot` | `shell.qml` (lane) — `SurfaceSlot { slot: "switcher" }`, behind the `switcher` component; the lane's one `strillix:switcher` `GlobalShortcut` calls `.item.toggle()` (the venue binds the combo; a body registers no shortcut of its own) | none | the lane-side `fallback` `StrillixSwitcher.qml`: the plain window switcher (Hyprland clients, icon + title, the focused workspace first; ←/→/Tab/Shift+Tab move, Enter or the modifier's release focuses through `bridge.focusWindow`, Esc cancels). A rice dresses it by shipping `widgets/switcher.qml`, whose `PanelWindow` exposes `toggle()` |
 | `bar` | `WidgetSlot` | `shell.qml` (lane) — the bar's `PanelWindow` content, `WidgetSlot { slot: "bar" }`, behind the `bar` component | `shared` (session-state QtObject: the calendar's anchor, the dock's state), `stagingEngine` (so the bar's embedded ricemode `WidgetSlot` can resolve) | none — sonata's `widgets/bar.qml` is the floor |
 | `ricemode` | `WidgetSlot` | every bar body — `WidgetSlot { slot: "ricemode" }` in the bar's right stave, enforced by `checks.bar-ricemode`; the shared rice-mode control (any click opens the one menu: the runtime rices's rices, back to declarative, then the draft rows, which a rice's body may leave to another surface of its own, as barcarolle's Start menu does; nothing switches until a row is chosen) | none | none — sonata's `widgets/ricemode.qml` IS the baseline floor; a rice may dress it with its own body (cadenza does) |
 | `lockscreen` | session-lock host | `LockHost.qml` (lane), anchored in `shell.qml` behind the `lock` component; `strx lock` locks through it (`ipc call lock lock`) when the staged rice's own manifest entry has this slot, else runs hyprlock | `theme`, `bridge` (null: no shellbridge, so no power or other bridge action, behind a locked screen), `auth`: `message`, `messageIsError`, `responseRequired`, `responseVisible`, `busy`, `failures` (wrong answers this lock), `userName` (the passwd name), `respond(text)`, signal `unlocked()`; the face sets `ready` to `true` once up, within 3 s | the host's floor password field (also for a face not ready in time): no baseline rice is ever borrowed, so a rice without a face is a hyprlock rice |
 | `greeter` | greeter host | `GreeterHost.qml` (lane), the `shell.qml` of the greeter lane's store tree (`modules/dendrites/greeter.nix`), chosen at build time when the DECLARED rice ships this slot (`strillix.rices.greeter`); a rice that ships none logs in through ly | `theme`, `bridge` (null: no shellbridge before login), `auth`: `message`, `messageIsError`, `responseRequired`, `responseVisible`, `busy`, `failures`, `users` (`[{ name, realName }]`, passwd uid ≥ 1000 with a login shell), `selectedUser`, `selectUser(name)` (`""` goes back to choosing), `respond(text)`; the face sets `ready` to `true` once up, within 3 s | the host's floor user + password fields (also for a face not ready in time) |
-| `wallpaper` | `WidgetSlot` | `AoideWallpaper.qml` (lane) — inside the per-screen Background layer surface (behind the `wallpaper` component), over the staged wallpaper image | none | none — this slot has NO baseline floor: the anchor gates on `stagingEngine.has(<active rice>, "wallpaper")`, so an unauthored `wallpaper` slot renders NOTHING and the wallpaper image stands (sonata ships no body here, so its twin can never be resolved in as a floor); cadenza's `widgets/wallpaper.qml` is the live board, and the anchor DESTROYS it (not hides it) while a `wallpaper set` pick applies — and, when the host's provider is `skwd-wall`, paints nothing at all (no image, no board, no palette rectangle) while a pick applies, since that provider has the pick on screen |
+| `wallpaper` | `WidgetSlot` | `StrillixWallpaper.qml` (lane) — inside the per-screen Background layer surface (behind the `wallpaper` component), over the staged wallpaper image | none | none — this slot has NO baseline floor: the anchor gates on `stagingEngine.has(<active rice>, "wallpaper")`, so an unauthored `wallpaper` slot renders NOTHING and the wallpaper image stands (sonata ships no body here, so its twin can never be resolved in as a floor); cadenza's `widgets/wallpaper.qml` is the live board, and the anchor DESTROYS it (not hides it) while a `wallpaper set` pick applies — and, when the host's provider is `skwd-wall`, paints nothing at all (no image, no board, no palette rectangle) while a pick applies, since that provider has the pick on screen |
 
 ### Window-owning slot namespaces (`SurfaceSlot` contract)
 
 | slot | WlrLayershell namespace | layer |
 | --- | --- | --- |
-| `dock` | `aoide-dock` | Overlay |
-| `powermenu` | `aoide-powermenu` | Overlay |
-| `calendar` | `aoide-calendar` | Overlay |
-| `launcher` | `aoide-launcher` | Overlay |
-| `switcher` | `aoide-switcher` | Overlay |
+| `dock` | `strillix-dock` | Overlay |
+| `powermenu` | `strillix-powermenu` | Overlay |
+| `calendar` | `strillix-calendar` | Overlay |
+| `launcher` | `strillix-launcher` | Overlay |
+| `switcher` | `strillix-switcher` | Overlay |
 
 The compositor lane's glass layerrules (`modules/dendrites/compositor/hyprland/default.nix`)
 match on these namespaces (`layerrule blur` + hyprglass) — the namespace
@@ -318,7 +318,7 @@ exclusive (`rice lint` rejects a field from the wrong kind):
 
 | kind | fields | renders |
 | --- | --- | --- |
-| `surface` | `namespace` (nullOr str; derives `aoide-<slot>` when null), `layer` (`overlay` \| `top`, default `overlay`), `shortcut` (nullOr str — a `GlobalShortcut` name, split on `:` into appid/name), `blur` (bool, default true) | its own `PanelWindow`/layer-shell surface — hosted by `RiceSurfaces.qml`, a non-visual `Instantiator` of `SurfaceSlot`s, one per declared surface-kind entry the active rice carries |
+| `surface` | `namespace` (nullOr str; derives `strillix-<slot>` when null), `layer` (`overlay` \| `top`, default `overlay`), `shortcut` (nullOr str — a `GlobalShortcut` name, split on `:` into appid/name), `blur` (bool, default true) | its own `PanelWindow`/layer-shell surface — hosted by `RiceSurfaces.qml`, a non-visual `Instantiator` of `SurfaceSlot`s, one per declared surface-kind entry the active rice carries |
 | `dock` | `order` (nullOr int, sort key; default treated as 0) | an `Item` mounted into sonata's `dock.qml`'s gadget column — hosted by `RiceGadgets.qml`, a `Repeater` of `WidgetSlot`s, sorted `(order ?? 0, slot-name)` ascending; mounted as the column's last children, after the shipped gadgets and `notifications-center` |
 
 `order` exists because the registry is serialized through
@@ -349,7 +349,7 @@ declaration with no body is inert, not an error.
 
 The worked example is a surface declared in a rice's `rice.nix`:
 `strillix.layout.widgets.demo = { kind = "surface"; namespace =
-"aoide-<rice>-demo"; layer = "overlay"; shortcut = "aoide:<rice>-demo"; blur =
+"strillix-<rice>-demo"; layer = "overlay"; shortcut = "strillix:<rice>-demo"; blur =
 true; }`, with `widgets/demo.qml` its `PanelWindow`-rooted body — proving
 build-walk → `rice lint` → `rice stage`/`preview` hot-sync →
 `RiceSurfaces.qml` end to end. No committed rice declares a `kind: "dock"`

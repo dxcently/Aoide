@@ -7,11 +7,11 @@
 // body is what gets previewed.
 //
 // Contract (slots.md, the same one sonata's powermenu keeps):
-//   · namespace `aoide-powermenu`, layer Overlay, full-screen, no exclusive
+//   · namespace `strillix-powermenu`, layer Overlay, full-screen, no exclusive
 //     zone; keyboard focus Exclusive while shown.
 //   · `toggle()` / `show()` / `hide()` — the bar's `[⏻]` calls `toggle()`
 //     on the slot's live `.item`.
-//   · GlobalShortcut `aoide:powermenu` toggles it too.
+//   · GlobalShortcut `strillix:powermenu` toggles it too.
 //   · The body sends `{ cmd: "power", action }` through `bridge.sendCommand`;
 //     QML never shells out.
 import QtQuick
@@ -43,12 +43,12 @@ PanelWindow {
     color: "transparent"
     visible: root.shown || lingerTimer.running
     WlrLayershell.layer: WlrLayer.Overlay
-    WlrLayershell.namespace: "aoide-powermenu"
+    WlrLayershell.namespace: "strillix-powermenu"
     WlrLayershell.keyboardFocus: root.shown ? WlrKeyboardFocus.Exclusive
                                             : WlrKeyboardFocus.None
 
     GlobalShortcut {
-        appid: "aoide"
+        appid: "strillix"
         name: "powermenu"
         description: "Summon the power menu"
         onPressed: root.toggle()

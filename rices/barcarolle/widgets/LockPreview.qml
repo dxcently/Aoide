@@ -142,7 +142,7 @@ Item {
         NumberAnimation { target: root; property: "shakeX"; to: 0; duration: 55; easing.type: Easing.OutQuad }
     }
 
-    property string wallpaperPath: Quickshell.env("AOIDE_WALLPAPER") || ""
+    property string wallpaperPath: Quickshell.env("STRILLIX_WALLPAPER") || ""
     property bool wallpaperTile: false
     FileView {
         path: root.strillixRoot + "/stage/wallpaper.json"
@@ -151,7 +151,7 @@ Item {
         printErrors: false
         onFileChanged: reload()
         onLoaded: {
-            var baked = Quickshell.env("AOIDE_WALLPAPER") || ""
+            var baked = Quickshell.env("STRILLIX_WALLPAPER") || ""
             try {
                 var d = JSON.parse(text())
                 var applies = !!d && !!d.path && (!d.rice || d.rice === (root.theme ? root.theme.riceName : ""))
@@ -159,7 +159,7 @@ Item {
                 root.wallpaperTile = applies && d.pick === true && d.tile === true
             } catch (e) { root.wallpaperPath = baked; root.wallpaperTile = false }
         }
-        onLoadFailed: { root.wallpaperPath = Quickshell.env("AOIDE_WALLPAPER") || ""; root.wallpaperTile = false }
+        onLoadFailed: { root.wallpaperPath = Quickshell.env("STRILLIX_WALLPAPER") || ""; root.wallpaperTile = false }
     }
 
     // The account picture in its Aero frame: a white halo at rest, the bar's

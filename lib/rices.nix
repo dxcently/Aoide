@@ -252,20 +252,27 @@ let
   # not `lib.filesystem`: the check is the replacement for a walker that is gone,
   # and a check that needed one would not survive it.
   #
-  # ── One walk, two questions ─────────────────────────────────────────────────
-  # Every `.nix` under one rice. Two callers want different views of that list,
-  # so the differences are knobs rather than a second recursion:
+  # ── One walk, three questions ───────────────────────────────────────────────
+  # Every `.nix` under one rice, or every file of the kinds a caller names.
+  # Three callers want different views of that list, so the differences are
+  # knobs rather than a second recursion:
   #
-  #   `pruneShelf`  skip `_widgets/` (a shelf is score, not a module — the strays
-  #                 check is about modules, and the shelf's own files are its own)
+  #   `prune`       the folders it skips, by name at any depth: `_widgets/` for
+  #                 the strays check (a shelf is score, not a module — the
+  #                 strays check is about modules, and the shelf's own files are
+  #                 its own), and `design/` for `runFiles` (a rice's design
+  #                 record, which nothing runs).
   #   `rootRice`    this directory IS the rice root, so `rice.nix` here is the
   #                 rice's module and not a stray — while a nested `rice.nix` is.
-  walkNix =
+  #   `suffixes`    the kinds of file it lists: `.nix` for the two module
+  #                 scans, every kind a rice runs for `runFiles`.
+  walkRice =
     {
       prefix,
       dir,
-      pruneShelf ? false,
+      prune ? [ ],
       rootRice ? false,
+      suffixes ? [ ".nix" ],
     }:
     let
       entries = builtins.readDir dir;
@@ -275,24 +282,26 @@ let
       let
         isDir = entries.${entry} == "directory";
       in
-      if isDir && pruneShelf && entry == "_widgets" then
+      if isDir && builtins.elem entry prune then
         [ ]
       else if isDir then
-        walkNix {
+        walkRice {
           prefix = "${prefix}/${entry}";
           dir = dir + "/${entry}";
-          inherit pruneShelf;
+          inherit prune suffixes;
         }
       else
-        lib.optional (lib.hasSuffix ".nix" entry && !(rootRice && entry == "rice.nix")) "${prefix}/${entry}"
+        lib.optional (
+          lib.any (suffix: lib.hasSuffix suffix entry) suffixes && !(rootRice && entry == "rice.nix")
+        ) "${prefix}/${entry}"
     ) (builtins.attrNames entries);
 
   strayNixFiles = lib.concatMap (
     name:
-    walkNix {
+    walkRice {
       prefix = name;
       dir = riceDirs.${name};
-      pruneShelf = true;
+      prune = [ "_widgets" ];
       rootRice = true;
     }
   ) discoveredNames;
@@ -311,10 +320,32 @@ let
       # `rel` is `<name>/<path inside the rice>`: read it where the rice lives.
       fileOf = rel: riceDirs.${name} + lib.removePrefix name rel;
     in
-    lib.filter (rel: lib.hasInfix "../" (builtins.readFile (fileOf rel))) (walkNix {
+    lib.filter (rel: lib.hasInfix "../" (builtins.readFile (fileOf rel))) (walkRice {
       prefix = name;
       dir = riceDirs.${name};
     })
+  ) discoveredNames;
+
+  # ── Every file a rice runs ──────────────────────────────────────────────────
+  # `<name>/<path>` of each `.qml`, `.js`, `.nix`, `.json` and `.conf` under a
+  # rice, its shelf included: what Quickshell, Hyprland and the module merge
+  # read of it, which `checks.rice-shape` scans for the names a rice shares
+  # with the shell (CONTRACTS.md §5). Nothing runs a rice's `.md` notes or a
+  # `design/` folder's files, so neither is listed.
+  runFiles = lib.concatMap (
+    name:
+    walkRice {
+      prefix = name;
+      dir = riceDirs.${name};
+      prune = [ "design" ];
+      suffixes = [
+        ".qml"
+        ".js"
+        ".nix"
+        ".json"
+        ".conf"
+      ];
+    }
   ) discoveredNames;
 
   # ── The rice hook ───────────────────────────────────────────────────────────
@@ -501,6 +532,7 @@ in
     riceMeta
     strayNixFiles
     escapingNixFiles
+    runFiles
     hook
     builtIn
     greeter

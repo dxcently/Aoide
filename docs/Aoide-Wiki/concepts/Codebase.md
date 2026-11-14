@@ -127,9 +127,10 @@ discipline, written to throw legibly at eval time on a violation:
 - **`rice-shape`** — the assertions on the committed rices: each `rice.nix`
   is a body of the aggregation shape, every rice carries `rice.nix`,
   `theme.json` and `hyprland.conf`, `hyprland.conf` holds no theme-owned key,
-  no stray `.nix` sits outside a rice's `rice.nix`/`_widgets/`, and no `../` path
-  literal appears in a rice's `.nix` text (the host-agnostic rice discipline,
-  `CONTRACTS.md §5`).
+  no stray `.nix` sits outside a rice's `rice.nix`/`_widgets/`, no `../` path
+  literal appears in a rice's `.nix` text (the host-agnostic rice discipline),
+  and no file a rice runs spells a namespace, a shortcut or a variable it
+  shares with the shell the old `aoide` way (`CONTRACTS.md §5`).
 
 Alongside these, `flake.nix` auto-generates a `pkg-<name>` check per discovered
 package (from `lib/pkgs.nix`) so every package builds under `nix flake check`.

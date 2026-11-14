@@ -1,4 +1,4 @@
-// AoideWallpaper.qml — wallpaper layer.
+// StrillixWallpaper.qml — wallpaper layer.
 //
 // Quickshell-native wallpaper rendering — replaces swww/swaybg.
 // Reads the active wallpaper path from stage/wallpaper.json (shellbridge emits this
@@ -33,10 +33,10 @@ Item {
 
     // ── Wallpaper path ─────────────────────────────────────────────────────────
     // The BAKED rice wallpaper — the strillix lane exports its immutable
-    // store path as AOIDE_WALLPAPER, so the rice's wallpaper is RELIABLY set on
+    // store path as STRILLIX_WALLPAPER, so the rice's wallpaper is RELIABLY set on
     // every rebuild/boot (this was the "background gone after rebuild" bug: the
     // live stage/wallpaper.json is runtime state nothing re-seeds from the rice).
-    readonly property string bakedWallpaper: Quickshell.env("AOIDE_WALLPAPER") || ""
+    readonly property string bakedWallpaper: Quickshell.env("STRILLIX_WALLPAPER") || ""
 
     // The live staged wallpaper (rice preview/adopt or a manual write). A wallpaper
     // carries the rice it was staged for: one naming another rice is ignored,

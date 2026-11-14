@@ -377,6 +377,7 @@
               discoveredNames
               strayNixFiles
               escapingNixFiles
+              runFiles
               borrow
               ;
             ricesRoot = ./rices;

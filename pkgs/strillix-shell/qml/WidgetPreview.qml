@@ -740,7 +740,7 @@ ShellRoot {
     // initial property warns and the object is still created, so a slot→extras
     // table would buy nothing but a table to keep in sync with slots.md.
     // `clipboard`/`ledger` (the launcher's extras) are passed as null rather
-    // than real AoideClipboard/GrimoireLedger instances — both reach the
+    // than real StrillixClipboard/GrimoireLedger instances — both reach the
     // system, and this canvas starts exactly one process.
     function widgetProps() {
         return {

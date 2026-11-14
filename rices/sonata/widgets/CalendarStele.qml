@@ -136,8 +136,8 @@
 // the numerals over dark windows. The injected-prop contract is `theme` and
 // `bridge` (bridge unused). Qt's Window.visible attached never flips under
 // quickshell's proxy windows, so QsWindow.window.visible is the real open and
-// close edge. The popout sits on its own layer surface, in the "aoide-calendar"
-// layer namespace, which escapes aoide-bar's blur_popups rule. The host's left pin
+// close edge. The popout sits on its own layer surface, in the "strillix-calendar"
+// layer namespace, which escapes strillix-bar's blur_popups rule. The host's left pin
 // (StelePopout anchorEdges and anchorGravity, set by AoideBar) keeps the popup in
 // place through the two window steps.
 //

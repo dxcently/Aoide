@@ -64,9 +64,9 @@
           # and any declared flavor widget — is summoned on demand and must NOT be
           # declared, or a consumer would read a CLOSED surface as a lost one.
           strillix.layout.surfaces = {
-            bar.perMonitor = true; # aoide-bar — one bar per output (shell.qml Variants)
-            wallpaper.perMonitor = true; # aoide-wallpaper — one per output (same)
-            dock.perMonitor = false; # aoide-dock — one column, single
+            bar.perMonitor = true; # strillix-bar — one bar per output (shell.qml Variants)
+            wallpaper.perMonitor = true; # strillix-wallpaper — one per output (same)
+            dock.perMonitor = false; # strillix-dock — one column, single
           };
 
           # ── Palette tier (base16 mapping — the Greek marble register) ───────────

@@ -7,8 +7,8 @@
 // (design/kit.md §1: nothing in cadenza is resolved by type name).
 //
 // ── The contract (slots.md, shell.qml) ───────────────────────────────────
-//   namespace `aoide-dock`, layer Overlay; extras `shared`, `stagingEngine`
-//   toggle()          shell.qml's SUPER+G (`aoide:dock`) and the bar
+//   namespace `strillix-dock`, layer Overlay; extras `shared`, `stagingEngine`
+//   toggle()          shell.qml's SUPER+G (`strillix:dock`) and the bar
 //   openTab(tab)      the bar's cells: "overview" | "sys" | "notif" |
 //                     "project:<name>" — opens the board on that tab; on an
 //                     open board already on that tab it closes it
@@ -17,7 +17,7 @@
 // Escape (the body), the `[x]` in the board's top rule (the body's
 // closeRequested), SUPER+G, the bar cell of the tab already showing, and a
 // click anywhere off the board: `catcher` below, a transparent full-screen
-// layer (`aoide-dock-scrim`) one layer under the board and clear of the
+// layer (`strillix-dock-scrim`) one layer under the board and clear of the
 // bar's zone, mapped only while the board is shown.
 //   open              readable: is the board up
 //   show() / hide()   the same pair sonata's dock exposes
@@ -75,7 +75,7 @@ PanelWindow {
     visible: true
 
     WlrLayershell.layer: WlrLayer.Overlay
-    WlrLayershell.namespace: "aoide-dock"
+    WlrLayershell.namespace: "strillix-dock"
     WlrLayershell.keyboardFocus: root.shown ? WlrKeyboardFocus.OnDemand : WlrKeyboardFocus.None
 
     implicitWidth: body.item ? body.item.implicitWidth : 560
@@ -125,7 +125,7 @@ PanelWindow {
         exclusiveZone: 0
         color: "transparent"
         WlrLayershell.layer: WlrLayer.Top
-        WlrLayershell.namespace: "aoide-dock-scrim"
+        WlrLayershell.namespace: "strillix-dock-scrim"
         WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
         MouseArea {
             anchors.fill: parent

@@ -34,7 +34,7 @@ ShellRoot {
         color: "transparent"
         exclusionMode: ExclusionMode.Ignore
         WlrLayershell.layer: WlrLayer.Overlay
-        WlrLayershell.namespace: "aoide-terminals-preview"
+        WlrLayershell.namespace: "strillix-terminals-preview"
         implicitWidth: 360
         implicitHeight: 520
 

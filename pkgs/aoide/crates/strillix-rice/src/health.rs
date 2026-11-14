@@ -50,7 +50,7 @@
 //! for the first second or two after any normal start, and a restart resets
 //! the window the journal is read over.
 //!
-//! That predicate used to be a bare total: any `aoide-*` surface, anywhere,
+//! That predicate used to be a bare total: any `strillix-*` surface, anywhere,
 //! on any monitor, at any layer. It cannot see a PARTIAL loss, and a partial
 //! loss is exactly what happens. When one output blips, the surfaces that
 //! recover and the surfaces that do not are decided per-surface — a
@@ -64,7 +64,7 @@
 //!
 //! Answering that question needs a set to compare against, and the set
 //! cannot be hardcoded here: on a host where waybar owns the bar, expecting
-//! `aoide-bar` would restart a healthy desktop every fifteen minutes
+//! `strillix-bar` would restart a healthy desktop every fifteen minutes
 //! forever. So it is DECLARED by the active rice
 //! (`strillix.layout.surfaces`) and published to
 //! `run/qml/rices/surfaces.json` by the strillix lane's build
@@ -79,7 +79,7 @@
 //! only when its slot is in `run/qml/components.json` (CONTRACTS.md §4). So
 //! the declared set is intersected with that file's slots first — a rice that
 //! declares `dock` on a host without the dock component does not report the
-//! dock lost. A surface key is its slot's name (`aoide-<slot>`), so the
+//! dock lost. A surface key is its slot's name (`strillix-<slot>`), so the
 //! intersection matches the two directly. When the file is absent or not an
 //! object nothing is intersected, as before it existed; when the
 //! intersection leaves nothing, the rice declared something but the host
@@ -147,7 +147,7 @@ pub enum HealthOutcome {
     /// The shell isn't painting the desktop it should be, and this watchdog
     /// cannot say why: either the declared surface set falls short of what
     /// `run/qml/rices/surfaces.json` says should be mapped, or — with no
-    /// expectation published — zero `aoide-*` layer surfaces anywhere exist,
+    /// expectation published — zero `strillix-*` layer surfaces anywhere exist,
     /// and in both cases there is no placeholder-screen line in the journal
     /// since the unit went active. Either way the user sees a desktop that is
     /// missing something it declared — blank, or half-painted with a bar or
@@ -215,13 +215,13 @@ pub(crate) fn journal_shows_placeholder(journal_tail: &str) -> bool {
     journal_tail.contains("no outputs") && journal_tail.contains("creating placeholder screen")
 }
 
-/// Pure: total `aoide-`-namespaced layer-shell surfaces `hyprctl layers -j`
+/// Pure: total `strillix-`-namespaced layer-shell surfaces `hyprctl layers -j`
 /// reports, summed across every monitor and every level. Only the
 /// no-expectation fallback in [`run_healthcheck`] uses this — see the module
 /// header for why a total count cannot see the partial loss that
 /// [`surfaces_fall_short`] exists to catch, and for why summing across every
 /// monitor is the right shape for the fallback specifically.
-pub(crate) fn total_aoide_layers(layers: &Value) -> usize {
+pub(crate) fn total_strillix_layers(layers: &Value) -> usize {
     let Some(monitors) = layers.as_object() else {
         return 0;
     };
@@ -233,13 +233,13 @@ pub(crate) fn total_aoide_layers(layers: &Value) -> usize {
         .filter_map(Value::as_array)
         .flatten()
         .filter(|surface| {
-            surface.get("namespace").and_then(Value::as_str).is_some_and(|ns| ns.starts_with("aoide-"))
+            surface.get("namespace").and_then(Value::as_str).is_some_and(|ns| ns.starts_with("strillix-"))
         })
         .count()
 }
 
 /// Pure: is the shell painting nothing anywhere? `true` is the blank
-/// desktop — zero `aoide-*` surfaces across the whole `hyprctl layers -j`
+/// desktop — zero `strillix-*` surfaces across the whole `hyprctl layers -j`
 /// map. It is also true for the first second or two after any normal
 /// start/reload, which is why it decides [`HealthOutcome::Healthy`] but
 /// never a restart on its own: the journal line in [`run_healthcheck`]
@@ -263,7 +263,7 @@ pub(crate) fn total_aoide_layers(layers: &Value) -> usize {
 /// asked first: without it a missing `hyprctl` would report every tick as
 /// [`HealthOutcome::Blank`].
 pub(crate) fn shell_has_zero_layers(layers: &Value) -> bool {
-    layers.is_object() && total_aoide_layers(layers) == 0
+    layers.is_object() && total_strillix_layers(layers) == 0
 }
 
 /// Pure: the published expectation's namespaces, each mapped to its
@@ -271,7 +271,7 @@ pub(crate) fn shell_has_zero_layers(layers: &Value) -> bool {
 /// [`published_surfaces`] would have handed over, i.e. not an object
 /// carrying a `surfaces` object. Read straight off the generated
 /// `run/qml/rices/surfaces.json` (CONTRACTS.md §5), whose keys are already
-/// the RESOLVED layer-shell namespaces (`aoide-<slot>`) precisely so this
+/// the RESOLVED layer-shell namespaces (`strillix-<slot>`) precisely so this
 /// function derives nothing of its own and compares them directly against
 /// the compositor's own layer list.
 ///
@@ -310,7 +310,7 @@ pub(crate) fn parse_expectation(v: &Value) -> Option<BTreeMap<String, bool>> {
 /// the inverse of "a host that declares nothing keeps today's behaviour".
 ///
 /// `components` is the published `run/qml/components.json`. When it is an
-/// object, only the namespaces whose slot (`aoide-<slot>`) is one of its keys
+/// object, only the namespaces whose slot (`strillix-<slot>`) is one of its keys
 /// stay: the shell never instantiates an unselected component, so its
 /// surface is never expected. A declaration the intersection empties stays
 /// `Some(empty)`, which [`surfaces_fall_short`] never fails: the rice did
@@ -325,7 +325,7 @@ pub(crate) fn asserted_expectation(
     };
     Some(
         exp.into_iter()
-            .filter(|(ns, _)| ns.strip_prefix("aoide-").is_some_and(|slot| selected.contains(slot)))
+            .filter(|(ns, _)| ns.strip_prefix("strillix-").is_some_and(|slot| selected.contains(slot)))
             .collect(),
     )
 }
@@ -373,7 +373,7 @@ fn is_real_monitor(m: &Value) -> bool {
     m.get("name").and_then(Value::as_str) != Some("FALLBACK")
 }
 
-/// Pure: for each `aoide-*` namespace present in `hyprctl layers -j`, the
+/// Pure: for each `strillix-*` namespace present in `hyprctl layers -j`, the
 /// number of DISTINCT real monitors it is mapped on. Skipping `FALLBACK`
 /// here as well as in [`real_monitor_count`] is what keeps the two sides of
 /// the comparison measuring the same thing: a surface drawn onto the
@@ -405,7 +405,7 @@ pub(crate) fn namespace_coverage(layers: &Value) -> BTreeMap<String, usize> {
             .filter_map(Value::as_array)
             .flatten()
             .filter_map(|surface| surface.get("namespace").and_then(Value::as_str))
-            .filter(|ns| ns.starts_with("aoide-"))
+            .filter(|ns| ns.starts_with("strillix-"))
             .collect();
         for ns in namespaces {
             *coverage.entry(ns.to_string()).or_insert(0) += 1;
@@ -854,10 +854,10 @@ mod tests {
         json!({
             "DP-1": {
                 "levels": {
-                    "0": [{"namespace": "aoide-wallpaper"}],
+                    "0": [{"namespace": "strillix-wallpaper"}],
                     "1": [],
-                    "2": [{"namespace": "aoide-bar"}, {"namespace": "aoide-dock"}],
-                    "3": [{"namespace": "aoide-notifications"}]
+                    "2": [{"namespace": "strillix-bar"}, {"namespace": "strillix-dock"}],
+                    "3": [{"namespace": "strillix-notifications"}]
                 }
             },
             "HDMI-A-1": {
@@ -867,14 +867,14 @@ mod tests {
     }
 
     #[test]
-    fn total_aoide_layers_sums_across_every_monitor_and_level() {
-        assert_eq!(total_aoide_layers(&two_monitor_one_painted()), 4);
+    fn total_strillix_layers_sums_across_every_monitor_and_level() {
+        assert_eq!(total_strillix_layers(&two_monitor_one_painted()), 4);
     }
 
     #[test]
-    fn non_aoide_namespaced_surfaces_never_count() {
+    fn non_strillix_namespaced_surfaces_never_count() {
         let layers = json!({ "DP-1": { "levels": { "0": [{"namespace": "waybar"}], "1": [], "2": [], "3": [] } } });
-        assert_eq!(total_aoide_layers(&layers), 0);
+        assert_eq!(total_strillix_layers(&layers), 0);
         assert!(shell_has_zero_layers(&layers));
     }
 
@@ -908,7 +908,7 @@ mod tests {
         // Also what keeps a missing `hyprctl` from reporting every tick as
         // `HealthOutcome::Blank`, since this signal is asked first.
         assert!(!shell_has_zero_layers(&Value::Null));
-        assert_eq!(total_aoide_layers(&Value::Null), 0);
+        assert_eq!(total_strillix_layers(&Value::Null), 0);
     }
 
     // ── The declared-expectation predicate ────────────────────────────────
@@ -917,14 +917,14 @@ mod tests {
     // (`surfacesJsonFile`, CONTRACTS.md §5): one object, NOT keyed by rice,
     // whose keys are the
     // already-RESOLVED layer-shell namespaces. That resolution is why nothing
-    // here derives `aoide-<slot>` itself.
+    // here derives `strillix-<slot>` itself.
     fn sonata_expectation() -> Value {
         json!({
             "rice": "sonata",
             "surfaces": {
-                "aoide-bar": { "perMonitor": true },
-                "aoide-wallpaper": { "perMonitor": true },
-                "aoide-dock": { "perMonitor": false }
+                "strillix-bar": { "perMonitor": true },
+                "strillix-wallpaper": { "perMonitor": true },
+                "strillix-dock": { "perMonitor": false }
             }
         })
     }
@@ -939,21 +939,21 @@ mod tests {
     #[test]
     fn parse_expectation_reads_namespaces_to_their_per_monitor_flag() {
         let exp = parse_expectation(&sonata_expectation()).unwrap();
-        assert_eq!(exp.get("aoide-bar"), Some(&true));
-        assert_eq!(exp.get("aoide-wallpaper"), Some(&true));
-        assert_eq!(exp.get("aoide-dock"), Some(&false));
+        assert_eq!(exp.get("strillix-bar"), Some(&true));
+        assert_eq!(exp.get("strillix-wallpaper"), Some(&true));
+        assert_eq!(exp.get("strillix-dock"), Some(&false));
         assert_eq!(exp.len(), 3);
     }
 
     #[test]
     fn parse_expectation_is_none_without_a_surfaces_object() {
         assert_eq!(parse_expectation(&Value::Null), None);
-        assert_eq!(parse_expectation(&json!("aoide-bar")), None);
+        assert_eq!(parse_expectation(&json!("strillix-bar")), None);
         assert_eq!(parse_expectation(&json!([1, 2])), None);
         // An object, but not this file's shape — a bare namespace map under
         // some other key is not a declaration this reads.
         assert_eq!(parse_expectation(&json!({ "rice": "sonata" })), None);
-        assert_eq!(parse_expectation(&json!({ "surfaces": "aoide-bar" })), None);
+        assert_eq!(parse_expectation(&json!({ "surfaces": "strillix-bar" })), None);
     }
 
     // The parser reports the file faithfully: an empty declaration is
@@ -989,9 +989,9 @@ mod tests {
 
     #[test]
     fn a_populated_declaration_is_asserted() {
-        let published = json!({ "rice": "sonata", "surfaces": { "aoide-bar": { "perMonitor": true } } });
+        let published = json!({ "rice": "sonata", "surfaces": { "strillix-bar": { "perMonitor": true } } });
         let exp = asserted_expectation(Some(&published), None).unwrap();
-        assert_eq!(exp.get("aoide-bar"), Some(&true));
+        assert_eq!(exp.get("strillix-bar"), Some(&true));
     }
 
     // ── the component intersection ────────────────────────────────────────
@@ -1002,11 +1002,11 @@ mod tests {
     #[test]
     fn a_declared_dock_without_the_dock_component_is_not_expected() {
         let exp = asserted_expectation(Some(&sonata_expectation()), Some(&components(&["bar", "wallpaper"]))).unwrap();
-        assert_eq!(exp.keys().collect::<Vec<_>>(), ["aoide-bar", "aoide-wallpaper"]);
+        assert_eq!(exp.keys().collect::<Vec<_>>(), ["strillix-bar", "strillix-wallpaper"]);
         // Mapped bar and wallpaper on both heads, no dock anywhere: healthy.
         let layers = json!({
-            "DP-1": { "levels": { "0": [{ "namespace": "aoide-wallpaper" }], "2": [{ "namespace": "aoide-bar" }] } },
-            "HDMI-A-1": { "levels": { "0": [{ "namespace": "aoide-wallpaper" }], "2": [{ "namespace": "aoide-bar" }] } }
+            "DP-1": { "levels": { "0": [{ "namespace": "strillix-wallpaper" }], "2": [{ "namespace": "strillix-bar" }] } },
+            "HDMI-A-1": { "levels": { "0": [{ "namespace": "strillix-wallpaper" }], "2": [{ "namespace": "strillix-bar" }] } }
         });
         assert!(!surfaces_fall_short(&exp, &layers, &two_real_monitors()));
     }
@@ -1015,8 +1015,8 @@ mod tests {
     fn a_selected_component_missing_its_surface_still_falls_short() {
         let exp = asserted_expectation(Some(&sonata_expectation()), Some(&components(&["bar", "wallpaper", "dock"]))).unwrap();
         let layers = json!({
-            "DP-1": { "levels": { "0": [{ "namespace": "aoide-wallpaper" }], "2": [{ "namespace": "aoide-bar" }] } },
-            "HDMI-A-1": { "levels": { "0": [{ "namespace": "aoide-wallpaper" }], "2": [{ "namespace": "aoide-bar" }] } }
+            "DP-1": { "levels": { "0": [{ "namespace": "strillix-wallpaper" }], "2": [{ "namespace": "strillix-bar" }] } },
+            "HDMI-A-1": { "levels": { "0": [{ "namespace": "strillix-wallpaper" }], "2": [{ "namespace": "strillix-bar" }] } }
         });
         assert!(surfaces_fall_short(&exp, &layers, &two_real_monitors()));
     }
@@ -1046,8 +1046,8 @@ mod tests {
     // default, rather than as malformed.
     #[test]
     fn parse_expectation_defaults_a_missing_per_monitor_to_false() {
-        let exp = parse_expectation(&json!({ "surfaces": { "aoide-dock": {} } })).unwrap();
-        assert_eq!(exp.get("aoide-dock"), Some(&false));
+        let exp = parse_expectation(&json!({ "surfaces": { "strillix-dock": {} } })).unwrap();
+        assert_eq!(exp.get("strillix-dock"), Some(&false));
     }
 
     #[test]
@@ -1095,18 +1095,18 @@ mod tests {
         let layers = json!({
             "DP-1": {
                 "levels": {
-                    "0": [{"namespace": "aoide-wallpaper"}],
-                    "2": [{"namespace": "aoide-bar"}, {"namespace": "aoide-dock"}]
+                    "0": [{"namespace": "strillix-wallpaper"}],
+                    "2": [{"namespace": "strillix-bar"}, {"namespace": "strillix-dock"}]
                 }
             },
             "HDMI-A-1": {
-                "levels": { "0": [{"namespace": "aoide-wallpaper"}], "2": [] }
+                "levels": { "0": [{"namespace": "strillix-wallpaper"}], "2": [] }
             }
         });
         let coverage = namespace_coverage(&layers);
-        assert_eq!(coverage.get("aoide-wallpaper"), Some(&2));
-        assert_eq!(coverage.get("aoide-bar"), Some(&1));
-        assert_eq!(coverage.get("aoide-dock"), Some(&1));
+        assert_eq!(coverage.get("strillix-wallpaper"), Some(&2));
+        assert_eq!(coverage.get("strillix-bar"), Some(&1));
+        assert_eq!(coverage.get("strillix-dock"), Some(&1));
     }
 
     // Distinct monitors, not total surfaces. The dock's own column can hold
@@ -1117,12 +1117,12 @@ mod tests {
         let layers = json!({
             "DP-1": {
                 "levels": {
-                    "0": [{"namespace": "aoide-wallpaper"}],
-                    "2": [{"namespace": "aoide-wallpaper"}]
+                    "0": [{"namespace": "strillix-wallpaper"}],
+                    "2": [{"namespace": "strillix-wallpaper"}]
                 }
             }
         });
-        assert_eq!(namespace_coverage(&layers).get("aoide-wallpaper"), Some(&1));
+        assert_eq!(namespace_coverage(&layers).get("strillix-wallpaper"), Some(&1));
     }
 
     // Same exclusion as `real_monitor_count`: a surface drawn onto the
@@ -1132,21 +1132,21 @@ mod tests {
     #[test]
     fn namespace_coverage_skips_the_synthesized_fallback_output() {
         let layers = json!({
-            "FALLBACK": { "levels": { "0": [{"namespace": "aoide-wallpaper"}] } },
-            "DP-1": { "levels": { "0": [{"namespace": "aoide-bar"}] } }
+            "FALLBACK": { "levels": { "0": [{"namespace": "strillix-wallpaper"}] } },
+            "DP-1": { "levels": { "0": [{"namespace": "strillix-bar"}] } }
         });
         let coverage = namespace_coverage(&layers);
-        assert_eq!(coverage.get("aoide-wallpaper"), None);
-        assert_eq!(coverage.get("aoide-bar"), Some(&1));
+        assert_eq!(coverage.get("strillix-wallpaper"), None);
+        assert_eq!(coverage.get("strillix-bar"), Some(&1));
     }
 
     #[test]
-    fn namespace_coverage_ignores_non_aoide_namespaces_and_malformed_layers() {
+    fn namespace_coverage_ignores_non_strillix_namespaces_and_malformed_layers() {
         let layers = json!({
-            "DP-1": { "levels": { "0": [{"namespace": "waybar"}, {"namespace": "aoide-bar"}] } }
+            "DP-1": { "levels": { "0": [{"namespace": "waybar"}, {"namespace": "strillix-bar"}] } }
         });
         let coverage = namespace_coverage(&layers);
-        assert_eq!(coverage.get("aoide-bar"), Some(&1));
+        assert_eq!(coverage.get("strillix-bar"), Some(&1));
         assert_eq!(coverage.get("waybar"), None);
         // A failed `hyprctl layers` is an empty map, never a panic.
         assert!(namespace_coverage(&Value::Null).is_empty());
@@ -1155,20 +1155,20 @@ mod tests {
     // The actual incident: two real heads, the per-screen wallpaper recovered
     // on both, the bar stayed mapped on only one. The bar and the dock
     // survived the blip bound to the dead output, and the old TOTAL count saw
-    // three surviving `aoide-*` surfaces and called this desktop healthy for
-    // hours. Against the declaration, `aoide-bar` covers one head where two
+    // three surviving `strillix-*` surfaces and called this desktop healthy for
+    // hours. Against the declaration, `strillix-bar` covers one head where two
     // are demanded — genuinely missing.
     #[test]
     fn the_incident_a_per_monitor_namespace_mapped_on_only_one_of_two_heads_falls_short() {
         let layers = json!({
             "DP-1": {
                 "levels": {
-                    "0": [{"namespace": "aoide-wallpaper"}],
-                    "2": [{"namespace": "aoide-bar"}]
+                    "0": [{"namespace": "strillix-wallpaper"}],
+                    "2": [{"namespace": "strillix-bar"}]
                 }
             },
             "HDMI-A-1": {
-                "levels": { "0": [{"namespace": "aoide-wallpaper"}], "2": [] }
+                "levels": { "0": [{"namespace": "strillix-wallpaper"}], "2": [] }
             }
         });
         // Precondition: the OLD predicate reads this desktop as healthy,
@@ -1183,12 +1183,12 @@ mod tests {
         let layers = json!({
             "DP-1": {
                 "levels": {
-                    "0": [{"namespace": "aoide-wallpaper"}],
-                    "2": [{"namespace": "aoide-bar"}]
+                    "0": [{"namespace": "strillix-wallpaper"}],
+                    "2": [{"namespace": "strillix-bar"}]
                 }
             },
             "HDMI-A-1": {
-                "levels": { "0": [{"namespace": "aoide-wallpaper"}], "2": [{"namespace": "aoide-bar"}] }
+                "levels": { "0": [{"namespace": "strillix-wallpaper"}], "2": [{"namespace": "strillix-bar"}] }
             }
         });
         // Everything per-monitor is satisfied on both heads; only the dock —
@@ -1203,14 +1203,14 @@ mod tests {
         let layers = json!({
             "DP-1": {
                 "levels": {
-                    "0": [{"namespace": "aoide-wallpaper"}],
-                    "2": [{"namespace": "aoide-bar"}, {"namespace": "aoide-dock"}]
+                    "0": [{"namespace": "strillix-wallpaper"}],
+                    "2": [{"namespace": "strillix-bar"}, {"namespace": "strillix-dock"}]
                 }
             },
             "HDMI-A-1": {
                 "levels": {
-                    "0": [{"namespace": "aoide-wallpaper"}],
-                    "2": [{"namespace": "aoide-bar"}]
+                    "0": [{"namespace": "strillix-wallpaper"}],
+                    "2": [{"namespace": "strillix-bar"}]
                 }
             }
         });
@@ -1228,8 +1228,8 @@ mod tests {
         let layers = json!({
             "HDMI-A-1": {
                 "levels": {
-                    "0": [{"namespace": "aoide-wallpaper"}],
-                    "2": [{"namespace": "aoide-bar"}, {"namespace": "aoide-dock"}]
+                    "0": [{"namespace": "strillix-wallpaper"}],
+                    "2": [{"namespace": "strillix-bar"}, {"namespace": "strillix-dock"}]
                 }
             },
             "FALLBACK": { "levels": { "0": [], "1": [], "2": [], "3": [] } }

@@ -11,7 +11,7 @@ The `clipboard` command group removes entries from the clipboard history:
 one by id, or all of them. It is a `strillix` group ([[strillix]]): the history is
 cliphist's record of a Wayland session's clipboard, and the thumbnails it
 also removes are the launcher's paint cache. The launcher's clipboard backend
-(`pkgs/strillix-shell/qml/AoideClipboard.qml`) runs these commands; it never runs
+(`pkgs/strillix-shell/qml/StrillixClipboard.qml`) runs these commands; it never runs
 `cliphist delete` or `cliphist wipe` itself. Delete every `.qml` and
 `strx clipboard clear` still empties the history from a terminal
 ([[Widget-Bridge-Contract]]).
@@ -28,7 +28,7 @@ watcher brings its own.
 
 Thumbnails are `$XDG_CACHE_HOME/strillix-clipboard/previews/<id>`, with
 `~/.cache` when `XDG_CACHE_HOME` is empty or relative: the directory
-`AoideClipboard.qml` decodes image entries into.
+`StrillixClipboard.qml` decodes image entries into.
 
 Only an id reaches cliphist. The history's text is read only to learn which
 ids exist, and never reaches the output.
@@ -82,7 +82,7 @@ strx clipboard clear --json
 
 ## The QML side
 
-`AoideClipboard` (the launcher slot's `clipboard` extra) exposes
+`StrillixClipboard` (the launcher slot's `clipboard` extra) exposes
 `deleteById(id)`, which returns `false` without running anything for a
 non-numeric id, and `clear()`. Each runs `strx clipboard … --json`, puts
 strillix's message in `actionError` when it fails (`""` otherwise), and then

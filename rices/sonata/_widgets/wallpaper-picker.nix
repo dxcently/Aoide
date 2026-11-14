@@ -1,8 +1,8 @@
 # sonata's `wallpaper-picker` slot — SUPER+W wallpaper switcher, ported from
-# the shell's `AoideWallpaperPicker.qml` (its own header: "the shell original
+# the shell's `StrillixWallpaperPicker.qml` (its own header: "the shell original
 # stays in place until a later phase retires it"). `kind` absent → null: no
 # `SurfaceSlot { slot: "wallpaper-picker" }` anchor is wired yet — `shell.qml`
-# still instantiates the shell's own `AoideWallpaperPicker` directly — so it
+# still instantiates the shell's own `StrillixWallpaperPicker` directly — so it
 # registers nothing today.
 #
 # No `packages`: it runs `Process { command: ["ls", "-1", wallpapersDir] }`

@@ -120,7 +120,7 @@ applying, and the shell's board is back.
 Nothing here is declared in `strillix.surfaces`: `wallpaper.owner` stays
 `quickshell`, because the shell's surface stays mapped (transparent) while an
 external provider has a pick on screen; the provider's own paper surface is the
-compositor's, not an `aoide-<slot>`.
+compositor's, not an `strillix-<slot>`.
 
 ## The core-service dendrites
 

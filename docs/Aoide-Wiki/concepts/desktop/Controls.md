@@ -43,10 +43,10 @@ modifier.
 
 | Keybind | Action |
 |---|---|
-| `SUPER + SPACE` | Toggle the launcher — a Hyprland global shortcut (`global, aoide:launcher`) reaching the QML surface directly; no CLI command. |
-| `SUPER + W` | Open the wallpaper picker (`global, aoide:wallpaper`): the launcher's own Desktop Pictures when the rice's launcher has one (`openPictures()`), else the plain wallpaper picker; picking a wallpaper shells `strx wallpaper set <path>`. |
-| `SUPER + G` | Toggle the gadget dock (`global, aoide:dock`) — see [[Gadget-Dock]]. |
-| `SUPER + C` | Toggle clipboard history — opens the launcher on its clipboard chapter (`global, aoide:clipboard`). |
+| `SUPER + SPACE` | Toggle the launcher — a Hyprland global shortcut (`global, strillix:launcher`) reaching the QML surface directly; no CLI command. |
+| `SUPER + W` | Open the wallpaper picker (`global, strillix:wallpaper`): the launcher's own Desktop Pictures when the rice's launcher has one (`openPictures()`), else the plain wallpaper picker; picking a wallpaper shells `strx wallpaper set <path>`. |
+| `SUPER + G` | Toggle the gadget dock (`global, strillix:dock`) — see [[Gadget-Dock]]. |
+| `SUPER + C` | Toggle clipboard history — opens the launcher on its clipboard chapter (`global, strillix:clipboard`). |
 | `SUPER + ESCAPE` | Lock the screen — `exec, strx lock`: the shell's lock host in the staged rice's face when the rice dresses `lockscreen`, else hyprlock. |
 | `SUPER SHIFT + P` | Bound to `strx rice preview` in `modules/dendrites/compositor/hyprland/behaviour.nix` — a retired command, so the keybind is a no-op until repointed to `rice stage` (report only, not repointed). |
 | `SUPER SHIFT + A` | Bound to `strx rice adopt` in `modules/dendrites/compositor/hyprland/behaviour.nix` — a retired command, so the keybind is a no-op until repointed to `rice declare` (a stub — `implemented: false`; report only, not repointed). |
@@ -59,7 +59,7 @@ modifier.
 | `SUPER + 1–0` | Switch to workspace 1–10. |
 | `SUPER SHIFT + 1–0` | Move window to workspace 1–10. |
 | `ALT + Tab` | Previous workspace. |
-| — | `aoide:switcher`, the window switcher (a rice's `widgets/switcher.qml`, else the plain one), is registered but not bound here: the venue binds it. |
+| — | `strillix:switcher`, the window switcher (a rice's `widgets/switcher.qml`, else the plain one), is registered but not bound here: the venue binds it. |
 | `SUPER + X` / `SUPER + Z` | Toggle special workspace `magic` / `scratch` (`SHIFT` = move window there). |
 | `SUPER + leftdrag` / `rightdrag` | Move / resize window with the mouse. |
 

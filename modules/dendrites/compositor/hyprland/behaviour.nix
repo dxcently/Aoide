@@ -14,7 +14,7 @@
 #   LOOK / SHAPE  → default.nix beside this file (the `hyprland` provider of
 #     the `compositor` capability)
 #     Anything derived from `strillix.theme`: border colours, gaps, rounding,
-#     blur, the aoide-* layerrules, hyprglass, the kitty rounding
+#     blur, the strillix-* layerrules, hyprglass, the kitty rounding
 #     rules. Re-riced whenever the rice changes. That file also owns the
 #     session plumbing (programs.hyprland, the systemd/Wayland env handoff,
 #     hyprpolkitagent, xdg.portal).
@@ -166,7 +166,7 @@ in
 
         # ── Misc quality-of-life ──────────────────────────────────────────────
         # force_default_wallpaper = -1 kills Hyprland's built-in wallpaper: the
-        # Aoide wallpaper is a quickshell layer surface (AoideWallpaper.qml) and
+        # Aoide wallpaper is a quickshell layer surface (StrillixWallpaper.qml) and
         # is the sole painter, so Hyprland must not draw its own underneath.
         #
         # allow_session_lock_restore: a lock client that dies leaves the
@@ -200,23 +200,23 @@ in
 
         # ── Keybinds ──────────────────────────────────────────────────────────
         # Launcher (Hyprland global shortcut → AoideLauncher.GlobalShortcut
-        # toggle). The launcher registers `aoide:launcher` in-process (hyprland-
+        # toggle). The launcher registers `strillix:launcher` in-process (hyprland-
         # global-shortcuts-v1), so the keypress reaches the running surface
         # directly — no `aoide shell launcher` CLI command (that command is an
         # unimplemented stub) and no inbound socket. `global, <appid>:<name>` is
         # Hyprland's dispatcher for it.
-        bind = SUPER, SPACE, global, aoide:launcher
+        bind = SUPER, SPACE, global, strillix:launcher
 
-        # Wallpaper picker (Hyprland global shortcut → AoideWallpaperPicker's
-        # GlobalShortcut). Registers `aoide:wallpaper` in-process, same
+        # Wallpaper picker (Hyprland global shortcut → StrillixWallpaperPicker's
+        # GlobalShortcut). Registers `strillix:wallpaper` in-process, same
         # global-shortcuts-v1 seam as the launcher. A press opens the launcher
         # body's own Desktop Pictures (`openPictures()`) when the rice's
         # launcher has one, else the plain wallpaper grid over $STRILLIX_ROOT/wallpapers/; a pick
         # shells `strillix wallpaper set <path>`, which hot-swaps the live wallpaper.
         # No CLI toggle command, no inbound socket.
-        bind = SUPER, W, global, aoide:wallpaper
+        bind = SUPER, W, global, strillix:wallpaper
 
-        # `aoide:switcher` (the window switcher: a rice's widgets/switcher.qml,
+        # `strillix:switcher` (the window switcher: a rice's widgets/switcher.qml,
         # else the plain StrillixSwitcher) is registered by shell.qml but not bound
         # here: the venue binds its combo.
 
@@ -229,11 +229,11 @@ in
         # Panel dock (Hyprland global shortcut → the center-left panel's
         # GlobalShortcut toggle). SUPER+G opens/closes the center-left book-edge
         # dock that holds the widget sub-panels (conductor, terminals, meters,
-        # power). It registers `aoide:dock` in-process (same global-shortcuts-v1
+        # power). It registers `strillix:dock` in-process (same global-shortcuts-v1
         # seam as the launcher/wallpaper) — no CLI command (the old `aoide shell
         # dock` was an unimplemented stub), no inbound socket. The dock also
         # peeks out on its own as an alert when an agent needs a response.
-        bind = SUPER, G, global, aoide:dock
+        bind = SUPER, G, global, strillix:dock
 
         # Rice preview / adopt shortcuts. `rice` left core's registry at P-A5
         # of the binary-split workstream — it lives only in `strillix` now
@@ -280,10 +280,10 @@ in
         # Window controls
         bind = SUPER, Q, killactive
         # Clipboard history — opens the Grimoire launcher on the clipboard
-        # chapter. The clipboard backend (AoideClipboard.qml) is a non-visual
+        # chapter. The clipboard backend (StrillixClipboard.qml) is a non-visual
         # data provider that feeds cliphist entries into the launcher as
         # paginated chapters; no separate picker window.
-        bind = SUPER, C, global, aoide:clipboard
+        bind = SUPER, C, global, strillix:clipboard
         bind = SUPER, V, togglefloating
         bind = SUPER, F, fullscreen
 

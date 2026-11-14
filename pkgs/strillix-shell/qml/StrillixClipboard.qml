@@ -1,4 +1,4 @@
-// AoideClipboard.qml — the cliphist clipboard-backend for the Grimoire.
+// StrillixClipboard.qml — the cliphist clipboard-backend for the Grimoire.
 //
 // Entries are display-only metadata. Copying and image thumbnails call the
 // system's own `cliphist` and `wl-copy` from PATH; removing history runs

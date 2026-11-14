@@ -4,18 +4,18 @@
 // `Item`; it owns its own layer, namespace, keyboard focus, and
 // GlobalShortcut, which travels with the slot (see
 // pkgs/strillix-shell/qml/slots.md). Extras: `clipboard` (the
-// AoideClipboard instance, unchanged) and `ledger` (GrimoireLedger — stays
+// StrillixClipboard instance, unchanged) and `ledger` (GrimoireLedger — stays
 // in the shell, injected here, see below).
 //
 // Quickshell-native application launcher — replaces rofi. A summoned overlay:
 // hidden by default, it drops onto the OVERLAY layer with an EXCLUSIVE keyboard
 // grab, filters the installed .desktop entries as you type, and launches the
-// chosen one. Trigger is a Hyprland GLOBAL shortcut (aoide:launcher) the
+// chosen one. Trigger is a Hyprland GLOBAL shortcut (strillix:launcher) the
 // launcher registers in-process — the compositor binds SUPER+SPACE to it (see
-// modules/dendrites/compositor/hyprland: `bind = SUPER, SPACE, global, aoide:launcher`).
+// modules/dendrites/compositor/hyprland: `bind = SUPER, SPACE, global, strillix:launcher`).
 // Escape / a click on the scrim / launching an app dismisses it. NONE of that
 // wiring has ever changed across the chrome redesigns — the trigger name,
-// keybind, and compositor namespace (`aoide-launcher`) are stable contracts.
+// keybind, and compositor namespace (`strillix-launcher`) are stable contracts.
 //
 // ── Why GlobalShortcut, not the bridge ──────────────────────────────────────
 // ShellBridge is OUTBOUND-only (QML → shellbridge socket), and the old
@@ -232,19 +232,19 @@ PanelWindow {
     color: "transparent"
     visible: root.shown || root.fold > 0.01
     WlrLayershell.layer: WlrLayer.Overlay
-    WlrLayershell.namespace: "aoide-launcher"
+    WlrLayershell.namespace: "strillix-launcher"
     WlrLayershell.keyboardFocus: root.shown ? WlrKeyboardFocus.Exclusive
                                             : WlrKeyboardFocus.None
 
-    // ── Trigger: Hyprland global shortcut (aoide:launcher) ─────────────────
+    // ── Trigger: Hyprland global shortcut (strillix:launcher) ─────────────────
     GlobalShortcut {
-        appid: "aoide"
+        appid: "strillix"
         name: "launcher"
-        description: "Summon the Aoide app launcher"
+        description: "Summon the Strillix app launcher"
         onPressed: root.toggle()
     }
     GlobalShortcut {
-        appid: "aoide"
+        appid: "strillix"
         name: "clipboard"
         description: "Open clipboard history in the Grimoire"
         onPressed: root.openClipboard()

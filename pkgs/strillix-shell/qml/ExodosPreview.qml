@@ -4,7 +4,7 @@ import Quickshell
 // Standalone harness to render the Exodos powermenu for a screenshot.
 //   qs -p pkgs/strillix-shell/qml/ExodosPreview.qml
 // Loads the REAL powermenu.qml pre-shown — it owns its own full-screen
-// Overlay PanelWindow (namespace "aoide-powermenu", so a live compositor with
+// Overlay PanelWindow (namespace "strillix-powermenu", so a live compositor with
 // the lane's layerrules gives this preview the same blur + hyprglass the
 // real surface gets). Stub gold-marble palette (hex sanctioned here only —
 // mirrors the theme roles, CalendarPreview-style) and a stub bridge that
